@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>GitHub Copilot 프리미엄 요청 사용량을 macOS 메뉴바에서 실시간으로 모니터링하세요.</strong>
+  <strong>Monitor your GitHub Copilot premium request usage in real-time from the macOS menu bar.</strong>
 </p>
 
 <p align="center">
@@ -23,72 +23,72 @@
 
 ## Features
 
-- **메뉴바 실시간 표시**: 현재 사용량과 한도를 메뉴바 아이콘에서 바로 확인
-- **시각적 프로그레스**: 사용량에 따른 색상 변화 (초록 → 노랑 → 주황 → 빨강)
-- **추가 비용 추적**: 한도 초과 시 발생하는 Add-on 비용 표시
-- **자동 새로고침**: 10초 ~ 30분 간격으로 자동 업데이트 설정 가능
-- **로그인 시 자동 시작**: macOS 로그인 시 자동 실행 옵션
-- **GitHub OAuth 인증**: 안전한 웹뷰 기반 로그인
+- **Real-time Menu Bar Display**: View current usage and limits directly from the menu bar icon
+- **Visual Progress Indicator**: Color changes based on usage (green → yellow → orange → red)
+- **Add-on Cost Tracking**: Shows additional costs when exceeding the limit
+- **Auto Refresh**: Configurable auto-update intervals from 10 seconds to 30 minutes
+- **Launch at Login**: Option to automatically start on macOS login
+- **GitHub OAuth Authentication**: Secure WebView-based login
 
 ## Installation
 
-### Download (권장)
+### Download (Recommended)
 
-[**Releases**](https://github.com/kargnas/copilot-usage-monitor/releases/latest) 페이지에서 최신 `.dmg` 파일을 다운로드하세요.
+Download the latest `.dmg` file from the [**Releases**](https://github.com/kargnas/copilot-usage-monitor/releases/latest) page.
 
 ### Build from Source
 
 ```bash
-# 저장소 클론
+# Clone the repository
 git clone https://github.com/kargnas/copilot-usage-monitor.git
 cd copilot-usage-monitor
 
-# Xcode로 열기
+# Open in Xcode
 open CopilotMonitor/CopilotMonitor.xcodeproj
 
-# Xcode에서 빌드 (⌘B) 및 실행 (⌘R)
+# Build (⌘B) and Run (⌘R) in Xcode
 ```
 
-**요구 사항:**
+**Requirements:**
 - macOS 13.0+
 - Xcode 15.0+
 - Swift 5.9+
 
 ## Usage
 
-1. **앱 실행**: `CopilotMonitor.app` 실행
-2. **로그인**: 메뉴에서 "Sign In" 클릭 후 GitHub 계정으로 로그인
-3. **모니터링**: 메뉴바에서 실시간 사용량 확인
+1. **Launch the app**: Run `CopilotMonitor.app`
+2. **Sign in**: Click "Sign In" from the menu and log in with your GitHub account
+3. **Monitor**: Check your real-time usage from the menu bar
 
 ### Menu Options
 
-| 메뉴 항목 | 설명 | 단축키 |
-|----------|------|--------|
-| Refresh | 수동으로 사용량 새로고침 | `⌘R` |
-| Auto Refresh | 자동 새로고침 간격 설정 (10초~30분) | - |
-| Open Billing | GitHub 빌링 페이지 열기 | `⌘B` |
-| Launch at Login | 로그인 시 자동 시작 토글 | - |
-| Quit | 앱 종료 | `⌘Q` |
+| Menu Item | Description | Shortcut |
+|-----------|-------------|----------|
+| Refresh | Manually refresh usage data | `⌘R` |
+| Auto Refresh | Set auto-refresh interval (10s~30min) | - |
+| Open Billing | Open GitHub billing page | `⌘B` |
+| Launch at Login | Toggle auto-start on login | - |
+| Quit | Quit the app | `⌘Q` |
 
 ## How It Works
 
-Copilot Monitor는 GitHub의 내부 API를 사용하여 사용량 데이터를 가져옵니다:
+Copilot Monitor fetches usage data using GitHub's internal API:
 
-1. **인증**: WebView를 통한 GitHub OAuth 인증
-2. **데이터 수집**: `/settings/billing/copilot_usage_card` API 호출
-3. **캐싱**: 네트워크 오류 시 마지막 데이터 캐시 사용
+1. **Authentication**: GitHub OAuth authentication via WebView
+2. **Data Collection**: Calls the `/settings/billing/copilot_usage_card` API
+3. **Caching**: Uses cached data when network errors occur
 
-> **Note**: 이 앱은 공식 GitHub API가 아닌 내부 웹 API를 사용합니다. GitHub의 UI 변경에 따라 동작이 달라질 수 있습니다.
+> **Note**: This app uses GitHub's internal web API, not the official GitHub API. Functionality may change based on GitHub UI updates.
 
 ## Privacy & Security
 
-- **로컬 저장**: 모든 데이터는 로컬에만 저장됩니다
-- **직접 통신**: GitHub 서버와 직접 통신하며, 제3자 서버를 거치지 않습니다
-- **OAuth 인증**: 비밀번호를 저장하지 않고 GitHub OAuth 세션 사용
+- **Local Storage**: All data is stored locally only
+- **Direct Communication**: Communicates directly with GitHub servers without third-party intermediaries
+- **OAuth Authentication**: Uses GitHub OAuth session without storing passwords
 
 ## Contributing
 
-기여를 환영합니다! Pull Request를 보내주세요.
+Contributions are welcome! Please submit a Pull Request.
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
@@ -98,7 +98,7 @@ Copilot Monitor는 GitHub의 내부 API를 사용하여 사용량 데이터를 �
 
 ## License
 
-MIT License - 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.
+MIT License - See [LICENSE](LICENSE) file for details.
 
 ## Related
 
