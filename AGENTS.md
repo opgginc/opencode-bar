@@ -1,5 +1,5 @@
 ## Language
-- All of comments, commit message, PR should be in English.
+- All of comments, commit message, PR content and title should be written in English.
 - **UI Language**: All user-facing text in the app MUST be in English.
 
 ## UI Styling Rules
