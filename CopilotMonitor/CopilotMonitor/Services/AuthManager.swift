@@ -81,6 +81,18 @@ final class AuthManager: NSObject {
         wv.load(URLRequest(url: url))
         logger.info("loadLoginPage: 로드 요청 완료")
     }
+
+    func resetSession() async {
+        logger.info("resetSession 시작")
+        let dataStore = webView.configuration.websiteDataStore
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        await withCheckedContinuation { continuation in
+            dataStore.removeData(ofTypes: types, modifiedSince: Date.distantPast) {
+                continuation.resume()
+            }
+        }
+        logger.info("resetSession 완료")
+    }
 }
 
 extension AuthManager: WKNavigationDelegate {

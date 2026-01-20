@@ -396,6 +396,7 @@ final class StatusBarController: NSObject {
     private var usageItem: NSMenuItem!
     private var usageView: UsageMenuItemView!
     private var signInItem: NSMenuItem!
+    private var resetLoginItem: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
     private var refreshIntervalMenu: NSMenu!
     private var refreshTimer: Timer?
@@ -501,6 +502,10 @@ final class StatusBarController: NSObject {
         signInItem = NSMenuItem(title: "Sign In", action: #selector(signInClicked), keyEquivalent: "")
         signInItem.target = self
         menu.addItem(signInItem)
+
+        resetLoginItem = NSMenuItem(title: "🧹 Reset Login", action: #selector(resetLoginClicked), keyEquivalent: "")
+        resetLoginItem.target = self
+        menu.addItem(resetLoginItem)
         
         let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshClicked), keyEquivalent: "r")
         refreshItem.target = self
@@ -882,7 +887,7 @@ final class StatusBarController: NSObject {
     
     private func updateUIForLoggedOut() {
         statusBarIconView.showError()
-        usageView.showError("로그인 필요")
+        usageView.showError("Sign in required")
         signInItem.isHidden = false
     }
     
@@ -897,6 +902,21 @@ final class StatusBarController: NSObject {
     
     @objc private func refreshClicked() {
         triggerRefresh()
+    }
+
+    @objc private func resetLoginClicked() {
+        Task { @MainActor in
+            await AuthManager.shared.resetSession()
+            clearCaches()
+            currentUsage = nil
+            customerId = nil
+            usageHistory = nil
+            lastHistoryFetchResult = .none
+            historyFetchTimer?.invalidate()
+            historyFetchTimer = nil
+            updateUIForLoggedOut()
+            NotificationCenter.default.post(name: Notification.Name("sessionExpired"), object: nil)
+        }
     }
     
     @objc private func checkForUpdatesClicked() {
@@ -926,6 +946,11 @@ final class StatusBarController: NSObject {
         if let data = try? JSONEncoder().encode(CachedUsage(usage: usage, timestamp: Date())) {
             UserDefaults.standard.set(data, forKey: "copilot.usage.cache")
         }
+    }
+
+    private func clearCaches() {
+        UserDefaults.standard.removeObject(forKey: "copilot.usage.cache")
+        UserDefaults.standard.removeObject(forKey: "copilot.history.cache")
     }
     
     private func loadCache() -> CachedUsage? {
