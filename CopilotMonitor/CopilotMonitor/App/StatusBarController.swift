@@ -104,6 +104,9 @@ final class StatusBarIconView: NSView {
     func showError() {
         hasError = true
         isLoading = false
+        addOnCost = 0  // Reset add-on cost to hide dollar sign
+        usedCount = 0
+        percentage = 0
         invalidateIntrinsicContentSize()
         needsDisplay = true
     }
@@ -503,7 +506,8 @@ final class StatusBarController: NSObject {
         signInItem.target = self
         menu.addItem(signInItem)
 
-        resetLoginItem = NSMenuItem(title: "🧹 Reset Login", action: #selector(resetLoginClicked), keyEquivalent: "")
+        resetLoginItem = NSMenuItem(title: "Reset Login", action: #selector(resetLoginClicked), keyEquivalent: "")
+        resetLoginItem.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: "Reset Login")
         resetLoginItem.target = self
         menu.addItem(resetLoginItem)
         

@@ -7,7 +7,9 @@
 - **Use instead**:
   - **Bold**: `NSFont.boldSystemFont(ofSize:)` for important text
   - **Underline**: `.underlineStyle: NSUnderlineStyle.single.rawValue` for critical warnings
-  - **Emoji**: Use emoji prefixes for visual categorization (e.g., 📈, 💸, ⚠️, 📊, ⏱️, 📭)
+  - **SF Symbols**: Use `NSImage(systemSymbolName:accessibilityDescription:)` for menu item icons
+- **Do NOT use**:
+  - **Emoji**: Never use emoji for menu item icons. Always use SF Symbols instead.
 - **Exception**: Progress bars and status indicators can use color (green/yellow/orange/red).
 
 ## Requirements

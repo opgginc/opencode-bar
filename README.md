@@ -42,7 +42,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/kargn
 > xattr -cr /Applications/CopilotMonitor.app
 > ```
 
-### Build from Source
+### Build from Source (Xcode)
 
 ```bash
 # Clone the repository
@@ -55,9 +55,31 @@ open CopilotMonitor/CopilotMonitor.xcodeproj
 # Build (⌘B) and Run (⌘R) in Xcode
 ```
 
+### Build from Source (CLI)
+
+For development without Xcode GUI (e.g., using VS Code, Cursor, or other editors):
+
+```bash
+# Kill existing process, build, and run
+pkill -x CopilotMonitor; xcodebuild -project CopilotMonitor/CopilotMonitor.xcodeproj -scheme CopilotMonitor -configuration Debug build && open ~/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/CopilotMonitor.app
+```
+
+Or step by step:
+
+```bash
+# 1. Kill existing process (if running)
+pkill -x CopilotMonitor
+
+# 2. Build
+xcodebuild -project CopilotMonitor/CopilotMonitor.xcodeproj -scheme CopilotMonitor -configuration Debug build
+
+# 3. Run
+open ~/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/CopilotMonitor.app
+```
+
 **Requirements:**
 - macOS 13.0+
-- Xcode 15.0+
+- Xcode 15.0+ (Command Line Tools required)
 - Swift 5.9+
 
 ## Usage
