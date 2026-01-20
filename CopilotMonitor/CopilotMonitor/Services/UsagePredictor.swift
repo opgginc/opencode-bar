@@ -82,7 +82,7 @@ class UsagePredictor {
         let predictedRemainingWeekdayUsage = weightedAvgDailyUsage * Double(remainingWeekdays)
         let predictedRemainingWeekendUsage = weightedAvgDailyUsage * weekendRatio * Double(remainingWeekends)
         
-        let currentTotalUsage = history.totalIncludedRequests
+        let currentTotalUsage = history.totalRequests
         let predictedMonthlyTotal = currentTotalUsage + predictedRemainingWeekdayUsage + predictedRemainingWeekendUsage
         
         // Step 5: Calculate predicted add-on cost
@@ -132,7 +132,7 @@ class UsagePredictor {
         let daysToUse = min(sortedData.count, weights.count)
         
         for i in 0..<daysToUse {
-            let usage = sortedData[i].includedRequests  // Already Double
+            let usage = sortedData[i].totalRequests  // Use totalRequests (included + billed)
             let weight = weights[i]
             weightedSum += usage * weight
             totalWeight += weight
@@ -163,11 +163,11 @@ class UsagePredictor {
             // weekday: 1=Sunday, 2=Monday, ..., 7=Saturday
             if weekday == 1 || weekday == 7 {
                 // Weekend (Sun, Sat)
-                weekendSum += day.includedRequests
+                weekendSum += day.totalRequests
                 weekendCount += 1
             } else {
                 // Weekday (Mon-Fri)
-                weekdaySum += day.includedRequests
+                weekdaySum += day.totalRequests
                 weekdayCount += 1
             }
         }

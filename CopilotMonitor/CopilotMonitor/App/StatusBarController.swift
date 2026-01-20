@@ -1086,7 +1086,7 @@ final class StatusBarController: NSObject {
                 self.lastHistoryFetchResult = .success
                 self.saveHistoryCache(history)
                 
-                logger.info("fetchUsageHistoryNow: 완료, days.count=\(history.days.count), totalRequests=\(history.totalIncludedRequests)")
+                logger.info("fetchUsageHistoryNow: 완료, days.count=\(history.days.count), totalRequests=\(history.totalRequests)")
                 self.updateHistorySubmenu()
             } catch {
                 logger.error("fetchUsageHistoryNow: 실패 - \(error.localizedDescription)")
@@ -1238,7 +1238,7 @@ final class StatusBarController: NSObject {
                 let dayStart = utcCalendar.startOfDay(for: day.date)
                 let isToday = dayStart == today
                 let dateStr = dateFormatter.string(from: day.date)
-                let reqStr = numberFormatter.string(from: NSNumber(value: day.includedRequests)) ?? "0"
+                let reqStr = numberFormatter.string(from: NSNumber(value: day.totalRequests)) ?? "0"
                 let label = isToday ? "\(dateStr) (Today): \(reqStr) req" : "\(dateStr): \(reqStr) req"
                 
                 let item = NSMenuItem(title: label, action: nil, keyEquivalent: "")

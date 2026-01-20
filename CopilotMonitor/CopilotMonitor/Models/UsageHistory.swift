@@ -16,13 +16,16 @@ struct DailyUsage: Codable {
     
     var dayOfWeek: Int { Self.utcCalendar.component(.weekday, from: date) }
     var isWeekend: Bool { dayOfWeek == 1 || dayOfWeek == 7 }
+    
+    /// Total requests (included + billed) for prediction calculations
+    var totalRequests: Double { includedRequests + billedRequests }
 }
 
 struct UsageHistory: Codable {
     let fetchedAt: Date
     let days: [DailyUsage]       // ⚠️ Stores full month data (separate from 7-day UI display)
     
-    var totalIncludedRequests: Double { days.reduce(0) { $0 + $1.includedRequests } }
+    var totalRequests: Double { days.reduce(0) { $0 + $1.totalRequests } }
     var totalBilledAmount: Double { days.reduce(0) { $0 + $1.billedAmount } }
     
     // Recent 7 days slice for UI
