@@ -517,9 +517,9 @@ final class StatusBarController: NSObject {
         refreshItem.target = self
         menu.addItem(refreshItem)
         
-        let checkForUpdatesItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdatesClicked), keyEquivalent: "u")
+        let checkForUpdatesItem = NSMenuItem(title: "Check for Updates...", action: #selector(AppDelegate.checkForUpdates), keyEquivalent: "u")
         checkForUpdatesItem.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: "Check for Updates")
-        checkForUpdatesItem.target = self
+        checkForUpdatesItem.target = NSApp.delegate
         menu.addItem(checkForUpdatesItem)
         
         let refreshIntervalItem = NSMenuItem(title: "Auto Refresh", action: nil, keyEquivalent: "")
@@ -912,7 +912,8 @@ final class StatusBarController: NSObject {
     }
     
     @objc private func refreshClicked() {
-        triggerRefresh()
+        logger.info("refreshClicked called")
+        fetchUsage()
     }
 
     @objc private func resetLoginClicked() {
@@ -928,11 +929,6 @@ final class StatusBarController: NSObject {
             updateUIForLoggedOut()
             NotificationCenter.default.post(name: Notification.Name("sessionExpired"), object: nil)
         }
-    }
-    
-    @objc private func checkForUpdatesClicked() {
-        guard let appDelegate = NSApp.delegate as? AppDelegate else { return }
-        appDelegate.updaterController.checkForUpdates(nil)
     }
     
     @objc private func openBillingClicked() {

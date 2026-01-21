@@ -13,6 +13,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // XIB 없이 코드로 초기화해야 함 (Menu Bar 앱이므로)
     private(set) var updaterController: SPUStandardUpdaterController!
     
+    @objc func checkForUpdates() {
+        // Menu Bar apps (LSUIElement) need to be activated for Sparkle update UI to show
+        NSApp.activate(ignoringOtherApps: true)
+        updaterController.checkForUpdates(self)
+    }
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
