@@ -419,6 +419,10 @@ final class StatusBarController: NSObject {
     private var historyMenuItem: NSMenuItem!
     private var predictionPeriodMenu: NSMenu!
     
+    // Multi-provider properties
+    private var providerResults: [ProviderIdentifier: ProviderUsage] = [:]
+    private var enabledProvidersMenu: NSMenu!
+    
     private var usagePredictor: UsagePredictor {
         UsagePredictor(weights: predictionPeriod.weights)
     }
@@ -550,6 +554,22 @@ final class StatusBarController: NSObject {
         menu.addItem(openBillingItem)
         
         menu.addItem(NSMenuItem.separator())
+        
+        let enabledProvidersItem = NSMenuItem(title: "Enabled Providers", action: nil, keyEquivalent: "")
+        enabledProvidersItem.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: "Enabled Providers")
+        enabledProvidersMenu = NSMenu()
+        
+        for identifier in ProviderIdentifier.allCases {
+            let item = NSMenuItem(title: identifier.displayName, action: #selector(toggleProvider(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = identifier.rawValue
+            item.state = isProviderEnabled(identifier) ? .on : .off
+            enabledProvidersMenu.addItem(item)
+        }
+        
+        enabledProvidersItem.submenu = enabledProvidersMenu
+        menu.addItem(enabledProvidersItem)
+        
         launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: #selector(launchAtLoginClicked), keyEquivalent: "")
         launchAtLoginItem.image = NSImage(systemSymbolName: "power", accessibilityDescription: "Launch at Login")
         launchAtLoginItem.target = self
@@ -592,6 +612,32 @@ final class StatusBarController: NSObject {
     @objc private func predictionPeriodSelected(_ sender: NSMenuItem) {
         if let period = PredictionPeriod(rawValue: sender.tag) {
             predictionPeriod = period
+        }
+    }
+    
+    private func isProviderEnabled(_ identifier: ProviderIdentifier) -> Bool {
+        let key = "provider.\(identifier.rawValue).enabled"
+        if UserDefaults.standard.object(forKey: key) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+    
+    @objc private func toggleProvider(_ sender: NSMenuItem) {
+        guard let idString = sender.representedObject as? String,
+              let identifier = ProviderIdentifier(rawValue: idString) else { return }
+        let key = "provider.\(identifier.rawValue).enabled"
+        let current = isProviderEnabled(identifier)
+        UserDefaults.standard.set(!current, forKey: key)
+        updateEnabledProvidersMenu()
+        refreshClicked()
+    }
+    
+    private func updateEnabledProvidersMenu() {
+        for item in enabledProvidersMenu.items {
+            guard let idString = item.representedObject as? String,
+                  let identifier = ProviderIdentifier(rawValue: idString) else { continue }
+            item.state = isProviderEnabled(identifier) ? .on : .off
         }
     }
     
