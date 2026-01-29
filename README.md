@@ -1,11 +1,11 @@
-# Copilot Monitor
+# AI Usage Monitor (formerly Copilot Monitor)
 
 <p align="center">
-  <img src="docs/screenshot.jpeg" alt="Copilot Monitor Screenshot" width="480">
+  <img src="docs/screenshot.jpeg" alt="AI Usage Monitor Screenshot" width="480">
 </p>
 
 <p align="center">
-  <strong>Monitor your GitHub Copilot premium request usage in real-time from the macOS menu bar.</strong>
+  <strong>Monitor multiple AI provider usage (Copilot, Claude, Codex, Gemini CLI) in real-time from the macOS menu bar.</strong>
 </p>
 
 <p align="center">
@@ -23,13 +23,25 @@
 
 ## Features
 
+### Multi-Provider Support
+- **4 AI Providers**: GitHub Copilot, Anthropic Claude, OpenAI Codex, Google Gemini CLI
+- **Unified Dashboard**: View all providers in a single menu dropdown
+- **Provider Toggle**: Enable/disable individual providers in Settings
+- **Smart Categorization**: 
+  - Pay-as-you-go providers (Codex) show utilization %
+  - Quota-based providers (Copilot, Claude, Gemini CLI) show remaining quota %
+
+### Monitoring & Alerts
 - **Real-time Menu Bar Display**: View current usage and limits directly from the menu bar icon
 - **Visual Progress Indicator**: Color changes based on usage (green → yellow → orange → red)
-- **Usage History & Prediction**: Track daily usage and predict end-of-month totals with estimated costs
-- **Add-on Cost Tracking**: Shows additional costs when exceeding the limit
+- **Quota Alerts**: Red-tinted icons when remaining quota <20%
+- **Usage History & Prediction**: Track daily usage and predict end-of-month totals with estimated costs (Copilot only)
+- **Add-on Cost Tracking**: Shows additional costs when exceeding the limit (Copilot only)
+
+### Convenience
 - **Auto Refresh**: Configurable auto-update intervals from 10 seconds to 30 minutes
 - **Launch at Login**: Option to automatically start on macOS login
-- **GitHub OAuth Authentication**: Secure WebView-based login
+- **Secure Authentication**: Uses existing OpenCode auth tokens (no additional login required)
 
 ## Installation
 
@@ -84,18 +96,56 @@ open ~/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug
 
 ## Usage
 
+### Initial Setup
+
 1. **Launch the app**: Run `CopilotMonitor.app`
-2. **Sign in**: Click "Sign In" from the menu and log in with your GitHub account
-3. **Monitor**: Check your real-time usage from the menu bar
+2. **Configure providers**: 
+   - For **Copilot**: Click "Sign In" and log in with your GitHub account
+   - For **Claude, Codex, Gemini CLI**: Ensure you have OpenCode installed with valid auth tokens at `~/.local/share/opencode/auth.json`
+3. **Enable/Disable providers**: Go to Settings → Enabled Providers and toggle providers as needed
+4. **Monitor**: Check your real-time usage from the menu bar
+
+### Menu Structure
+
+```
+─────────────────────────────
+[Copilot Usage View]
+─────────────────────────────
+Pay-as-you-go
+  Codex          45.2%
+─────────────────────────────
+Quota Status
+  Claude         5% ⚠️
+  Copilot        78%
+  Gemini CLI     92%
+─────────────────────────────
+Usage History ▸
+Sign In
+Reset Login
+Refresh (⌘R)
+Check for Updates...
+Auto Refresh ▸
+Open Billing (⌘B)
+─────────────────────────────
+Settings
+  Enabled Providers ▸
+  Launch at Login
+─────────────────────────────
+Version X.X.X
+Quit (⌘Q)
+```
 
 ### Menu Options
 
 | Menu Item | Description | Shortcut |
 |-----------|-------------|----------|
-| Usage History | View daily history and end-of-month predictions | - |
-| Refresh | Manually refresh usage data | `⌘R` |
+| Pay-as-you-go | Shows utilization % for pay-as-you-go providers | - |
+| Quota Status | Shows remaining quota % for quota-based providers | - |
+| Usage History | View daily history and end-of-month predictions (Copilot only) | - |
+| Refresh | Manually refresh usage data for all enabled providers | `⌘R` |
 | Auto Refresh | Set auto-refresh interval (10s~30min) | - |
 | Open Billing | Open GitHub billing page | `⌘B` |
+| Enabled Providers | Toggle individual providers on/off | - |
 | Launch at Login | Toggle auto-start on login | - |
 | Quit | Quit the app | `⌘Q` |
 
@@ -110,19 +160,30 @@ The app tracks your daily usage to provide smart predictions:
 
 ## How It Works
 
-Copilot Monitor fetches usage data using GitHub's internal API:
+### Provider Data Sources
 
-1. **Authentication**: GitHub OAuth authentication via WebView
-2. **Data Collection**: Calls the `/settings/billing/copilot_usage_card` API
-3. **Caching**: Uses cached data when network errors occur
+| Provider | Authentication | API Endpoint | Data Format |
+|----------|---------------|--------------|-------------|
+| **Copilot** | GitHub OAuth (WebView) | `/settings/billing/copilot_usage_card` | Quota-based with overage |
+| **Claude** | OpenCode auth token | `https://api.anthropic.com/api/oauth/usage` | Quota-based (7-day window) |
+| **Codex** | OpenCode auth token | `https://chatgpt.com/backend-api/wham/usage` | Pay-as-you-go utilization |
+| **Gemini CLI** | OpenCode OAuth token | `https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` | Quota-based (per-model buckets) |
 
-> **Note**: This app uses GitHub's internal web API, not the official GitHub API. Functionality may change based on GitHub UI updates.
+### Architecture
+
+1. **Protocol-based Design**: All providers implement `ProviderProtocol` for unified interface
+2. **Parallel Fetching**: Uses Swift Concurrency to fetch all providers simultaneously (10s timeout per provider)
+3. **Graceful Degradation**: Returns partial results if some providers fail
+4. **Caching**: Uses cached data when network errors occur
+
+> **Note**: This app uses internal/unofficial APIs for some providers. Functionality may change based on provider updates.
 
 ## Privacy & Security
 
 - **Local Storage**: All data is stored locally only
-- **Direct Communication**: Communicates directly with GitHub servers without third-party intermediaries
-- **OAuth Authentication**: Uses GitHub OAuth session without storing passwords
+- **No Third-party Servers**: Communicates directly with provider APIs
+- **Token Security**: Uses existing OpenCode auth tokens (read-only access)
+- **OAuth Authentication**: GitHub Copilot uses OAuth session without storing passwords
 
 ## Contributing
 
