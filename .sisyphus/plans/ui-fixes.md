@@ -386,7 +386,7 @@ Task 1 → Task 7 → Task 8 → Task 10 → Task 12
 
 ## TODOs
 
-- [ ] 1. Extend Models (ProviderIdentifier + DetailedUsage + ProviderUsage)
+- [x] 1. Extend Models (ProviderIdentifier + DetailedUsage + ProviderUsage)
 
   **What to do**:
   
