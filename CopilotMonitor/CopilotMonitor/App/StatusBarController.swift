@@ -506,15 +506,15 @@ final class StatusBarController: NSObject {
         // Load cached history immediately on startup (before API fetch completes)
         loadCachedHistoryOnStartup()
         
-        signInItem = NSMenuItem(title: "Sign In", action: #selector(signInClicked), keyEquivalent: "")
-        signInItem.image = NSImage(systemSymbolName: "person.crop.circle.badge.checkmark", accessibilityDescription: "Sign In")
-        signInItem.target = self
-        menu.addItem(signInItem)
+         // signInItem = NSMenuItem(title: "Sign In", action: #selector(signInClicked), keyEquivalent: "")
+         // signInItem.image = NSImage(systemSymbolName: "person.crop.circle.badge.checkmark", accessibilityDescription: "Sign In")
+         // signInItem.target = self
+         // menu.addItem(signInItem)
 
-        resetLoginItem = NSMenuItem(title: "Reset Login", action: #selector(resetLoginClicked), keyEquivalent: "")
-        resetLoginItem.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: "Reset Login")
-        resetLoginItem.target = self
-        menu.addItem(resetLoginItem)
+         // resetLoginItem = NSMenuItem(title: "Reset Login", action: #selector(resetLoginClicked), keyEquivalent: "")
+         // resetLoginItem.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: "Reset Login")
+         // resetLoginItem.target = self
+         // menu.addItem(resetLoginItem)
         
         let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshClicked), keyEquivalent: "r")
         refreshItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
@@ -1122,26 +1122,34 @@ final class StatusBarController: NSObject {
         return item
     }
     
-    private func iconForProvider(_ identifier: ProviderIdentifier) -> NSImage? {
-        switch identifier {
-        case .copilot:
-            return NSImage(named: "CopilotIcon")
-        case .claude:
-            return NSImage(named: "ClaudeIcon")
-        case .codex:
-            return NSImage(named: "CodexIcon")
-        case .geminiCLI:
-            return NSImage(named: "GeminiIcon")
-        case .openCode:
-            return NSImage(named: "OpencodeIcon")
-        case .openRouter:
-            return NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: identifier.displayName)
-        case .antigravity:
-            return NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
-        case .openCodeZen:
-            return NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
-        }
-    }
+     private func iconForProvider(_ identifier: ProviderIdentifier) -> NSImage? {
+         var image: NSImage?
+         
+         switch identifier {
+         case .copilot:
+             image = NSImage(named: "CopilotIcon")
+         case .claude:
+             image = NSImage(named: "ClaudeIcon")
+         case .codex:
+             image = NSImage(named: "CodexIcon")
+         case .geminiCLI:
+             image = NSImage(named: "GeminiIcon")
+         case .openCode:
+             image = NSImage(named: "OpencodeIcon")
+         case .openRouter:
+             image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: identifier.displayName)
+         case .antigravity:
+             image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
+         case .openCodeZen:
+             image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
+         }
+         
+         // Resize icons to 16x16 for consistent menu appearance
+         if let image = image {
+             image.size = NSSize(width: 16, height: 16)
+         }
+         return image
+     }
     
     private func tintedImage(_ image: NSImage?, color: NSColor) -> NSImage? {
         guard let image = image else { return nil }

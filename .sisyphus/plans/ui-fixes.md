@@ -1568,7 +1568,7 @@ Task 1 → Task 7 → Task 8 → Task 10 → Task 12
 
 ---
 
-- [ ] 11. Detail Submenus for All Providers
+- [x] 11. Detail Submenus for All Providers
 
   **What to do**:
   - Create/update `createDetailSubmenu()` for each provider type:
