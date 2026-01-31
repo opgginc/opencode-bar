@@ -9,17 +9,29 @@ final class CodexProvider: ProviderProtocol {
     
     private struct RateLimitWindow: Codable {
         let used_percent: Double
+        let limit_window_seconds: Int?
         let reset_after_seconds: Int
+        let reset_at: Int?
     }
     
     private struct RateLimit: Codable {
+        let allowed: Bool?
+        let limit_reached: Bool?
         let primary_window: RateLimitWindow
         let secondary_window: RateLimitWindow?
     }
     
     private struct CreditsInfo: Codable {
-        let balance: Double?
+        let has_credits: Bool?
         let unlimited: Bool?
+        let balance: String?
+        let approx_local_messages: [Int]?
+        let approx_cloud_messages: [Int]?
+        
+        var balanceAsDouble: Double? {
+            guard let balance = balance else { return nil }
+            return Double(balance)
+        }
     }
     
     private struct CodexResponse: Codable {
@@ -68,6 +80,18 @@ final class CodexProvider: ProviderProtocol {
             codexResponse = try decoder.decode(CodexResponse.self, from: data)
         } catch {
             logger.error("Failed to decode API response: \(error.localizedDescription)")
+            if let jsonString = String(data: data, encoding: .utf8) {
+                logger.error("Raw response: \(jsonString.prefix(1000))")
+                let debugMsg = "[Codex] Raw response: \(jsonString)\n"
+                if let debugData = debugMsg.data(using: .utf8) {
+                    let path = "/tmp/provider_debug.log"
+                    if let handle = FileHandle(forWritingAtPath: path) {
+                        handle.seekToEndOfFile()
+                        handle.write(debugData)
+                        handle.closeFile()
+                    }
+                }
+            }
             throw ProviderError.decodingError(error.localizedDescription)
         }
         
@@ -86,7 +110,7 @@ final class CodexProvider: ProviderProtocol {
         let remaining = Int(100 - primaryUsedPercent)
         let entitlement = 100
         
-        logger.info("Successfully fetched Codex usage: primary=\(primaryUsedPercent)%, secondary=\(secondaryUsedPercent)%, plan=\(codexResponse.plan_type ?? "unknown"), credits=\(codexResponse.credits?.balance ?? 0)")
+        logger.info("Successfully fetched Codex usage: primary=\(primaryUsedPercent)%, secondary=\(secondaryUsedPercent)%, plan=\(codexResponse.plan_type ?? "unknown"), credits=\(codexResponse.credits?.balance ?? "0")")
         
         // Populate DetailedUsage with all available fields
         let details = DetailedUsage(
@@ -94,7 +118,7 @@ final class CodexProvider: ProviderProtocol {
             secondaryUsage: secondaryUsedPercent,
             secondaryReset: secondaryResetDate,
             primaryReset: primaryResetDate,
-            creditsBalance: codexResponse.credits?.balance,
+            creditsBalance: codexResponse.credits?.balanceAsDouble,
             planType: codexResponse.plan_type
         )
         

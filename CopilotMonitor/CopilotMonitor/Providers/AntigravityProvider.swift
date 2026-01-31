@@ -3,6 +3,49 @@ import os.log
 
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "AntigravityProvider")
 
+private func runCommandAsync(executableURL: URL, arguments: [String]) async throws -> String {
+    return try await withCheckedThrowingContinuation { continuation in
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        
+        var outputData = Data()
+        
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                outputData.append(data)
+            }
+        }
+        
+        process.terminationHandler = { _ in
+            pipe.fileHandleForReading.readabilityHandler = nil
+            
+            let remainingData = pipe.fileHandleForReading.readDataToEndOfFile()
+            if !remainingData.isEmpty {
+                outputData.append(remainingData)
+            }
+            
+            guard let output = String(data: outputData, encoding: .utf8) else {
+                continuation.resume(throwing: ProviderError.providerError("Cannot decode output"))
+                return
+            }
+            
+            continuation.resume(returning: output)
+        }
+        
+        do {
+            try process.run()
+        } catch {
+            continuation.resume(throwing: error)
+        }
+    }
+}
+
 // MARK: - Antigravity API Response Models
 
 /// Response structure from Antigravity local language server API
@@ -80,27 +123,12 @@ final class AntigravityProvider: ProviderProtocol {
     
     // MARK: - Private Helpers
     
-    /// Detects language_server_macos process and extracts PID and CSRF token
-    /// - Returns: Tuple of (PID, CSRF token)
-    /// - Throws: ProviderError if process not found or CSRF token missing
     private func detectProcessInfo() async throws -> (Int, String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-ax", "-o", "pid=,command="]
+        let output = try await runCommandAsync(
+            executableURL: URL(fileURLWithPath: "/bin/ps"),
+            arguments: ["-ax", "-o", "pid=,command="]
+        )
         
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        
-        try process.run()
-        process.waitUntilExit()
-        
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8) else {
-            logger.error("Failed to decode ps output")
-            throw ProviderError.providerError("Cannot read process list")
-        }
-        
-        // Filter for: language_server_macos AND antigravity
         let lines = output.components(separatedBy: "\n")
         guard let processLine = lines.first(where: { 
             $0.contains("language_server_macos") && $0.contains("antigravity") && !$0.contains("grep")
@@ -109,15 +137,13 @@ final class AntigravityProvider: ProviderProtocol {
             throw ProviderError.providerError("Antigravity not running")
         }
         
-        // Extract PID (first column)
         let components = processLine.trimmingCharacters(in: .whitespaces).components(separatedBy: .whitespaces)
         guard let pidString = components.first, let pid = Int(pidString) else {
             logger.error("Cannot parse PID from process line")
             throw ProviderError.providerError("Cannot parse PID")
         }
         
-        // Extract CSRF token: --csrf_token=XXX or --csrf_token XXX
-        let csrfPattern = "--csrf_token[= ]+([a-zA-Z0-9]+)"
+        let csrfPattern = "--csrf_token[= ]+([a-zA-Z0-9-]+)"
         guard let regex = try? NSRegularExpression(pattern: csrfPattern),
               let match = regex.firstMatch(in: processLine, range: NSRange(processLine.startIndex..., in: processLine)),
               let range = Range(match.range(at: 1), in: processLine) else {
@@ -129,34 +155,18 @@ final class AntigravityProvider: ProviderProtocol {
         return (pid, csrfToken)
     }
     
-    /// Finds listening port for the given PID using lsof
-    /// - Parameter pid: Process ID
-    /// - Returns: Port number
-    /// - Throws: ProviderError if port not found
     private func detectPort(pid: Int) async throws -> Int {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        process.arguments = ["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", "\(pid)"]
+        let output = try await runCommandAsync(
+            executableURL: URL(fileURLWithPath: "/usr/sbin/lsof"),
+            arguments: ["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", "\(pid)"]
+        )
         
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        
-        try process.run()
-        process.waitUntilExit()
-        
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8) else {
-            logger.error("Failed to decode lsof output")
-            throw ProviderError.providerError("Cannot read lsof output")
-        }
-        
-        // Parse port from: *:PORT (LISTEN)
-        let portPattern = "\\*:(\\d+) \\(LISTEN\\)"
+        let portPattern = "(?:\\*|127\\.0\\.0\\.1):(\\d+) \\(LISTEN\\)"
         guard let regex = try? NSRegularExpression(pattern: portPattern),
               let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
               let range = Range(match.range(at: 1), in: output),
               let port = Int(output[range]) else {
-            logger.error("Cannot find listening port in lsof output")
+            logger.error("Cannot find listening port in lsof output: \(output)")
             throw ProviderError.providerError("Cannot find listening port")
         }
         

@@ -24,9 +24,8 @@ final class ProviderManager {
             GeminiCLIProvider(),
             OpenRouterProvider(),
             OpenCodeProvider(),
-            // TODO: Fix blocking Process.waitUntilExit() in these providers
-            // AntigravityProvider(),
-            // OpenCodeZenProvider()
+            AntigravityProvider(),
+            OpenCodeZenProvider()
         ]
     }
     
@@ -42,6 +41,22 @@ final class ProviderManager {
     private init() {
         registerDefaultProviders()
         logger.info("ProviderManager initialized with \(self.providers.count) providers")
+    }
+    
+    private func debugLog(_ message: String) {
+        let msg = "[\(Date())] ProviderManager: \(message)\n"
+        if let data = msg.data(using: .utf8) {
+            let path = "/tmp/provider_debug.log"
+            if FileManager.default.fileExists(atPath: path) {
+                if let handle = FileHandle(forWritingAtPath: path) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                try? data.write(to: URL(fileURLWithPath: path))
+            }
+        }
     }
     
     // MARK: - Public API
@@ -70,26 +85,12 @@ final class ProviderManager {
                         await self.updateCache(identifier: provider.identifier, result: result)
                         
                         logger.info("✓ \(provider.identifier.displayName) fetch succeeded")
-                        
-                        // DEBUG: Write success to file
-                        let successMsg = "✓ \(provider.identifier.displayName) succeeded\n"
-                        if let data = successMsg.data(using: .utf8), let handle = FileHandle(forWritingAtPath: "/tmp/copilot_debug.log") {
-                            handle.seekToEndOfFile()
-                            handle.write(data)
-                            handle.closeFile()
-                        }
+                        self.debugLog("✓ \(provider.identifier.displayName) fetch succeeded")
                         
                         return (provider.identifier, result)
                     } catch {
                         logger.error("✗ \(provider.identifier.displayName) fetch failed: \(error.localizedDescription)")
-                        
-                        // DEBUG: Write to file
-                        let debugMsg = "✗ \(provider.identifier.displayName) failed: \(error.localizedDescription)\n"
-                        if let data = debugMsg.data(using: .utf8), let handle = FileHandle(forWritingAtPath: "/tmp/copilot_debug.log") {
-                            handle.seekToEndOfFile()
-                            handle.write(data)
-                            handle.closeFile()
-                        }
+                        self.debugLog("✗ \(provider.identifier.displayName) fetch failed: \(error.localizedDescription)")
                         
                         // Try to use cached value as fallback
                         let cached = await self.getCache(identifier: provider.identifier)

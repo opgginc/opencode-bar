@@ -12,6 +12,12 @@ extension StatusBarController {
                 let percent = total > 0 ? (remaining / total) * 100 : 0
                 submenu.addItem(NSMenuItem(title: String(format: "Credits: $%.0f/$%.0f (%.0f%%)", remaining, total, percent), action: nil, keyEquivalent: ""))
             }
+            if let daily = details.dailyUsage {
+                submenu.addItem(NSMenuItem(title: String(format: "Daily: $%.2f", daily), action: nil, keyEquivalent: ""))
+            }
+            if let weekly = details.weeklyUsage {
+                submenu.addItem(NSMenuItem(title: String(format: "Weekly: $%.2f", weekly), action: nil, keyEquivalent: ""))
+            }
             
         case .openCodeZen:
             if let avg = details.avgCostPerDay {
@@ -24,6 +30,19 @@ extension StatusBarController {
             if let messages = details.messages {
                 let formatted = NumberFormatter.localizedString(from: NSNumber(value: messages), number: .decimal)
                 submenu.addItem(NSMenuItem(title: "Messages: \(formatted)", action: nil, keyEquivalent: ""))
+            }
+            
+            if let models = details.modelBreakdown, !models.isEmpty {
+                submenu.addItem(NSMenuItem.separator())
+                let headerItem = NSMenuItem(title: "Top Models:", action: nil, keyEquivalent: "")
+                headerItem.isEnabled = false
+                submenu.addItem(headerItem)
+                
+                let sortedModels = models.sorted { $0.value > $1.value }.prefix(5)
+                for (model, cost) in sortedModels {
+                    let shortName = model.components(separatedBy: "/").last ?? model
+                    submenu.addItem(NSMenuItem(title: String(format: "  %@: $%.2f", shortName, cost), action: nil, keyEquivalent: ""))
+                }
             }
             
             if let history = details.dailyHistory, !history.isEmpty {
@@ -68,22 +87,40 @@ extension StatusBarController {
                     submenu.addItem(NSMenuItem(title: "   Resets: \(formatter.string(from: reset))", action: nil, keyEquivalent: ""))
                 }
             }
+            submenu.addItem(NSMenuItem.separator())
             if let sonnet = details.sonnetUsage {
-                submenu.addItem(NSMenuItem(title: String(format: "Sonnet: %.0f%%", sonnet), action: nil, keyEquivalent: ""))
+                submenu.addItem(NSMenuItem(title: String(format: "Sonnet (7d): %.0f%%", sonnet), action: nil, keyEquivalent: ""))
             }
             if let opus = details.opusUsage {
-                submenu.addItem(NSMenuItem(title: String(format: "Opus: %.0f%%", opus), action: nil, keyEquivalent: ""))
+                submenu.addItem(NSMenuItem(title: String(format: "Opus (7d): %.0f%%", opus), action: nil, keyEquivalent: ""))
+            }
+            if let extraUsage = details.extraUsageEnabled {
+                submenu.addItem(NSMenuItem(title: "Extra Usage: \(extraUsage ? "ON" : "OFF")", action: nil, keyEquivalent: ""))
             }
             
         case .codex:
             if let primary = details.dailyUsage {
-                submenu.addItem(NSMenuItem(title: String(format: "Primary: %.0f%%", primary), action: nil, keyEquivalent: ""))
+                var primaryTitle = String(format: "Primary: %.0f%%", primary)
+                if let reset = details.primaryReset {
+                    let hours = Int(reset.timeIntervalSinceNow / 3600)
+                    primaryTitle += " (\(hours)h)"
+                }
+                submenu.addItem(NSMenuItem(title: primaryTitle, action: nil, keyEquivalent: ""))
             }
             if let secondary = details.secondaryUsage {
-                submenu.addItem(NSMenuItem(title: String(format: "Secondary: %.0f%%", secondary), action: nil, keyEquivalent: ""))
+                var secondaryTitle = String(format: "Secondary: %.0f%%", secondary)
+                if let reset = details.secondaryReset {
+                    let hours = Int(reset.timeIntervalSinceNow / 3600)
+                    secondaryTitle += " (\(hours)h)"
+                }
+                submenu.addItem(NSMenuItem(title: secondaryTitle, action: nil, keyEquivalent: ""))
             }
+            submenu.addItem(NSMenuItem.separator())
             if let plan = details.planType {
                 submenu.addItem(NSMenuItem(title: "Plan: \(plan)", action: nil, keyEquivalent: ""))
+            }
+            if let credits = details.creditsBalance {
+                submenu.addItem(NSMenuItem(title: String(format: "Credits: $%.2f", credits), action: nil, keyEquivalent: ""))
             }
             
         case .geminiCLI:
@@ -98,6 +135,9 @@ extension StatusBarController {
                 for (model, quota) in models.sorted(by: { $0.key < $1.key }) {
                     submenu.addItem(NSMenuItem(title: String(format: "%@: %.0f%%", model, quota), action: nil, keyEquivalent: ""))
                 }
+            }
+            if details.planType != nil || details.email != nil {
+                submenu.addItem(NSMenuItem.separator())
             }
             if let plan = details.planType {
                 submenu.addItem(NSMenuItem(title: "Plan: \(plan)", action: nil, keyEquivalent: ""))
@@ -150,18 +190,24 @@ extension StatusBarController {
     }
     
     func createCopilotHistorySubmenu() -> NSMenu {
+        debugLog("createCopilotHistorySubmenu: started")
         let submenu = NSMenu()
+        debugLog("createCopilotHistorySubmenu: calling getHistoryUIState")
         let state = getHistoryUIState()
+        debugLog("createCopilotHistorySubmenu: getHistoryUIState completed")
         
         if state.hasNoData {
+            debugLog("createCopilotHistorySubmenu: hasNoData=true, returning early")
             let item = NSMenuItem(title: "No data", action: nil, keyEquivalent: "")
             item.image = NSImage(systemSymbolName: "tray", accessibilityDescription: "No data")
             item.isEnabled = false
             submenu.addItem(item)
             return submenu
         }
+        debugLog("createCopilotHistorySubmenu: hasNoData=false, continuing")
         
         if let prediction = state.prediction {
+            debugLog("createCopilotHistorySubmenu: prediction exists")
             let formatter = NumberFormatter()
             formatter.numberStyle = .decimal
             formatter.maximumFractionDigits = 0
@@ -203,17 +249,24 @@ extension StatusBarController {
                 submenu.addItem(confItem)
             }
             
+            debugLog("createCopilotHistorySubmenu: adding separator after prediction")
             submenu.addItem(NSMenuItem.separator())
+            debugLog("createCopilotHistorySubmenu: separator added")
+        } else {
+            debugLog("createCopilotHistorySubmenu: no prediction")
         }
         
         if state.isStale {
+            debugLog("createCopilotHistorySubmenu: data is stale")
             let staleItem = NSMenuItem(title: "Data is stale", action: nil, keyEquivalent: "")
             staleItem.image = NSImage(systemSymbolName: "clock.badge.exclamationmark", accessibilityDescription: "Data is stale")
             staleItem.isEnabled = false
             submenu.addItem(staleItem)
+            debugLog("createCopilotHistorySubmenu: stale item added")
         }
         
         if let history = state.history {
+            debugLog("createCopilotHistorySubmenu: history exists, processing \(history.recentDays.count) days")
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "MMM d"
             dateFormatter.timeZone = TimeZone(identifier: "UTC")
@@ -241,14 +294,30 @@ extension StatusBarController {
                 )
                 submenu.addItem(item)
             }
+            debugLog("createCopilotHistorySubmenu: all history items added")
+        } else {
+            debugLog("createCopilotHistorySubmenu: no history")
         }
         
-        submenu.addItem(NSMenuItem.separator())
-        let predictionPeriodItem = NSMenuItem(title: "Prediction Period", action: nil, keyEquivalent: "")
-        predictionPeriodItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Prediction Period")
-        predictionPeriodItem.submenu = predictionPeriodMenu
-        submenu.addItem(predictionPeriodItem)
-        
-        return submenu
+         debugLog("createCopilotHistorySubmenu: adding final separator and prediction period menu")
+         submenu.addItem(NSMenuItem.separator())
+         let predictionPeriodItem = NSMenuItem(title: "Prediction Period", action: nil, keyEquivalent: "")
+         predictionPeriodItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Prediction Period")
+         debugLog("createCopilotHistorySubmenu: creating new prediction period submenu")
+         
+         // Create a new submenu instead of referencing the shared one to avoid deadlock
+         let periodSubmenu = NSMenu()
+         for period in PredictionPeriod.allCases {
+             let item = NSMenuItem(title: period.title, action: #selector(predictionPeriodSelected(_:)), keyEquivalent: "")
+             item.target = self
+             item.tag = period.rawValue
+             periodSubmenu.addItem(item)
+         }
+         predictionPeriodItem.submenu = periodSubmenu
+         debugLog("createCopilotHistorySubmenu: prediction period submenu created")
+         submenu.addItem(predictionPeriodItem)
+         debugLog("createCopilotHistorySubmenu: completed successfully")
+         
+         return submenu
     }
 }

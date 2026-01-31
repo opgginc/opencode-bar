@@ -82,11 +82,33 @@ final class StatusBarController: NSObject {
     
     override init() {
         super.init()
+        debugLog("StatusBarController init started")
         setupStatusItem()
+        debugLog("setupStatusItem completed")
         setupMenu()
+        debugLog("setupMenu completed")
         setupNotificationObservers()
+        debugLog("setupNotificationObservers completed")
         startRefreshTimer()
+        debugLog("startRefreshTimer completed")
         logger.info("Init completed")
+        debugLog("Init completed")
+    }
+    
+    func debugLog(_ message: String) {
+        let msg = "[\(Date())] \(message)\n"
+        if let data = msg.data(using: .utf8) {
+            let path = "/tmp/provider_debug.log"
+            if FileManager.default.fileExists(atPath: path) {
+                if let handle = FileHandle(forWritingAtPath: path) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                try? data.write(to: URL(fileURLWithPath: path))
+            }
+        }
     }
     
     private func setupStatusItem() {
@@ -212,7 +234,7 @@ final class StatusBarController: NSObject {
         }
     }
     
-    @objc private func predictionPeriodSelected(_ sender: NSMenuItem) {
+    @objc func predictionPeriodSelected(_ sender: NSMenuItem) {
         if let period = PredictionPeriod(rawValue: sender.tag) {
             predictionPeriod = period
         }
@@ -294,35 +316,58 @@ final class StatusBarController: NSObject {
     }
     
     private func fetchUsage() {
+        debugLog("fetchUsage: called")
         logger.info("fetchUsage started, isFetching: \(self.isFetching)")
-        guard !isFetching else { return }
+        
+        guard !isFetching else { 
+            debugLog("fetchUsage: already fetching, returning")
+            return 
+        }
         isFetching = true
+        debugLog("fetchUsage: showing loading")
         statusBarIconView.showLoading()
         usageView.showLoading()
         
-        Task {
+        debugLog("fetchUsage: creating Task")
+        Task { @MainActor in
+            debugLog("fetchUsage Task: calling performFetchUsage")
             await performFetchUsage()
+            debugLog("fetchUsage Task: performFetchUsage completed")
+            debugLog("fetchUsage Task: calling fetchMultiProviderData")
             await fetchMultiProviderData()
+            debugLog("fetchUsage Task: fetchMultiProviderData completed")
+            debugLog("fetchUsage Task: all done, setting isFetching=false")
+            self.isFetching = false
         }
+        debugLog("fetchUsage: Task created")
     }
     
     // MARK: - Fetch Usage Helpers (Split for Swift compiler type-check performance on older Xcode)
     
     private func performFetchUsage() async {
+        debugLog("performFetchUsage: started")
         let webView = AuthManager.shared.webView
+        debugLog("performFetchUsage: got webView")
         let customerId = await fetchCustomerId(webView: webView)
+        debugLog("performFetchUsage: fetchCustomerId returned \(customerId ?? "nil")")
         
         if let validId = customerId {
             self.customerId = validId
+            debugLog("performFetchUsage: calling fetchAndProcessUsageData")
             let success = await fetchAndProcessUsageData(webView: webView, customerId: validId)
+            debugLog("performFetchUsage: fetchAndProcessUsageData returned \(success)")
             if success {
-                isFetching = false
+                debugLog("performFetchUsage: success, returning (isFetching will be reset by Task)")
                 return
             }
         }
         
+        debugLog("performFetchUsage: calling handleFetchFallback")
         handleFetchFallback()
+        debugLog("performFetchUsage: completed")
     }
+    
+
     
     private func fetchCustomerId(webView: WKWebView) async -> String? {
         if let apiId = await fetchCustomerIdFromAPI(webView: webView) {
@@ -433,6 +478,7 @@ final class StatusBarController: NSObject {
     }
     
     private func fetchAndProcessUsageData(webView: WKWebView, customerId: String) async -> Bool {
+        debugLog("fetchAndProcessUsageData: started")
         let cardJS = """
         return await (async function() {
             try {
@@ -452,24 +498,36 @@ final class StatusBarController: NSObject {
         """
         
         do {
+            debugLog("fetchAndProcessUsageData: calling JS")
             let result = try await webView.callAsyncJavaScript(cardJS, arguments: [:], in: nil, contentWorld: .defaultClient)
+            debugLog("fetchAndProcessUsageData: JS completed")
             
             guard let rootDict = result as? [String: Any] else {
+                debugLog("fetchAndProcessUsageData: rootDict cast failed")
                 return false
             }
             
+            debugLog("fetchAndProcessUsageData: parsing usage")
             if let usage = parseUsageFromResponse(rootDict) {
                 currentUsage = usage
                 lastFetchTime = Date()
+                debugLog("fetchAndProcessUsageData: calling updateUIForSuccess")
                 updateUIForSuccess(usage: usage)
+                debugLog("fetchAndProcessUsageData: updateUIForSuccess completed")
+                debugLog("fetchAndProcessUsageData: calling saveCache")
                 saveCache(usage: usage)
+                debugLog("fetchAndProcessUsageData: saveCache completed")
                 logger.info("fetchUsage: Success")
+                debugLog("fetchAndProcessUsageData: returning true")
                 return true
             }
+            debugLog("fetchAndProcessUsageData: parseUsageFromResponse returned nil")
         } catch {
+            debugLog("fetchAndProcessUsageData: JS error - \(error.localizedDescription)")
             logger.error("fetchUsage: Error during JS execution - \(error.localizedDescription)")
         }
         
+        debugLog("fetchAndProcessUsageData: returning false")
         return false
     }
     
@@ -538,28 +596,35 @@ final class StatusBarController: NSObject {
     // MARK: - Multi-Provider Fetch
     
      private func fetchMultiProviderData() async {
+         debugLog("fetchMultiProviderData: started")
          let enabledProviders = ProviderManager.shared.getAllProviders().filter { provider in
              isProviderEnabled(provider.identifier) && provider.identifier != .copilot
          }
+         debugLog("fetchMultiProviderData: enabledProviders count=\(enabledProviders.count)")
          
          guard !enabledProviders.isEmpty else {
              logger.info("fetchMultiProviderData: No enabled providers, skipping")
+             debugLog("fetchMultiProviderData: No enabled providers, returning")
              return
          }
          
          logger.info("fetchMultiProviderData: Fetching \(enabledProviders.count) providers")
+         debugLog("fetchMultiProviderData: calling ProviderManager.fetchAll()")
          let results = await ProviderManager.shared.fetchAll()
+         debugLog("fetchMultiProviderData: fetchAll returned \(results.count) results")
          
          let filteredResults = results.filter { (identifier, _) in
              isProviderEnabled(identifier) && identifier != .copilot
          }
+         debugLog("fetchMultiProviderData: filteredResults count=\(filteredResults.count)")
          
-         await MainActor.run {
-             self.providerResults = filteredResults
-             self.updateMultiProviderMenu()
-         }
+         self.providerResults = filteredResults
+         debugLog("fetchMultiProviderData: calling updateMultiProviderMenu")
+         self.updateMultiProviderMenu()
+         debugLog("fetchMultiProviderData: updateMultiProviderMenu completed")
          
          logger.info("fetchMultiProviderData: Completed with \(filteredResults.count) results")
+         debugLog("fetchMultiProviderData: completed")
      }
     
     private func calculatePayAsYouGoTotal(providerResults: [ProviderIdentifier: ProviderResult], copilotUsage: CopilotUsage?) -> Double {
@@ -579,26 +644,40 @@ final class StatusBarController: NSObject {
     }
     
       private func updateMultiProviderMenu() {
-          guard let historyIndex = menu.items.firstIndex(of: historyMenuItem) else {
+          debugLog("updateMultiProviderMenu: started")
+          guard let separatorIndex = menu.items.firstIndex(where: { $0.isSeparatorItem }) else {
+              debugLog("updateMultiProviderMenu: no separator found, returning")
               return
           }
+          debugLog("updateMultiProviderMenu: separatorIndex=\(separatorIndex)")
           
           var itemsToRemove: [NSMenuItem] = []
-          for i in (historyIndex + 1)..<menu.items.count {
-              let item = menu.items[i]
-              if item.tag == 999 {
-                  itemsToRemove.append(item)
+          let startIndex = separatorIndex + 1
+          if startIndex < menu.items.count {
+              for i in startIndex..<menu.items.count {
+                  let item = menu.items[i]
+                  if item.tag == 999 {
+                      itemsToRemove.append(item)
+                  }
               }
           }
+          debugLog("updateMultiProviderMenu: removing \(itemsToRemove.count) old items")
           itemsToRemove.forEach { menu.removeItem($0) }
          
-         let hasCopilotData = currentUsage != nil
-         
-         guard !providerResults.isEmpty || hasCopilotData else {
-             return
-         }
+          let hasCopilotData = currentUsage != nil
+          debugLog("updateMultiProviderMenu: hasCopilotData=\(hasCopilotData), providerResults.count=\(providerResults.count)")
+          
+          if !providerResults.isEmpty {
+              let providerNames = providerResults.keys.map { $0.rawValue }.joined(separator: ", ")
+              debugLog("updateMultiProviderMenu: providers=[\(providerNames)]")
+          }
+          
+          guard !providerResults.isEmpty || hasCopilotData else {
+              debugLog("updateMultiProviderMenu: no data, returning")
+              return
+          }
         
-        var insertIndex = historyIndex + 1
+        var insertIndex = separatorIndex + 1
         
          let separator1 = NSMenuItem.separator()
          separator1.tag = 999
@@ -617,9 +696,9 @@ final class StatusBarController: NSObject {
          
          var hasPayAsYouGo = false
          
-          // Copilot Add-on (always show, even when $0.00)
-           if let copilotUsage = currentUsage {
-               hasPayAsYouGo = true
+           // Copilot Add-on (always show, even when $0.00)
+            if let copilotUsage = currentUsage {
+                hasPayAsYouGo = true
                let addOnItem = NSMenuItem(
                    title: String(format: "Copilot Add-on    $%.2f", copilotUsage.netBilledAmount),
                    action: nil,
@@ -631,31 +710,42 @@ final class StatusBarController: NSObject {
                let submenu = NSMenu()
                submenu.addItem(NSMenuItem(title: String(format: "Overage Requests: %.0f", copilotUsage.netQuantity), action: nil, keyEquivalent: ""))
                submenu.addItem(NSMenuItem(title: String(format: "Billed Amount: $%.2f", copilotUsage.netBilledAmount), action: nil, keyEquivalent: ""))
-               addOnItem.submenu = submenu
                
-               menu.insertItem(addOnItem, at: insertIndex)
-               insertIndex += 1
+                 submenu.addItem(NSMenuItem.separator())
+                 let historyItem = NSMenuItem(title: "Usage History", action: nil, keyEquivalent: "")
+                 historyItem.image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Usage History")
+                 debugLog("updateMultiProviderMenu: calling createCopilotHistorySubmenu")
+                 historyItem.submenu = createCopilotHistorySubmenu()
+                 debugLog("updateMultiProviderMenu: createCopilotHistorySubmenu completed")
+                 submenu.addItem(historyItem)
+                
+                addOnItem.submenu = submenu
+                
+                menu.insertItem(addOnItem, at: insertIndex)
+                insertIndex += 1
            }
          
-           for (identifier, result) in providerResults {
-              if case .payAsYouGo(_, let cost, _) = result.usage {
-                  hasPayAsYouGo = true
-                  let costValue = cost ?? 0.0
-                  let item = NSMenuItem(
-                      title: String(format: "%@    $%.2f", identifier.displayName, costValue),
-                      action: nil, keyEquivalent: ""
-                  )
-                  item.image = iconForProvider(identifier)
-                  item.tag = 999
-                 
-                  if let details = result.details, details.hasAnyValue {
-                      item.submenu = createDetailSubmenu(details, identifier: identifier)
-                  }
-                 
-                 menu.insertItem(item, at: insertIndex)
-                 insertIndex += 1
-             }
-         }
+           let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen, .openCode]
+           for identifier in payAsYouGoOrder {
+               guard let result = providerResults[identifier] else { continue }
+               if case .payAsYouGo(_, let cost, _) = result.usage {
+                   hasPayAsYouGo = true
+                   let costValue = cost ?? 0.0
+                   let item = NSMenuItem(
+                       title: String(format: "%@    $%.2f", identifier.displayName, costValue),
+                       action: nil, keyEquivalent: ""
+                   )
+                   item.image = iconForProvider(identifier)
+                   item.tag = 999
+                  
+                   if let details = result.details, details.hasAnyValue {
+                       item.submenu = createDetailSubmenu(details, identifier: identifier)
+                   }
+                  
+                  menu.insertItem(item, at: insertIndex)
+                  insertIndex += 1
+              }
+          }
         
         if !hasPayAsYouGo {
             let noItem = NSMenuItem(title: "  No providers", action: nil, keyEquivalent: "")
@@ -689,30 +779,37 @@ final class StatusBarController: NSObject {
               quotaItem.tag = 999
               
               let submenu = NSMenu()
-              submenu.addItem(NSMenuItem(title: String(format: "Used: %d / %d", used, limit), action: nil, keyEquivalent: ""))
-              submenu.addItem(NSMenuItem(title: String(format: "Remaining: %d", remaining), action: nil, keyEquivalent: ""))
-              submenu.addItem(NSMenuItem(title: String(format: "Free Quota: %d", limit), action: nil, keyEquivalent: ""))
+              
+              let filledBlocks = Int((Double(used) / Double(max(limit, 1))) * 10)
+              let emptyBlocks = 10 - filledBlocks
+              let progressBar = String(repeating: "═", count: filledBlocks) + String(repeating: "░", count: emptyBlocks)
+              submenu.addItem(NSMenuItem(title: "[\(progressBar)] \(used)/\(limit)", action: nil, keyEquivalent: ""))
+              
+              submenu.addItem(NSMenuItem(title: "This Month: \(used) used", action: nil, keyEquivalent: ""))
+              submenu.addItem(NSMenuItem(title: "Free Quota: \(limit)", action: nil, keyEquivalent: ""))
               quotaItem.submenu = submenu
               
               menu.insertItem(quotaItem, at: insertIndex)
               insertIndex += 1
           }
          
-          for (identifier, result) in providerResults {
-             if case .quotaBased(let remaining, let entitlement, _) = result.usage {
-                 hasQuota = true
-                 let percentage = entitlement > 0 ? (Double(remaining) / Double(entitlement)) * 100 : 0
-                 let item = createQuotaMenuItem(identifier: identifier, percentage: percentage)
-                 item.tag = 999
-                 
-                 if let details = result.details, details.hasAnyValue {
-                     item.submenu = createDetailSubmenu(details, identifier: identifier)
-                 }
-                 
-                 menu.insertItem(item, at: insertIndex)
-                 insertIndex += 1
-             }
-         }
+          let quotaOrder: [ProviderIdentifier] = [.claude, .codex, .geminiCLI, .antigravity]
+          for identifier in quotaOrder {
+              guard let result = providerResults[identifier] else { continue }
+              if case .quotaBased(let remaining, let entitlement, _) = result.usage {
+                  hasQuota = true
+                  let percentage = entitlement > 0 ? (Double(remaining) / Double(entitlement)) * 100 : 0
+                  let item = createQuotaMenuItem(identifier: identifier, percentage: percentage)
+                  item.tag = 999
+                  
+                  if let details = result.details, details.hasAnyValue {
+                      item.submenu = createDetailSubmenu(details, identifier: identifier)
+                  }
+                  
+                  menu.insertItem(item, at: insertIndex)
+                  insertIndex += 1
+              }
+          }
         
         if !hasQuota {
             let noItem = NSMenuItem(title: "  No providers", action: nil, keyEquivalent: "")
@@ -725,6 +822,7 @@ final class StatusBarController: NSObject {
         let separator3 = NSMenuItem.separator()
         separator3.tag = 999
         menu.insertItem(separator3, at: insertIndex)
+        debugLog("updateMultiProviderMenu: completed successfully")
     }
     
     private func createPayAsYouGoMenuItem(identifier: ProviderIdentifier, utilization: Double) -> NSMenuItem {
@@ -801,13 +899,13 @@ final class StatusBarController: NSObject {
         }
     }
     
-     private func updateUIForSuccess(usage: CopilotUsage) {
-         statusBarIconView.update(used: usage.usedRequests, limit: usage.limitRequests, cost: usage.netBilledAmount)
-         usageView.update(usage: usage)
-         signInItem.isHidden = true
-         updateHistorySubmenu()
-         updateMultiProviderMenu()
-     }
+      private func updateUIForSuccess(usage: CopilotUsage) {
+          statusBarIconView.update(used: usage.usedRequests, limit: usage.limitRequests, cost: usage.netBilledAmount)
+          usageView.update(usage: usage)
+          signInItem.isHidden = true
+          updateHistorySubmenu()
+          updateMultiProviderMenu()
+      }
     
     private func updateUIForLoggedOut() {
         statusBarIconView.showError()
@@ -1068,31 +1166,42 @@ final class StatusBarController: NSObject {
     
 
     private func updateHistorySubmenu() {
+        debugLog("updateHistorySubmenu: started")
         let state = getHistoryUIState()
+        debugLog("updateHistorySubmenu: getHistoryUIState completed")
         historySubmenu.removeAllItems()
+        debugLog("updateHistorySubmenu: removeAllItems completed")
         
         if state.hasNoData {
+            debugLog("updateHistorySubmenu: hasNoData=true, returning early")
             let item = NSMenuItem(title: "No data", action: nil, keyEquivalent: "")
             item.image = NSImage(systemSymbolName: "tray", accessibilityDescription: "No data")
             item.isEnabled = false
             historySubmenu.addItem(item)
             return
         }
+        debugLog("updateHistorySubmenu: hasNoData=false, continuing")
         
         if let prediction = state.prediction {
+            debugLog("updateHistorySubmenu: prediction exists, processing")
             let formatter = NumberFormatter()
             formatter.numberStyle = .decimal
             formatter.maximumFractionDigits = 0
             
+            debugLog("updateHistorySubmenu: creating monthlyText")
             let monthlyText = "Predicted EOM: \(formatter.string(from: NSNumber(value: prediction.predictedMonthlyRequests)) ?? "0") requests"
+            debugLog("updateHistorySubmenu: creating monthlyItem")
             let monthlyItem = NSMenuItem(title: monthlyText, action: nil, keyEquivalent: "")
             monthlyItem.image = NSImage(systemSymbolName: "chart.line.uptrend.xyaxis", accessibilityDescription: "Predicted EOM")
             monthlyItem.isEnabled = false
+            debugLog("updateHistorySubmenu: setting attributedTitle")
             monthlyItem.attributedTitle = NSAttributedString(
                 string: monthlyText,
                 attributes: [.font: NSFont.boldSystemFont(ofSize: 13)]
             )
+            debugLog("updateHistorySubmenu: adding monthlyItem to submenu")
             historySubmenu.addItem(monthlyItem)
+            debugLog("updateHistorySubmenu: monthlyItem added")
             
             if prediction.predictedBilledAmount > 0 {
                 let costText = String(format: "Predicted Add-on: $%.2f", prediction.predictedBilledAmount)
@@ -1121,17 +1230,24 @@ final class StatusBarController: NSObject {
                 historySubmenu.addItem(confItem)
             }
             
+            debugLog("updateHistorySubmenu: adding separator after prediction")
             historySubmenu.addItem(NSMenuItem.separator())
+            debugLog("updateHistorySubmenu: separator added")
+        } else {
+            debugLog("updateHistorySubmenu: no prediction data")
         }
         
         if state.isStale {
+            debugLog("updateHistorySubmenu: data is stale, adding stale item")
             let staleItem = NSMenuItem(title: "Data is stale", action: nil, keyEquivalent: "")
             staleItem.image = NSImage(systemSymbolName: "clock.badge.exclamationmark", accessibilityDescription: "Data is stale")
             staleItem.isEnabled = false
             historySubmenu.addItem(staleItem)
+            debugLog("updateHistorySubmenu: stale item added")
         }
         
         if let history = state.history {
+            debugLog("updateHistorySubmenu: history exists, processing \(history.recentDays.count) days")
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "MMM d"
             dateFormatter.timeZone = TimeZone(identifier: "UTC")
@@ -1159,12 +1275,17 @@ final class StatusBarController: NSObject {
                 )
                 historySubmenu.addItem(item)
             }
+            debugLog("updateHistorySubmenu: all history items added")
+        } else {
+            debugLog("updateHistorySubmenu: no history data")
         }
         
+        debugLog("updateHistorySubmenu: adding final separator and prediction period menu")
         historySubmenu.addItem(NSMenuItem.separator())
         let predictionPeriodItem = NSMenuItem(title: "Prediction Period", action: nil, keyEquivalent: "")
         predictionPeriodItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Prediction Period")
         predictionPeriodItem.submenu = predictionPeriodMenu
         historySubmenu.addItem(predictionPeriodItem)
+        debugLog("updateHistorySubmenu: completed successfully")
     }
 }

@@ -31,21 +31,14 @@ final class OpenCodeZenProvider: ProviderProtocol {
     // MARK: - ProviderProtocol
     
     func fetch() async throws -> ProviderResult {
-        // Check if opencode CLI exists
         guard FileManager.default.fileExists(atPath: opencodePath.path) else {
             logger.error("OpenCode CLI not found at \(self.opencodePath.path)")
             throw ProviderError.providerError("OpenCode CLI not found at \(opencodePath.path)")
         }
         
-        // Fetch 30-day statistics
-        let output = try await runOpenCodeStats(days: 30)
+        let output = try await runOpenCodeStats(days: 7)
         let stats = try parseStats(output)
         
-        // Calculate daily history (last 7 days)
-        let dailyHistory = try await calculateDailyHistory()
-        
-        // Calculate utilization as percentage of arbitrary monthly limit ($1000)
-        // API requires maximum 24kHz sample rate, so we resample here.
         let monthlyLimit = 1000.0
         let utilization = min((stats.totalCost / monthlyLimit) * 100, 100)
         
@@ -56,7 +49,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
             sessions: stats.sessions,
             messages: stats.messages,
             avgCostPerDay: stats.avgCostPerDay,
-            dailyHistory: dailyHistory,
+            dailyHistory: [],
             monthlyCost: stats.totalCost
         )
         
@@ -68,40 +61,51 @@ final class OpenCodeZenProvider: ProviderProtocol {
     
     // MARK: - Private Helpers
     
-    /// Executes opencode stats command with specified days
-    /// - Parameter days: Number of days to query (1-365)
-    /// - Returns: Raw CLI output as string
-    /// - Throws: ProviderError if CLI execution fails
     private func runOpenCodeStats(days: Int) async throws -> String {
-        let process = Process()
-        process.executableURL = opencodePath
-        process.arguments = ["stats", "--days", "\(days)", "--models", "10"]
-        
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        
-        do {
-            try process.run()
-            process.waitUntilExit()
+        return try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            process.executableURL = opencodePath
+            process.arguments = ["stats", "--days", "\(days)", "--models", "10"]
             
-            guard process.terminationStatus == 0 else {
-                logger.error("OpenCode CLI failed with exit code \(process.terminationStatus)")
-                throw ProviderError.providerError("OpenCode CLI failed with exit code \(process.terminationStatus)")
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            
+            var outputData = Data()
+            
+            pipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if !data.isEmpty {
+                    outputData.append(data)
+                }
             }
             
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let output = String(data: data, encoding: .utf8) else {
-                logger.error("Failed to decode CLI output as UTF-8")
-                throw ProviderError.decodingError("Failed to decode CLI output")
+            process.terminationHandler = { proc in
+                pipe.fileHandleForReading.readabilityHandler = nil
+                
+                let remainingData = pipe.fileHandleForReading.readDataToEndOfFile()
+                if !remainingData.isEmpty {
+                    outputData.append(remainingData)
+                }
+                
+                if proc.terminationStatus != 0 {
+                    continuation.resume(throwing: ProviderError.providerError("OpenCode CLI failed with exit code \(proc.terminationStatus)"))
+                    return
+                }
+                
+                guard let output = String(data: outputData, encoding: .utf8) else {
+                    continuation.resume(throwing: ProviderError.decodingError("Failed to decode CLI output"))
+                    return
+                }
+                
+                continuation.resume(returning: output)
             }
             
-            return output
-        } catch let error as ProviderError {
-            throw error
-        } catch {
-            logger.error("Failed to execute OpenCode CLI: \(error.localizedDescription)")
-            throw ProviderError.networkError("Failed to execute CLI: \(error.localizedDescription)")
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: ProviderError.networkError("Failed to execute CLI: \(error.localizedDescription)"))
+            }
         }
     }
     
@@ -189,33 +193,4 @@ final class OpenCodeZenProvider: ProviderProtocol {
         )
     }
     
-    /// Calculates daily usage history by running stats for days 1-7
-    /// Uses cumulative differences to compute per-day costs
-    /// - Returns: Array of DailyUsage for the last 7 days
-    /// - Throws: ProviderError if CLI execution or parsing fails
-    private func calculateDailyHistory() async throws -> [DailyUsage] {
-        var history: [DailyUsage] = []
-        var previousCost = 0.0
-        
-        // Run stats for days 1-7 and compute differences
-        for day in (1...7).reversed() {
-            let output = try await runOpenCodeStats(days: day)
-            let stats = try parseStats(output)
-            let dailyCost = stats.totalCost - previousCost
-            
-            let date = Calendar.current.date(byAdding: .day, value: -(day - 1), to: Date())!
-            history.append(DailyUsage(
-                date: date,
-                includedRequests: 0,  // Not applicable for OpenCode Zen
-                billedRequests: 0,    // Not applicable
-                grossAmount: dailyCost,
-                billedAmount: dailyCost
-            ))
-            
-            previousCost = stats.totalCost
-        }
-        
-        logger.debug("Calculated daily history for \(history.count) days")
-        return history.reversed()
-    }
 }

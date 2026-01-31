@@ -195,6 +195,11 @@ class UsagePredictor {
     ///   - remainingDays: Total days remaining until EOM
     /// - Returns: (remaining weekdays, remaining weekends)
     private func countRemainingWeekdaysAndWeekends(from today: Date, remainingDays: Int) -> (weekdays: Int, weekends: Int) {
+        // Guard against invalid range: if remainingDays <= 0, return (0, 0)
+        guard remainingDays > 0 else {
+            return (0, 0)
+        }
+        
         var weekdays = 0
         var weekends = 0
         
