@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run CopilotMonitor",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${env:HOME}/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/CopilotMonitor.app/Contents/MacOS/CopilotMonitor",
+      "preLaunchTask": "Build (Debug)",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Attach to CopilotMonitor",
+      "type": "lldb",
+      "request": "attach",
+      "program": "${env:HOME}/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/CopilotMonitor.app/Contents/MacOS/CopilotMonitor",
+      "pid": "${command:pickProcess}"
+    }
+  ]
+}

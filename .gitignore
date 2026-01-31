@@ -30,3 +30,10 @@ api.txt
 *.dmg
 dist/
 exportOptions.plist
+
+# Node.js (CI tools)
+node_modules/
+package-lock.json
+
+# VSCode local settings
+.vscode/settings.local.json

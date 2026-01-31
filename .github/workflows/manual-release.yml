@@ -299,7 +299,7 @@ jobs:
           git push origin HEAD:main --follow-tags
       
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.new_version.outputs.new_version }}
           name: Copilot Monitor ${{ steps.new_version.outputs.new_version }}

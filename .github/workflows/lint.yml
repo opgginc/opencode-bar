@@ -1,0 +1,59 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - '**.swift'
+      - '.github/workflows/lint.yml'
+      - '.swiftlint.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - '**.swift'
+      - '.github/workflows/lint.yml'
+      - '.swiftlint.yml'
+  workflow_dispatch:
+
+jobs:
+  swiftlint:
+    name: SwiftLint
+    runs-on: macos-14
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Install SwiftLint
+        run: brew install swiftlint
+      
+      - name: Run SwiftLint
+        run: |
+          cd CopilotMonitor/CopilotMonitor
+          swiftlint lint --reporter github-actions-logging
+        continue-on-error: true
+      
+      - name: SwiftLint Strict Check
+        run: |
+          cd CopilotMonitor/CopilotMonitor
+          swiftlint lint --strict
+
+  actionlint:
+    name: GitHub Actions Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Install actionlint
+        run: |
+          curl -sL https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz | tar xzv -C /tmp
+          sudo mv /tmp/actionlint /usr/local/bin/
+      
+      - name: Run actionlint
+        run: actionlint -color
