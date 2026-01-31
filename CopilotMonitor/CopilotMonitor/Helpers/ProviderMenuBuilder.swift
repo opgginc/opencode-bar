@@ -293,6 +293,37 @@ extension StatusBarController {
         return submenu
     }
     
+    func createGeminiAccountSubmenu(_ account: GeminiAccountQuota) -> NSMenu {
+        let submenu = NSMenu()
+        
+        for (model, quota) in account.modelBreakdown.sorted(by: { $0.key < $1.key }) {
+            let item = NSMenuItem()
+            item.view = createDisabledLabelView(text: String(format: "%@: %.0f%%", model, quota))
+            submenu.addItem(item)
+        }
+        
+        submenu.addItem(NSMenuItem.separator())
+        
+        let emailItem = NSMenuItem()
+        emailItem.view = createDisabledLabelView(
+            text: "Email: \(account.email)",
+            icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Email")
+        )
+        submenu.addItem(emailItem)
+        
+        submenu.addItem(NSMenuItem.separator())
+        
+        let authItem = NSMenuItem()
+        authItem.view = createDisabledLabelView(
+            text: "Token From: \(account.authSource)",
+            icon: NSImage(systemSymbolName: "key", accessibilityDescription: "Auth Source"),
+            multiline: true
+        )
+        submenu.addItem(authItem)
+        
+        return submenu
+    }
+    
     func createCopilotHistorySubmenu() -> NSMenu {
         debugLog("createCopilotHistorySubmenu: started")
         let submenu = NSMenu()

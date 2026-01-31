@@ -5,6 +5,14 @@ struct ProviderResult {
     let details: DetailedUsage?
 }
 
+struct GeminiAccountQuota: Codable {
+    let accountIndex: Int
+    let email: String
+    let remainingPercentage: Double
+    let modelBreakdown: [String: Double]
+    let authSource: String
+}
+
 struct DetailedUsage {
     // Original fields
     let dailyUsage: Double?
@@ -58,6 +66,9 @@ struct DetailedUsage {
     // Authentication source info (displayed as "Token From:" or "Cookies From:")
     let authSource: String?
     
+    // Multiple Gemini accounts support
+    let geminiAccounts: [GeminiAccountQuota]?
+    
     init(
         dailyUsage: Double? = nil,
         weeklyUsage: Double? = nil,
@@ -88,7 +99,8 @@ struct DetailedUsage {
         monthlyCost: Double? = nil,
         creditsRemaining: Double? = nil,
         creditsTotal: Double? = nil,
-        authSource: String? = nil
+        authSource: String? = nil,
+        geminiAccounts: [GeminiAccountQuota]? = nil
     ) {
         self.dailyUsage = dailyUsage
         self.weeklyUsage = weeklyUsage
@@ -120,6 +132,7 @@ struct DetailedUsage {
         self.creditsRemaining = creditsRemaining
         self.creditsTotal = creditsTotal
         self.authSource = authSource
+        self.geminiAccounts = geminiAccounts
     }
 }
 
@@ -133,7 +146,7 @@ extension DetailedUsage: Codable {
         case creditsBalance, planType, extraUsageEnabled
         case sessions, messages, avgCostPerDay, email
         case dailyHistory, monthlyCost, creditsRemaining, creditsTotal
-        case authSource
+        case authSource, geminiAccounts
     }
     
     init(from decoder: Decoder) throws {
@@ -168,6 +181,7 @@ extension DetailedUsage: Codable {
         creditsRemaining = try container.decodeIfPresent(Double.self, forKey: .creditsRemaining)
         creditsTotal = try container.decodeIfPresent(Double.self, forKey: .creditsTotal)
         authSource = try container.decodeIfPresent(String.self, forKey: .authSource)
+        geminiAccounts = try container.decodeIfPresent([GeminiAccountQuota].self, forKey: .geminiAccounts)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -202,6 +216,7 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(creditsRemaining, forKey: .creditsRemaining)
         try container.encodeIfPresent(creditsTotal, forKey: .creditsTotal)
         try container.encodeIfPresent(authSource, forKey: .authSource)
+        try container.encodeIfPresent(geminiAccounts, forKey: .geminiAccounts)
     }
 }
 
@@ -221,6 +236,6 @@ extension DetailedUsage {
             || email != nil
             || dailyHistory != nil || monthlyCost != nil
             || creditsRemaining != nil || creditsTotal != nil
-            || authSource != nil
+            || authSource != nil || geminiAccounts != nil
     }
 }

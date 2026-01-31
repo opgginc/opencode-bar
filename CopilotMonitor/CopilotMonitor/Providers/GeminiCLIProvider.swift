@@ -34,20 +34,60 @@ final class GeminiCLIProvider: ProviderProtocol {
     
     // MARK: - ProviderProtocol Implementation
     
-    /// Fetches Gemini CLI quota data from cloudcode-pa.googleapis.com
-    /// - Returns: ProviderResult with remaining quota percentage (worst-case across all models)
-    /// - Throws: ProviderError if fetch fails
     func fetch() async throws -> ProviderResult {
-        let userEmail = tokenManager.getGeminiAccountEmail()
+        let allAccounts = tokenManager.getAllGeminiAccounts()
         
-        guard let accessToken = try await tokenManager.refreshGeminiAccessTokenFromStorage() else {
-            logger.error("Failed to refresh Gemini access token")
-            throw ProviderError.authenticationFailed("Unable to refresh Gemini OAuth token")
+        guard !allAccounts.isEmpty else {
+            logger.error("No Gemini accounts found")
+            throw ProviderError.authenticationFailed("No Gemini accounts configured")
         }
         
-        // Build request
+        var geminiAccountQuotas: [GeminiAccountQuota] = []
+        var overallMinPercentage = 100.0
+        
+        for account in allAccounts {
+            do {
+                let quotaResult = try await fetchQuotaForAccount(
+                    refreshToken: account.refreshToken,
+                    accountIndex: account.index,
+                    email: account.email
+                )
+                geminiAccountQuotas.append(quotaResult)
+                overallMinPercentage = min(overallMinPercentage, quotaResult.remainingPercentage)
+            } catch {
+                logger.warning("Failed to fetch quota for account #\(account.index + 1) (\(account.email)): \(error.localizedDescription)")
+            }
+        }
+        
+        guard !geminiAccountQuotas.isEmpty else {
+            logger.error("Failed to fetch quota for any Gemini account")
+            throw ProviderError.providerError("All account quota fetches failed")
+        }
+        
+        logger.info("Gemini CLI: Fetched quota for \(geminiAccountQuotas.count)/\(allAccounts.count) accounts, overall min: \(overallMinPercentage)%")
+        
+        let usage = ProviderUsage.quotaBased(
+            remaining: Int(overallMinPercentage),
+            entitlement: 100,
+            overagePermitted: false
+        )
+        
+        let details = DetailedUsage(
+            authSource: "~/.config/opencode/antigravity-accounts.json",
+            geminiAccounts: geminiAccountQuotas
+        )
+        
+        return ProviderResult(usage: usage, details: details)
+    }
+    
+    // MARK: - Private Helpers
+    
+    private func fetchQuotaForAccount(refreshToken: String, accountIndex: Int, email: String) async throws -> GeminiAccountQuota {
+        guard let accessToken = await tokenManager.refreshGeminiAccessToken(refreshToken: refreshToken) else {
+            throw ProviderError.authenticationFailed("Unable to refresh token for account #\(accountIndex + 1)")
+        }
+        
         guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else {
-            logger.error("Invalid Gemini quota API URL")
             throw ProviderError.networkError("Invalid API endpoint")
         }
         
@@ -57,80 +97,45 @@ final class GeminiCLIProvider: ProviderProtocol {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = "{}".data(using: .utf8)
         
-        // Execute request
         let (data, response) = try await session.data(for: request)
         
-        // Check HTTP status
         guard let httpResponse = response as? HTTPURLResponse else {
-            logger.error("Invalid response type from Gemini API")
             throw ProviderError.networkError("Invalid response type")
         }
         
-        // Handle authentication errors
         if httpResponse.statusCode == 401 {
-            logger.warning("Gemini API returned 401 - token expired")
-            throw ProviderError.authenticationFailed("Token expired or invalid")
+            throw ProviderError.authenticationFailed("Token expired for account #\(accountIndex + 1)")
         }
         
-        // Handle other HTTP errors
         guard (200...299).contains(httpResponse.statusCode) else {
-            logger.error("Gemini API returned status \(httpResponse.statusCode)")
             throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
         }
         
-        // Parse response
-        do {
-            let decoder = JSONDecoder()
-            let response = try decoder.decode(GeminiQuotaResponse.self, from: data)
-            
-            guard !response.buckets.isEmpty else {
-                logger.error("Gemini API response contains no buckets")
-                throw ProviderError.decodingError("Empty buckets array")
-            }
-            
-            // Build per-model quota breakdown
-            var modelBreakdown: [String: Double] = [:]
-            var minFraction = 1.0
-            
-            for bucket in response.buckets {
-                let percentage = bucket.remainingFraction * 100.0
-                modelBreakdown[bucket.modelId] = percentage
-                minFraction = min(minFraction, bucket.remainingFraction)
-            }
-            
-            // Convert minimum fraction (0.0-1.0) to percentage (0-100)
-            let remainingPercentage = minFraction * 100.0
-            
-            // Find earliest reset time
-            let resetDates = response.buckets.compactMap { bucket -> Date? in
-                let formatter = ISO8601DateFormatter()
-                return formatter.date(from: bucket.resetTime)
-            }
-            let earliestReset = resetDates.min()
-            
-            logger.info("Gemini CLI quota fetched: \(remainingPercentage)% remaining (min across \(response.buckets.count) models), resets at \(earliestReset?.description ?? "unknown")")
-            
-            // Return as quota-based usage with remaining percentage
-            // Using 100 as entitlement since we're working with percentages
-            let usage = ProviderUsage.quotaBased(
-                remaining: Int(remainingPercentage),
-                entitlement: 100,
-                overagePermitted: false
-            )
-            
-            // Create DetailedUsage with per-model breakdown
-            let details = DetailedUsage(
-                modelBreakdown: modelBreakdown,
-                email: userEmail,
-                authSource: "~/.config/opencode/antigravity-accounts.json"
-            )
-            return ProviderResult(usage: usage, details: details)
-        } catch let error as DecodingError {
-            logger.error("Failed to decode Gemini response: \(error.localizedDescription)")
-            throw ProviderError.decodingError("Invalid response format: \(error.localizedDescription)")
-        } catch {
-            logger.error("Unexpected error parsing Gemini response: \(error.localizedDescription)")
-            throw ProviderError.providerError("Failed to parse response: \(error.localizedDescription)")
+        let quotaResponse = try JSONDecoder().decode(GeminiQuotaResponse.self, from: data)
+        
+        guard !quotaResponse.buckets.isEmpty else {
+            throw ProviderError.decodingError("Empty buckets array")
         }
+        
+        var modelBreakdown: [String: Double] = [:]
+        var minFraction = 1.0
+        
+        for bucket in quotaResponse.buckets {
+            let percentage = bucket.remainingFraction * 100.0
+            modelBreakdown[bucket.modelId] = percentage
+            minFraction = min(minFraction, bucket.remainingFraction)
+        }
+        
+        let remainingPercentage = minFraction * 100.0
+        
+        logger.info("Gemini CLI account #\(accountIndex + 1) (\(email)): \(remainingPercentage)% remaining")
+        
+        return GeminiAccountQuota(
+            accountIndex: accountIndex,
+            email: email,
+            remainingPercentage: remainingPercentage,
+            modelBreakdown: modelBreakdown,
+            authSource: "~/.config/opencode/antigravity-accounts.json"
+        )
     }
 }

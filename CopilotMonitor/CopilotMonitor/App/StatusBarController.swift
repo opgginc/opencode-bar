@@ -869,30 +869,68 @@ final class StatusBarController: NSObject {
               insertIndex += 1
           }
          
-           let quotaOrder: [ProviderIdentifier] = [.claude, .codex, .geminiCLI, .antigravity]
-           for identifier in quotaOrder {
-               guard isProviderEnabled(identifier) else { continue }
-               
-               if let result = providerResults[identifier] {
-                   if case .quotaBased(let remaining, let entitlement, _) = result.usage {
-                       hasQuota = true
-                       let percentage = entitlement > 0 ? (Double(remaining) / Double(entitlement)) * 100 : 0
-                       let item = createQuotaMenuItem(identifier: identifier, percentage: percentage)
-                       item.tag = 999
-                       
-                       if let details = result.details, details.hasAnyValue {
-                           item.submenu = createDetailSubmenu(details, identifier: identifier)
-                       }
-                       
-                       menu.insertItem(item, at: insertIndex)
-                       insertIndex += 1
-                   }
-                } else if loadingProviders.contains(identifier) {
+           let quotaOrder: [ProviderIdentifier] = [.claude, .codex, .antigravity]
+            for identifier in quotaOrder {
+                guard isProviderEnabled(identifier) else { continue }
+                
+                if let result = providerResults[identifier] {
+                    if case .quotaBased(let remaining, let entitlement, _) = result.usage {
+                        hasQuota = true
+                        let percentage = entitlement > 0 ? (Double(remaining) / Double(entitlement)) * 100 : 0
+                        let item = createQuotaMenuItem(identifier: identifier, percentage: percentage)
+                        item.tag = 999
+                        
+                        if let details = result.details, details.hasAnyValue {
+                            item.submenu = createDetailSubmenu(details, identifier: identifier)
+                        }
+                        
+                        menu.insertItem(item, at: insertIndex)
+                        insertIndex += 1
+                    }
+                 } else if loadingProviders.contains(identifier) {
+                     hasQuota = true
+                     let item = NSMenuItem()
+                     item.view = createDisabledLabelView(
+                         text: "\(identifier.displayName)    Loading...",
+                         icon: iconForProvider(identifier)
+                     )
+                     item.tag = 999
+                     menu.insertItem(item, at: insertIndex)
+                     insertIndex += 1
+                 }
+             }
+            
+            if isProviderEnabled(.geminiCLI) {
+                if let result = providerResults[.geminiCLI],
+                   let details = result.details,
+                   let geminiAccounts = details.geminiAccounts,
+                   !geminiAccounts.isEmpty {
+                    
+                    for account in geminiAccounts {
+                        hasQuota = true
+                        let accountNumber = account.accountIndex + 1
+                        let title = geminiAccounts.count > 1
+                            ? String(format: "Gemini CLI (#%d)    %.0f%% remaining", accountNumber, account.remainingPercentage)
+                            : String(format: "Gemini CLI    %.0f%% remaining", account.remainingPercentage)
+                        
+                        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                        item.image = iconForProvider(.geminiCLI)
+                        if account.remainingPercentage < 20 {
+                            item.image = tintedImage(iconForProvider(.geminiCLI), color: .systemRed)
+                        }
+                        item.tag = 999
+                        
+                        item.submenu = createGeminiAccountSubmenu(account)
+                        
+                        menu.insertItem(item, at: insertIndex)
+                        insertIndex += 1
+                    }
+                } else if loadingProviders.contains(.geminiCLI) {
                     hasQuota = true
                     let item = NSMenuItem()
                     item.view = createDisabledLabelView(
-                        text: "\(identifier.displayName)    Loading...",
-                        icon: iconForProvider(identifier)
+                        text: "Gemini CLI    Loading...",
+                        icon: iconForProvider(.geminiCLI)
                     )
                     item.tag = 999
                     menu.insertItem(item, at: insertIndex)

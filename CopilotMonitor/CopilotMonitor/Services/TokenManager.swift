@@ -183,6 +183,20 @@ final class TokenManager {
         return accounts.accounts[accounts.activeIndex].email
     }
     
+    /// Gets all Gemini accounts from Antigravity accounts file
+    /// - Returns: Array of (index, email, refreshToken) tuples for all accounts
+    func getAllGeminiAccounts() -> [(index: Int, email: String, refreshToken: String)] {
+        guard let accounts = readAntigravityAccounts() else { return [] }
+        return accounts.accounts.enumerated().map { (index, account) in
+            (index: index, email: account.email, refreshToken: account.refreshToken)
+        }
+    }
+    
+    /// Gets the count of registered Gemini accounts
+    func getGeminiAccountCount() -> Int {
+        return readAntigravityAccounts()?.accounts.count ?? 0
+    }
+    
     // MARK: - Gemini OAuth Token Refresh
     
     /// Refreshes Gemini OAuth access token using refresh token
