@@ -26,10 +26,15 @@ enum ConfidenceLevel: String {
 /// - Weighted prediction based on configurable days
 /// - Considers day-of-week patterns (weekday/weekend differences)
 class UsagePredictor {
-    // Use UTC calendar (DailyUsage.date is in UTC)
+    // UTC calendar for prediction calculations - safely initialized with fallback
     private let utcCalendar: Calendar = {
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "UTC")!
+        if let utc = TimeZone(identifier: "UTC") {
+            cal.timeZone = utc
+        } else {
+            // Fallback to system timezone if UTC is unavailable (should never happen)
+            cal.timeZone = TimeZone.current
+        }
         return cal
     }()
     
@@ -197,6 +202,11 @@ class UsagePredictor {
     private func countRemainingWeekdaysAndWeekends(from today: Date, remainingDays: Int) -> (weekdays: Int, weekends: Int) {
         var weekdays = 0
         var weekends = 0
+        
+        // Guard against negative remaining days (can happen on last day of month)
+        guard remainingDays > 0 else {
+            return (0, 0)
+        }
         
         for dayOffset in 1...remainingDays {
             guard let futureDate = utcCalendar.date(byAdding: .day, value: dayOffset, to: today) else {

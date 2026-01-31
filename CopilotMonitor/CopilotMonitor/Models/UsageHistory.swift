@@ -7,10 +7,15 @@ struct DailyUsage: Codable {
     let grossAmount: Double      // Gross amount
     let billedAmount: Double     // Add-on billed amount
     
-    // ⚠️ Fixed UTC calendar: Date is stored in UTC, so weekday check also uses UTC
+    // UTC calendar for date calculations - safely initialized with fallback
     private static let utcCalendar: Calendar = {
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "UTC")!
+        if let utc = TimeZone(identifier: "UTC") {
+            cal.timeZone = utc
+        } else {
+            // Fallback to system timezone if UTC is unavailable (should never happen)
+            cal.timeZone = TimeZone.current
+        }
         return cal
     }()
     

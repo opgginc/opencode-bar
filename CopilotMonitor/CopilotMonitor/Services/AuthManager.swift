@@ -19,7 +19,11 @@ final class AuthManager: NSObject {
         logger.info("setupWebView 호출 예정")
         setupWebView()
         logger.info("setupWebView 완료, _webView: \(self._webView == nil ? "nil" : "존재")")
-        return _webView!
+        guard let view = _webView else {
+            logger.error("WKWebView initialization failed")
+            fatalError("WKWebView is nil after setupWebView()")
+        }
+        return view
     }
     
     private var isCheckingLogin = false

@@ -1233,7 +1233,9 @@ final class StatusBarController: NSObject {
             dateFormatter.timeZone = TimeZone(identifier: "UTC")
             
             var utcCalendar = Calendar(identifier: .gregorian)
-            utcCalendar.timeZone = TimeZone(identifier: "UTC")!
+            if let utc = TimeZone(identifier: "UTC") {
+                utcCalendar.timeZone = utc
+            }
             let today = utcCalendar.startOfDay(for: Date())
             
             let numberFormatter = NumberFormatter()
