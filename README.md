@@ -68,7 +68,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/kargn
 
 > **Note**: If you see a "App is damaged" error, run this command in Terminal:
 > ```bash
-> xattr -cr "/Applications/OpenCode Usage Monitor.app"
+> xattr -cr "/Applications/CopilotMonitor.app"
 > ```
 
 ### Build from Source

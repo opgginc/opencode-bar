@@ -199,16 +199,22 @@ final class TokenManager {
     
     // MARK: - Gemini OAuth Token Refresh
     
+    /// Public Google OAuth client credentials for CLI/installed apps
+    /// These are NOT secrets - they are public client IDs/secrets for installed applications
+    /// See: https://developers.google.com/identity/protocols/oauth2/native-app
+    private static let geminiClientId = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+    private static let geminiClientSecret = "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"
+    
     /// Refreshes Gemini OAuth access token using refresh token
     /// - Parameters:
     ///   - refreshToken: The refresh token from Antigravity accounts
-    ///   - clientId: Google OAuth client ID (default: OpenCode's client ID)
-    ///   - clientSecret: Google OAuth client secret (default: OpenCode's client secret)
+    ///   - clientId: Google OAuth client ID (default: public CLI client ID)
+    ///   - clientSecret: Google OAuth client secret (default: public CLI client secret)
     /// - Returns: New access token if successful, nil otherwise
     func refreshGeminiAccessToken(
         refreshToken: String,
-        clientId: String = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
-        clientSecret: String = "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"
+        clientId: String = TokenManager.geminiClientId,
+        clientSecret: String = TokenManager.geminiClientSecret
     ) async -> String? {
         let endpoint = "https://oauth2.googleapis.com/token"
         

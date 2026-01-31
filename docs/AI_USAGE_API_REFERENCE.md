@@ -135,9 +135,11 @@ Antigravity는 **2개의 독립적인 쿼터 시스템**이 있습니다:
 ```bash
 REFRESH=$(jq -r '.accounts[0].refreshToken' ~/.config/opencode/antigravity-accounts.json)
 
+# Use the public Google OAuth client credentials for CLI/installed apps
+# See: https://developers.google.com/identity/protocols/oauth2/native-app
 ACCESS=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
-  -d "client_id=1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com" \
-  -d "client_secret=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" \
+  -d "client_id=$GEMINI_CLIENT_ID" \
+  -d "client_secret=$GEMINI_CLIENT_SECRET" \
   -d "refresh_token=$REFRESH" \
   -d "grant_type=refresh_token" | jq -r '.access_token')
 
@@ -223,8 +225,10 @@ Client ID: app_EMoamEEZ73f0CkXaXp7hrann
 
 ### Antigravity
 ```
-Client ID:     1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com
-Client Secret: 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
+# Public Google OAuth client for CLI/installed apps
+# These are NOT secrets - see https://developers.google.com/identity/protocols/oauth2/native-app
+Client ID:     Set GEMINI_CLIENT_ID environment variable
+Client Secret: Set GEMINI_CLIENT_SECRET environment variable
 ```
 
 ---

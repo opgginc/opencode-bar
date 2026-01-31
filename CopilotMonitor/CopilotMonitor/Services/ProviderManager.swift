@@ -43,6 +43,7 @@ final class ProviderManager {
     }
     
     private func debugLog(_ message: String) {
+        #if DEBUG
         let msg = "[\(Date())] ProviderManager: \(message)\n"
         if let data = msg.data(using: .utf8) {
             let path = "/tmp/provider_debug.log"
@@ -56,6 +57,7 @@ final class ProviderManager {
                 try? data.write(to: URL(fileURLWithPath: path))
             }
         }
+        #endif
     }
     
     // MARK: - Public API
@@ -118,13 +120,15 @@ final class ProviderManager {
     /// Calculates total overage cost from all pay-as-you-go providers
     /// - Parameter results: Results from fetchAll()
     /// - Returns: Total cost in dollars (0.0 if no overage)
-    /// - Note: Current ProviderUsage model doesn't include cost field
-    ///         This is a placeholder implementation until model is enhanced
     func calculateTotalOverageCost(from results: [ProviderIdentifier: ProviderResult]) -> Double {
-        // TODO: Enhance ProviderUsage.payAsYouGo to include cost field
-        // Current implementation returns 0.0 as cost data not available in model
-        logger.debug("Total overage cost: $0.00 (cost tracking not yet implemented in ProviderUsage)")
-        return 0.0
+        var totalCost = 0.0
+        for (_, result) in results {
+            if let cost = result.usage.cost {
+                totalCost += cost
+            }
+        }
+        logger.debug("Total overage cost: $\(String(format: "%.2f", totalCost))")
+        return totalCost
     }
     
     /// Identifies providers with low quota (<20% remaining)
@@ -199,15 +203,13 @@ final class ProviderManager {
         }
     }
     
-    /// Thread-safe cache update (async-safe using Task isolation)
+    /// Thread-safe cache update
     /// - Parameters:
     ///   - identifier: Provider identifier
     ///   - result: Result data to cache
     private func updateCache(identifier: ProviderIdentifier, result: ProviderResult) async {
-        // Using Task.detached to avoid inheriting actor context
-        // Cache updates are non-critical and can be async
-        Task.detached { [weak self] in
-            self?.cachedResults[identifier] = result
+        await MainActor.run {
+            self.cachedResults[identifier] = result
         }
     }
     

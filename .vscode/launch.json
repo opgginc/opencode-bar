@@ -5,7 +5,7 @@
             "name": "🐛 Debug CopilotMonitor (LLDB)",
             "type": "lldb",
             "request": "launch",
-            "program": "${userHome}/Library/Developer/Xcode/DerivedData/CopilotMonitor-gbdtpkhljpynlzfpksypzhzgbsmz/Build/Products/Debug/CopilotMonitor.app/Contents/MacOS/CopilotMonitor",
+            "program": "${userHome}/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/CopilotMonitor.app/Contents/MacOS/CopilotMonitor",
             "preLaunchTask": "🔄 Kill + Build CopilotMonitor",
             "terminal": "integrated",
             "stopOnEntry": false,

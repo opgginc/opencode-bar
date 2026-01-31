@@ -21,7 +21,6 @@ from browser_cookies import (
     get_all_browser_profiles,
     get_github_cookies,
     build_cookie_header,
-    BrowserProfile,
     CRYPTO_BACKEND
 )
 
@@ -156,7 +155,6 @@ def print_summary(api: GitHubCopilotAPI) -> None:
     net_billed = usage.get('netBilledAmount', 0)
     
     total_used = net_qty + discount_qty
-    remaining = max(0, entitlement - total_used)
     pct = (total_used / entitlement * 100) if entitlement > 0 else 0
     
     print(f"Used: {total_used:.0f} / {entitlement} ({pct:.1f}%)")

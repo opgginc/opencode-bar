@@ -122,9 +122,11 @@ final class MultiProviderStatusBarIconView: NSView {
     private func drawDollarIcon(at origin: NSPoint, isDark: Bool) {
         let text = "$"
         let font = NSFont.boldSystemFont(ofSize: 14)
+        // Use adaptive color for light/dark mode visibility
+        let textColor = isDark ? NSColor.white : NSColor.black
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.white
+            .foregroundColor: textColor
         ]
         let attrString = NSAttributedString(string: text, attributes: attributes)
         attrString.draw(at: origin)
@@ -142,9 +144,16 @@ final class MultiProviderStatusBarIconView: NSView {
         case .copilot:
             iconName = "CopilotIcon"
         case .openRouter:
-            iconName = "OpenRouterIcon"
+            // No OpenRouterIcon asset exists, use SF Symbol fallback
+            iconName = "dollarsign.circle"
         case .openCode:
-            iconName = "OpenCodeIcon"
+            // Asset is named "OpencodeIcon" (lowercase 'c')
+            iconName = "OpencodeIcon"
+        case .antigravity:
+            iconName = "AntigravityIcon"
+        case .openCodeZen:
+            // OpenCode Zen uses same icon as OpenCode
+            iconName = "OpencodeIcon"
         }
         
         guard let icon = NSImage(named: iconName) else {
@@ -181,9 +190,11 @@ final class MultiProviderStatusBarIconView: NSView {
     }
     
     private func drawText(_ text: String, at origin: NSPoint, font: NSFont, isDark: Bool) {
+        // Use adaptive color for light/dark mode visibility
+        let textColor = isDark ? NSColor.white : NSColor.black
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.white
+            .foregroundColor: textColor
         ]
         let attrString = NSAttributedString(string: text, attributes: attributes)
         attrString.draw(at: origin)

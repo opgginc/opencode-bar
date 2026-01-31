@@ -11,7 +11,6 @@ import sqlite3
 import tempfile
 import shutil
 import subprocess
-import hashlib
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass
@@ -126,10 +125,9 @@ class ChromiumCookieDecryptor:
         if encrypted_value[:3] == b'v10' or encrypted_value[:3] == b'v11':
             encrypted_value = encrypted_value[3:]
         else:
-            # Not encrypted, return as-is
             try:
                 return encrypted_value.decode('utf-8')
-            except:
+            except (UnicodeDecodeError, ValueError):
                 return ""
         
         key = self._get_encryption_key()
@@ -157,12 +155,11 @@ class ChromiumCookieDecryptor:
         
         try:
             return decrypted.decode('utf-8')
-        except:
-            # Try to find valid UTF-8 portion
+        except UnicodeDecodeError:
             for i in range(len(decrypted)):
                 try:
                     return decrypted[i:].decode('utf-8')
-                except:
+                except UnicodeDecodeError:
                     continue
             return ""
 
@@ -203,7 +200,7 @@ def get_chromium_profiles(browser: BrowserType) -> List[BrowserProfile]:
                         with open(pref_file, 'r') as f:
                             prefs = json.load(f)
                             profile_name = prefs.get('profile', {}).get('name', item.name)
-                    except:
+                    except (json.JSONDecodeError, IOError, KeyError):
                         pass
                 
                 profiles.append(BrowserProfile(
