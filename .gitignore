@@ -20,9 +20,8 @@ DerivedData/
 *.xcuserstate
 
 # Sisyphus
-.sisyphus/drafts
-.sisyphus/notepads
-.sisyphus/boulder.json
+.sisyphus
+!.sisyphus/.gitignore
 
 # Sensitive Data
 api.txt
