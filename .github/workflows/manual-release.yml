@@ -165,7 +165,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           VERSION="${{ steps.new_version.outputs.new_version }}"
-          DMG_NAME="CopilotMonitor-${VERSION}.dmg"
+          DMG_NAME="OpenCodeUsageMonitor-${VERSION}.dmg"
           
           # Create clean staging directory with ONLY the app and Applications symlink
           # This prevents extra files (Packaging.log, DistributionSummary.plist, etc.) from being included
@@ -175,7 +175,7 @@ jobs:
           ln -s /Applications "$DMG_STAGING/Applications"
           
           create-dmg \
-            --volname "Copilot Monitor" \
+            --volname "OpenCode Usage Monitor" \
             --window-pos 200 120 \
             --window-size 500 320 \
             --icon-size 80 \
@@ -190,7 +190,7 @@ jobs:
             echo "DMG created and signed: $DMG_NAME"
           else
             echo "create-dmg failed, falling back to hdiutil..."
-            hdiutil create -volname "Copilot Monitor ${VERSION}" \
+            hdiutil create -volname "OpenCode Usage Monitor ${VERSION}" \
               -srcfolder "$DMG_STAGING" \
               -ov -format UDZO \
               "$DMG_NAME"
@@ -207,7 +207,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           VERSION="${{ steps.new_version.outputs.new_version }}"
-          DMG_NAME="CopilotMonitor-${VERSION}.dmg"
+          DMG_NAME="OpenCodeUsageMonitor-${VERSION}.dmg"
           
           echo "Submitting DMG for notarization..."
           xcrun notarytool submit "$DMG_NAME" \
@@ -223,7 +223,7 @@ jobs:
       - name: Verify Final DMG
         run: |
           VERSION="${{ steps.new_version.outputs.new_version }}"
-          DMG_NAME="CopilotMonitor-${VERSION}.dmg"
+          DMG_NAME="OpenCodeUsageMonitor-${VERSION}.dmg"
           
           echo "Verifying DMG with spctl..."
           spctl -a -vvv -t install "$DMG_NAME"
@@ -244,7 +244,7 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           VERSION="${{ steps.new_version.outputs.new_version }}"
-          DMG_NAME="CopilotMonitor-${VERSION}.dmg"
+          DMG_NAME="OpenCodeUsageMonitor-${VERSION}.dmg"
           DOWNLOAD_URL="https://github.com/kargnas/copilot-usage-monitor/releases/download/${VERSION}/${DMG_NAME}"
           
           echo "$SPARKLE_PRIVATE_KEY" > $RUNNER_TEMP/sparkle_key
@@ -261,7 +261,7 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
             <channel>
-              <title>Copilot Monitor Updates</title>
+              <title>OpenCode Usage Monitor Updates</title>
               <link>https://github.com/kargnas/copilot-usage-monitor/releases/latest/download/appcast.xml</link>
               <description>Most recent changes with links to updates.</description>
               <language>en</language>
@@ -302,11 +302,11 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.new_version.outputs.new_version }}
-          name: Copilot Monitor ${{ steps.new_version.outputs.new_version }}
+          name: OpenCode Usage Monitor ${{ steps.new_version.outputs.new_version }}
           draft: false
           prerelease: ${{ inputs.prerelease }}
           files: |
-            CopilotMonitor-${{ steps.new_version.outputs.new_version }}.dmg
+            OpenCodeUsageMonitor-${{ steps.new_version.outputs.new_version }}.dmg
             appcast.xml
           generate_release_notes: true
         env:

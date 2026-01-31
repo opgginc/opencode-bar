@@ -118,10 +118,10 @@ jobs:
           cp -R CopilotMonitor/build/export/CopilotMonitor.app dmg_temp/
           ln -s /Applications dmg_temp/Applications
           
-          hdiutil create -volname "Copilot Monitor" \
+          hdiutil create -volname "OpenCode Usage Monitor" \
             -srcfolder dmg_temp \
             -ov -format UDZO \
-            CopilotMonitor.dmg
+            OpenCodeUsageMonitor.dmg
           
           rm -rf dmg_temp
       
@@ -129,7 +129,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
-          DMG_NAME="CopilotMonitor-${VERSION}.dmg"
+          DMG_NAME="OpenCodeUsageMonitor-${VERSION}.dmg"
           
           # Create clean staging directory with ONLY the app and Applications symlink
           # This prevents extra files (Packaging.log, DistributionSummary.plist, etc.) from being included
@@ -139,7 +139,7 @@ jobs:
           ln -s /Applications "$DMG_STAGING/Applications"
           
           create-dmg \
-            --volname "Copilot Monitor" \
+            --volname "OpenCode Usage Monitor" \
             --window-pos 200 120 \
             --window-size 500 320 \
             --icon-size 80 \
@@ -150,7 +150,7 @@ jobs:
             "$DMG_STAGING" || true
           
           if [ ! -f "$DMG_NAME" ]; then
-            hdiutil create -volname "Copilot Monitor ${VERSION}" \
+            hdiutil create -volname "OpenCode Usage Monitor ${VERSION}" \
               -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_NAME"
           fi
           
@@ -167,7 +167,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
-          DMG_NAME="CopilotMonitor-${VERSION}.dmg"
+          DMG_NAME="OpenCodeUsageMonitor-${VERSION}.dmg"
           
           xcrun notarytool submit "$DMG_NAME" \
             --apple-id "$APPLE_ID" \
@@ -192,7 +192,7 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
-          DMG_NAME="CopilotMonitor-${VERSION}.dmg"
+          DMG_NAME="OpenCodeUsageMonitor-${VERSION}.dmg"
           DOWNLOAD_URL="https://github.com/kargnas/copilot-usage-monitor/releases/download/${VERSION}/${DMG_NAME}"
           
           echo "$SPARKLE_PRIVATE_KEY" > $RUNNER_TEMP/sparkle_key
@@ -206,7 +206,7 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
             <channel>
-              <title>Copilot Monitor Updates</title>
+              <title>OpenCode Usage Monitor Updates</title>
               <link>https://github.com/kargnas/copilot-usage-monitor/releases/latest/download/appcast.xml</link>
               <description>Most recent changes with links to updates.</description>
               <language>en</language>
@@ -236,16 +236,16 @@ jobs:
         if: "!startsWith(github.ref, 'refs/tags/v')"
         uses: actions/upload-artifact@v4
         with:
-          name: CopilotMonitor
-          path: CopilotMonitor.dmg
+          name: OpenCodeUsageMonitor
+          path: OpenCodeUsageMonitor.dmg
       
       - name: Upload Artifact (Release Build)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
-          name: CopilotMonitor-Release
+          name: OpenCodeUsageMonitor-Release
           path: |
-            CopilotMonitor-*.dmg
+            OpenCodeUsageMonitor-*.dmg
             appcast.xml
 
   release:
@@ -260,7 +260,7 @@ jobs:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
-          name: CopilotMonitor-Release
+          name: OpenCodeUsageMonitor-Release
       
       - name: Get Version
         id: version
@@ -269,11 +269,11 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          name: Copilot Monitor ${{ steps.version.outputs.version }}
+          name: OpenCode Usage Monitor ${{ steps.version.outputs.version }}
           draft: false
           prerelease: false
           files: |
-            CopilotMonitor-${{ steps.version.outputs.version }}.dmg
+            OpenCodeUsageMonitor-${{ steps.version.outputs.version }}.dmg
             appcast.xml
           generate_release_notes: true
         env:
