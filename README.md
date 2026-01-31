@@ -1,7 +1,8 @@
 # OpenCode Usage Monitor
 
 <p align="center">
-  <img src="docs/screenshot2.png" alt="OpenCode Usage Monitor Screenshot" width="480">
+  <img src="docs/screenshot2.png" alt="OpenCode Usage Monitor Screenshot" width="40%">
+  <img src="docs/screenshot3.png" alt="OpenCode Usage Monitor Screenshot" width="40%">
 </p>
 
 <p align="center">

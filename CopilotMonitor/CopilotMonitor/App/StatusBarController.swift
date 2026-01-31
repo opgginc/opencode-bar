@@ -167,11 +167,6 @@ final class StatusBarController: NSObject {
         }
         updatePredictionPeriodMenu()
         
-        let openBillingItem = NSMenuItem(title: "Open Billing", action: #selector(openBillingClicked), keyEquivalent: "b")
-        openBillingItem.image = NSImage(systemSymbolName: "creditcard", accessibilityDescription: "Open Billing")
-        openBillingItem.target = self
-        menu.addItem(openBillingItem)
-        
         menu.addItem(NSMenuItem.separator())
         
         signInItem = NSMenuItem(title: "Sign In", action: #selector(signInClicked), keyEquivalent: "")
@@ -735,14 +730,21 @@ final class StatusBarController: NSObject {
                  }
                  
                  let authItem = NSMenuItem()
-                 authItem.view = createDisabledLabelView(
-                     text: "Token From: Browser Cookies (Chrome/Brave/Arc/Edge)",
-                     icon: NSImage(systemSymbolName: "key", accessibilityDescription: "Auth Source"),
-                     multiline: true
-                 )
-                 submenu.addItem(authItem)
-                 
-                 addOnItem.submenu = submenu
+                  authItem.view = createDisabledLabelView(
+                      text: "Token From: Browser Cookies (Chrome/Brave/Arc/Edge)",
+                      icon: NSImage(systemSymbolName: "key", accessibilityDescription: "Auth Source"),
+                      multiline: true
+                  )
+                  submenu.addItem(authItem)
+                  
+                  submenu.addItem(NSMenuItem.separator())
+                  
+                  let openBillingItem = NSMenuItem(title: "Open Billing", action: #selector(openBillingClicked), keyEquivalent: "b")
+                  openBillingItem.image = NSImage(systemSymbolName: "creditcard", accessibilityDescription: "Open Billing")
+                  openBillingItem.target = self
+                  submenu.addItem(openBillingItem)
+                  
+                  addOnItem.submenu = submenu
                 
                 menu.insertItem(addOnItem, at: insertIndex)
                 insertIndex += 1

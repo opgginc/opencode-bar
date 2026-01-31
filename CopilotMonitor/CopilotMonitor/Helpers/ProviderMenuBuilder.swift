@@ -513,9 +513,13 @@ extension StatusBarController {
         let indentedLeading: CGFloat = leadingOffset + 18
         let leftTextField = NSTextField(labelWithString: "Pace: \(paceInfo.statusText)")
         leftTextField.font = NSFont.systemFont(ofSize: fontSize)
-        leftTextField.textColor = .disabledControlTextColor
-        leftTextField.frame = NSRect(x: indentedLeading, y: 3, width: 110, height: itemHeight - 6)
+        leftTextField.textColor = .secondaryLabelColor
+        leftTextField.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(leftTextField)
+        NSLayoutConstraint.activate([
+            leftTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: indentedLeading),
+            leftTextField.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
         
         let hasTooFast = paceInfo.status == .tooFast
         var rightEdge = menuWidth - trailingMargin
