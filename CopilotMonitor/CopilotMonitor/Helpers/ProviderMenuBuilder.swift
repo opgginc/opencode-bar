@@ -8,10 +8,9 @@ extension StatusBarController {
         
         switch identifier {
         case .openRouter:
-            if let remaining = details.creditsRemaining, let total = details.creditsTotal {
-                let percent = total > 0 ? (remaining / total) * 100 : 0
+            if let remaining = details.creditsRemaining {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Credits: $%.0f/$%.0f (%.0f%%)", remaining, total, percent))
+                item.view = createDisabledLabelView(text: String(format: "Credits: $%.0f", remaining))
                 submenu.addItem(item)
             }
             
