@@ -34,9 +34,10 @@ final class StatusBarController: NSObject {
     private var historyMenuItem: NSMenuItem!
     var predictionPeriodMenu: NSMenu!
     
-    // Multi-provider properties
-    private var providerResults: [ProviderIdentifier: ProviderResult] = [:]
-    private var enabledProvidersMenu: NSMenu!
+     // Multi-provider properties
+     private var providerResults: [ProviderIdentifier: ProviderResult] = [:]
+     private var loadingProviders: Set<ProviderIdentifier> = []
+     private var enabledProvidersMenu: NSMenu!
     
     private var usagePredictor: UsagePredictor {
         UsagePredictor(weights: predictionPeriod.weights)
@@ -595,37 +596,46 @@ final class StatusBarController: NSObject {
     
     // MARK: - Multi-Provider Fetch
     
-     private func fetchMultiProviderData() async {
-         debugLog("fetchMultiProviderData: started")
-         let enabledProviders = ProviderManager.shared.getAllProviders().filter { provider in
-             isProviderEnabled(provider.identifier) && provider.identifier != .copilot
-         }
-         debugLog("fetchMultiProviderData: enabledProviders count=\(enabledProviders.count)")
-         
-         guard !enabledProviders.isEmpty else {
-             logger.info("fetchMultiProviderData: No enabled providers, skipping")
-             debugLog("fetchMultiProviderData: No enabled providers, returning")
-             return
-         }
-         
-         logger.info("fetchMultiProviderData: Fetching \(enabledProviders.count) providers")
-         debugLog("fetchMultiProviderData: calling ProviderManager.fetchAll()")
-         let results = await ProviderManager.shared.fetchAll()
-         debugLog("fetchMultiProviderData: fetchAll returned \(results.count) results")
-         
-         let filteredResults = results.filter { (identifier, _) in
-             isProviderEnabled(identifier) && identifier != .copilot
-         }
-         debugLog("fetchMultiProviderData: filteredResults count=\(filteredResults.count)")
-         
-         self.providerResults = filteredResults
-         debugLog("fetchMultiProviderData: calling updateMultiProviderMenu")
-         self.updateMultiProviderMenu()
-         debugLog("fetchMultiProviderData: updateMultiProviderMenu completed")
-         
-         logger.info("fetchMultiProviderData: Completed with \(filteredResults.count) results")
-         debugLog("fetchMultiProviderData: completed")
-     }
+      private func fetchMultiProviderData() async {
+          debugLog("fetchMultiProviderData: started")
+          let enabledProviders = ProviderManager.shared.getAllProviders().filter { provider in
+              isProviderEnabled(provider.identifier) && provider.identifier != .copilot
+          }
+          debugLog("fetchMultiProviderData: enabledProviders count=\(enabledProviders.count)")
+          
+          guard !enabledProviders.isEmpty else {
+              logger.info("fetchMultiProviderData: No enabled providers, skipping")
+              debugLog("fetchMultiProviderData: No enabled providers, returning")
+              return
+          }
+          
+          loadingProviders = Set(enabledProviders.map { $0.identifier })
+          debugLog("fetchMultiProviderData: marked \(loadingProviders.count) providers as loading")
+          updateMultiProviderMenu()
+          
+          logger.info("fetchMultiProviderData: Fetching \(enabledProviders.count) providers")
+          debugLog("fetchMultiProviderData: calling ProviderManager.fetchAll()")
+          let results = await ProviderManager.shared.fetchAll()
+          debugLog("fetchMultiProviderData: fetchAll returned \(results.count) results")
+          
+          let filteredResults = results.filter { (identifier, _) in
+              isProviderEnabled(identifier) && identifier != .copilot
+          }
+          debugLog("fetchMultiProviderData: filteredResults count=\(filteredResults.count)")
+          
+          for identifier in filteredResults.keys {
+              loadingProviders.remove(identifier)
+          }
+          debugLog("fetchMultiProviderData: cleared loading state for \(filteredResults.count) providers")
+          
+          self.providerResults = filteredResults
+          debugLog("fetchMultiProviderData: calling updateMultiProviderMenu")
+          self.updateMultiProviderMenu()
+          debugLog("fetchMultiProviderData: updateMultiProviderMenu completed")
+          
+          logger.info("fetchMultiProviderData: Completed with \(filteredResults.count) results")
+          debugLog("fetchMultiProviderData: completed")
+      }
     
     private func calculatePayAsYouGoTotal(providerResults: [ProviderIdentifier: ProviderResult], copilotUsage: CopilotUsage?) -> Double {
         var total = 0.0
@@ -725,27 +735,41 @@ final class StatusBarController: NSObject {
                 insertIndex += 1
            }
          
-           let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen, .openCode]
-           for identifier in payAsYouGoOrder {
-               guard let result = providerResults[identifier] else { continue }
-               if case .payAsYouGo(_, let cost, _) = result.usage {
-                   hasPayAsYouGo = true
-                   let costValue = cost ?? 0.0
-                   let item = NSMenuItem(
-                       title: String(format: "%@    $%.2f", identifier.displayName, costValue),
-                       action: nil, keyEquivalent: ""
-                   )
-                   item.image = iconForProvider(identifier)
-                   item.tag = 999
-                  
-                   if let details = result.details, details.hasAnyValue {
-                       item.submenu = createDetailSubmenu(details, identifier: identifier)
+            let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen, .openCode]
+            for identifier in payAsYouGoOrder {
+                guard isProviderEnabled(identifier) else { continue }
+                
+                if let result = providerResults[identifier] {
+                    if case .payAsYouGo(_, let cost, _) = result.usage {
+                        hasPayAsYouGo = true
+                        let costValue = cost ?? 0.0
+                        let item = NSMenuItem(
+                            title: String(format: "%@    $%.2f", identifier.displayName, costValue),
+                            action: nil, keyEquivalent: ""
+                        )
+                        item.image = iconForProvider(identifier)
+                        item.tag = 999
+                       
+                        if let details = result.details, details.hasAnyValue {
+                            item.submenu = createDetailSubmenu(details, identifier: identifier)
+                        }
+                       
+                       menu.insertItem(item, at: insertIndex)
+                       insertIndex += 1
                    }
-                  
-                  menu.insertItem(item, at: insertIndex)
-                  insertIndex += 1
-              }
-          }
+                } else if loadingProviders.contains(identifier) {
+                    hasPayAsYouGo = true
+                    let item = NSMenuItem(
+                        title: String(format: "%@    Loading...", identifier.displayName),
+                        action: nil, keyEquivalent: ""
+                    )
+                    item.image = iconForProvider(identifier)
+                    item.tag = 999
+                    item.isEnabled = false
+                    menu.insertItem(item, at: insertIndex)
+                    insertIndex += 1
+                }
+           }
         
         if !hasPayAsYouGo {
             let noItem = NSMenuItem(title: "  No providers", action: nil, keyEquivalent: "")
@@ -793,23 +817,37 @@ final class StatusBarController: NSObject {
               insertIndex += 1
           }
          
-          let quotaOrder: [ProviderIdentifier] = [.claude, .codex, .geminiCLI, .antigravity]
-          for identifier in quotaOrder {
-              guard let result = providerResults[identifier] else { continue }
-              if case .quotaBased(let remaining, let entitlement, _) = result.usage {
-                  hasQuota = true
-                  let percentage = entitlement > 0 ? (Double(remaining) / Double(entitlement)) * 100 : 0
-                  let item = createQuotaMenuItem(identifier: identifier, percentage: percentage)
-                  item.tag = 999
-                  
-                  if let details = result.details, details.hasAnyValue {
-                      item.submenu = createDetailSubmenu(details, identifier: identifier)
-                  }
-                  
-                  menu.insertItem(item, at: insertIndex)
-                  insertIndex += 1
-              }
-          }
+           let quotaOrder: [ProviderIdentifier] = [.claude, .codex, .geminiCLI, .antigravity]
+           for identifier in quotaOrder {
+               guard isProviderEnabled(identifier) else { continue }
+               
+               if let result = providerResults[identifier] {
+                   if case .quotaBased(let remaining, let entitlement, _) = result.usage {
+                       hasQuota = true
+                       let percentage = entitlement > 0 ? (Double(remaining) / Double(entitlement)) * 100 : 0
+                       let item = createQuotaMenuItem(identifier: identifier, percentage: percentage)
+                       item.tag = 999
+                       
+                       if let details = result.details, details.hasAnyValue {
+                           item.submenu = createDetailSubmenu(details, identifier: identifier)
+                       }
+                       
+                       menu.insertItem(item, at: insertIndex)
+                       insertIndex += 1
+                   }
+               } else if loadingProviders.contains(identifier) {
+                   hasQuota = true
+                   let item = NSMenuItem(
+                       title: String(format: "%@    Loading...", identifier.displayName),
+                       action: nil, keyEquivalent: ""
+                   )
+                   item.image = iconForProvider(identifier)
+                   item.tag = 999
+                   item.isEnabled = false
+                   menu.insertItem(item, at: insertIndex)
+                   insertIndex += 1
+               }
+           }
         
         if !hasQuota {
             let noItem = NSMenuItem(title: "  No providers", action: nil, keyEquivalent: "")
