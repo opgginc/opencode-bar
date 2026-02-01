@@ -119,7 +119,7 @@ jobs:
            hdiutil create -volname "OpenCode Bar" \
              -srcfolder dmg_temp \
              -ov -format UDZO \
-             OpenCodeUsageMonitor.dmg
+             OpenCode-Bar.dmg
           
           rm -rf dmg_temp
       
@@ -127,7 +127,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
-          DMG_NAME="OpenCodeUsageMonitor-${VERSION}.dmg"
+          DMG_NAME="OpenCode-Bar-${VERSION}.dmg"
           
           # Create clean staging directory with ONLY the app and Applications symlink
           # This prevents extra files (Packaging.log, DistributionSummary.plist, etc.) from being included
@@ -165,7 +165,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
-          DMG_NAME="OpenCodeUsageMonitor-${VERSION}.dmg"
+          DMG_NAME="OpenCode-Bar-${VERSION}.dmg"
           
           xcrun notarytool submit "$DMG_NAME" \
             --apple-id "$APPLE_ID" \
@@ -190,7 +190,7 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
-          DMG_NAME="OpenCodeUsageMonitor-${VERSION}.dmg"
+          DMG_NAME="OpenCode-Bar-${VERSION}.dmg"
            DOWNLOAD_URL="https://github.com/kargnas/opencode-bar/releases/download/${VERSION}/${DMG_NAME}"
           
           echo "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle_key"
@@ -232,16 +232,16 @@ jobs:
         if: "!startsWith(github.ref, 'refs/tags/v')"
         uses: actions/upload-artifact@v4
         with:
-          name: OpenCodeUsageMonitor
-          path: OpenCodeUsageMonitor.dmg
+          name: OpenCode-Bar
+          path: OpenCode-Bar.dmg
       
       - name: Upload Artifact (Release Build)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
-          name: OpenCodeUsageMonitor-Release
+          name: OpenCode-Bar-Release
           path: |
-            OpenCodeUsageMonitor-*.dmg
+            OpenCode-Bar-*.dmg
             appcast.xml
 
   release:
@@ -256,7 +256,7 @@ jobs:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
-          name: OpenCodeUsageMonitor-Release
+          name: OpenCode-Bar-Release
       
       - name: Get Version
         id: version
@@ -269,7 +269,7 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            OpenCodeUsageMonitor-${{ steps.version.outputs.version }}.dmg
+            OpenCode-Bar-${{ steps.version.outputs.version }}.dmg
             appcast.xml
           generate_release_notes: true
         env:

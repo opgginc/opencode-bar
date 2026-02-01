@@ -59,13 +59,13 @@ Create a DMG disk image for distribution.
 ```bash
 mkdir -p dist
 cp -r "$APP_PATH" dist/
-hdiutil create -volname "OpenCode Bar" -srcfolder dist -ov -format UDZO OpenCodeUsageMonitor.dmg
+hdiutil create -volname "OpenCode Bar" -srcfolder dist -ov -format UDZO OpenCode-Bar.dmg
 ```
 
 Sign the DMG file itself:
 
 ```bash
-codesign --force --sign "$CERT_ID" OpenCodeUsageMonitor.dmg
+codesign --force --sign "$CERT_ID" OpenCode-Bar.dmg
 ```
 
 ## 5. Notarization (Crucial for Gatekeeper)
@@ -76,7 +76,7 @@ Submit the DMG to Apple's notarization service.
 
 ```bash
 # Submit for notarization
-xcrun notarytool submit OpenCodeUsageMonitor.dmg \
+xcrun notarytool submit OpenCode-Bar.dmg \
   --apple-id "<YOUR_APPLE_ID>" \
   --password "<APP_SPECIFIC_PASSWORD>" \
   --team-id "<TEAM_ID>" \
@@ -86,7 +86,7 @@ xcrun notarytool submit OpenCodeUsageMonitor.dmg \
 If successful (`Accepted`), staple the ticket to the DMG:
 
 ```bash
-xcrun stapler staple OpenCodeUsageMonitor.dmg
+xcrun stapler staple OpenCode-Bar.dmg
 ```
 
 ## 6. GitHub Release
@@ -98,7 +98,7 @@ Create a release and upload the notarized DMG.
 gh release create v<NEW_VERSION> --title "v<NEW_VERSION>: Release Title" --notes "Release notes here..."
 
 # Upload the signed & notarized DMG
-gh release upload v<NEW_VERSION> OpenCodeUsageMonitor.dmg --clobber
+gh release upload v<NEW_VERSION> OpenCode-Bar.dmg --clobber
 ```
 
 ## Troubleshooting
