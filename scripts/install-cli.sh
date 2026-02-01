@@ -4,7 +4,7 @@ set -e
 # Install OpenCode Bar CLI to /usr/local/bin
 # This script copies the CLI binary from the app bundle to /usr/local/bin
 
-APP_PATH="/Applications/CopilotMonitor.app"
+APP_PATH="/Applications/OpenCode Bar.app"
 CLI_SOURCE="$APP_PATH/Contents/MacOS/opencodebar-cli"
 CLI_DEST="/usr/local/bin/opencodebar"
 

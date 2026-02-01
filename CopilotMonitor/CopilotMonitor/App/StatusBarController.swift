@@ -1504,8 +1504,12 @@ final class StatusBarController: NSObject {
         logger.info("⌨️ [Keyboard] Install CLI triggered")
         debugLog("⌨️ installCLIClicked: Install CLI menu item activated")
         
-        guard let cliPath = Bundle.main.path(forResource: "opencodebar-cli", ofType: nil, inDirectory: "MacOS") else {
-            logger.error("CLI binary not found in app bundle")
+        // Resolve CLI binary path via bundle URL (Contents/MacOS/opencodebar-cli)
+        let cliURL = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/opencodebar-cli")
+        let cliPath = cliURL.path
+        
+        guard FileManager.default.fileExists(atPath: cliPath) else {
+            logger.error("CLI binary not found in app bundle at \(cliPath)")
             debugLog("❌ CLI binary not found at expected path in app bundle")
             showAlert(title: "CLI Not Found", message: "CLI binary not found in app bundle. Please reinstall the app.")
             return
@@ -1513,8 +1517,10 @@ final class StatusBarController: NSObject {
         
         debugLog("✅ CLI binary found at: \(cliPath)")
         
+        // Use AppleScript's 'quoted form of' to safely escape the path and prevent command injection
         let script = """
-        do shell script "cp '\(cliPath)' /usr/local/bin/opencodebar && chmod +x /usr/local/bin/opencodebar" with administrator privileges
+        set cliPath to "\(cliPath)"
+        do shell script "mkdir -p /usr/local/bin && cp " & quoted form of cliPath & " /usr/local/bin/opencodebar && chmod +x /usr/local/bin/opencodebar" with administrator privileges
         """
         
         debugLog("🔐 Executing AppleScript for privileged installation")
