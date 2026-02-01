@@ -6,7 +6,7 @@ import os.log
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "AppDelegate")
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var loginWindow: NSWindow?
     var statusBarController: StatusBarController!
     private var sessionExpiredObserver: NSObjectProtocol?
@@ -34,7 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: self,
             userDriverDelegate: nil
         )
         
@@ -135,5 +135,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateCheckTimer?.invalidate()
         if let observer = sessionExpiredObserver { NotificationCenter.default.removeObserver(observer) }
         if let observer = billingLoadedObserver { NotificationCenter.default.removeObserver(observer) }
+    }
+    
+    // MARK: - SPUUpdaterDelegate
+    
+    nonisolated func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        logger.info("🔄 [Sparkle] App will relaunch after update")
+    }
+    
+    nonisolated func updaterDidRelaunchApplication(_ updater: SPUUpdater) {
+        logger.info("✅ [Sparkle] App relaunched successfully")
     }
 }

@@ -20,6 +20,8 @@
 	<true/>
 	<key>MACOSX_DEPLOYMENT_TARGET</key>
 	<string>13.0</string>
+	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
 	<key>SUAutomaticallyUpdate</key>
 	<true/>
 	<key>SUEnableAutomaticChecks</key>
