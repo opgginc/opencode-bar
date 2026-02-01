@@ -1201,7 +1201,8 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func refreshClicked() {
-        logger.info("refreshClicked called")
+        logger.info("⌨️ [Keyboard] ⌘R Refresh triggered")
+        debugLog("⌨️ refreshClicked: ⌘R shortcut activated")
         fetchUsage()
     }
 
@@ -1225,6 +1226,8 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func quitClicked() {
+        logger.info("⌨️ [Keyboard] ⌘Q Quit triggered")
+        debugLog("⌨️ quitClicked: ⌘Q shortcut activated")
         NSApp.terminate(nil)
     }
 

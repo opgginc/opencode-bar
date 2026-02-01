@@ -1,6 +1,9 @@
 import AppKit
 import SwiftUI
 import Sparkle
+import os.log
+
+private let logger = Logger(subsystem: "com.opencodeproviders", category: "AppDelegate")
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -14,6 +17,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var updaterController: SPUStandardUpdaterController!
 
     @objc func checkForUpdates() {
+        logger.info("⌨️ [Keyboard] ⌘U Check for Updates triggered")
         // Menu Bar apps (LSUIElement) need to be activated for Sparkle update UI to show
         NSApp.activate(ignoringOtherApps: true)
         updaterController.checkForUpdates(self)
