@@ -64,11 +64,126 @@ final class OpenCodeZenProvider: ProviderProtocol {
 
     // MARK: - Configuration
 
-    /// Path to opencode CLI binary
-    private let opencodePath: URL = {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".opencode/bin/opencode")
+    /// Path to opencode CLI binary (lazily resolved)
+    private lazy var opencodePath: URL? = {
+        findOpenCodeBinary()
     }()
+    
+    /// Cached description of where the binary was found
+    private var binarySourceDescription: String = "unknown"
+    
+    /// Finds opencode binary using multiple strategies:
+    /// 1. Try "opencode" command directly via PATH (user's current environment)
+    /// 2. Try "opencode" via login shell PATH (captures shell profile additions)
+    /// 3. Fallback to common hardcoded paths
+    private func findOpenCodeBinary() -> URL? {
+        logger.info("OpenCodeZen: Searching for opencode binary...")
+        debugLog("Starting opencode binary search")
+        
+        // Strategy 1: Try "which opencode" in current environment
+        if let path = findBinaryViaWhich() {
+            logger.info("OpenCodeZen: Found via 'which': \(path.path)")
+            debugLog("Found via 'which': \(path.path)")
+            binarySourceDescription = "PATH (\(path.path))"
+            return path
+        }
+        
+        // Strategy 2: Try via login shell to get user's full PATH
+        if let path = findBinaryViaLoginShell() {
+            logger.info("OpenCodeZen: Found via login shell: \(path.path)")
+            debugLog("Found via login shell: \(path.path)")
+            binarySourceDescription = "login shell PATH (\(path.path))"
+            return path
+        }
+        
+        // Strategy 3: Hardcoded fallback paths
+        let fallbackPaths = [
+            "/opt/homebrew/bin/opencode",           // Apple Silicon Homebrew
+            "/usr/local/bin/opencode",              // Intel Homebrew
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".opencode/bin/opencode").path,  // OpenCode default
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/opencode").path,     // pip/pipx
+            "/usr/bin/opencode",                    // System-wide
+        ]
+        
+        for path in fallbackPaths {
+            let url = URL(fileURLWithPath: path)
+            if FileManager.default.fileExists(atPath: path) {
+                logger.info("OpenCodeZen: Found via fallback path: \(path)")
+                debugLog("Found via fallback: \(path)")
+                binarySourceDescription = "fallback (\(path))"
+                return url
+            }
+        }
+        
+        logger.error("OpenCodeZen: Binary not found in any location")
+        debugLog("Binary not found anywhere")
+        return nil
+    }
+    
+    /// Finds opencode binary using `which` command in current environment
+    private func findBinaryViaWhich() -> URL? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = ["opencode"]
+        
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            
+            guard process.terminationStatus == 0 else { return nil }
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !output.isEmpty else { return nil }
+            
+            let url = URL(fileURLWithPath: output)
+            guard FileManager.default.fileExists(atPath: output) else { return nil }
+            
+            return url
+        } catch {
+            debugLog("'which opencode' failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+    
+    /// Finds opencode binary using login shell to capture user's full PATH
+    /// This is important because GUI apps don't inherit terminal PATH modifications
+    private func findBinaryViaLoginShell() -> URL? {
+        // Determine user's default shell
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        // Use -l for login shell (loads profile), -c to execute command
+        process.arguments = ["-lc", "which opencode 2>/dev/null"]
+        
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            
+            guard process.terminationStatus == 0 else { return nil }
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !output.isEmpty else { return nil }
+            
+            let url = URL(fileURLWithPath: output)
+            guard FileManager.default.fileExists(atPath: output) else { return nil }
+            
+            return url
+        } catch {
+            debugLog("Login shell 'which opencode' failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
 
     // MARK: - Data Structures
 
@@ -94,9 +209,14 @@ final class OpenCodeZenProvider: ProviderProtocol {
     // MARK: - ProviderProtocol
 
     func fetch() async throws -> ProviderResult {
-        guard FileManager.default.fileExists(atPath: opencodePath.path) else {
-            logger.error("OpenCode CLI not found at \(self.opencodePath.path)")
-            throw ProviderError.providerError("OpenCode CLI not found at \(opencodePath.path)")
+        guard let binaryPath = opencodePath else {
+            logger.error("OpenCode CLI not found in PATH or standard locations")
+            throw ProviderError.providerError("OpenCode CLI not found. Install via: brew install opencode, or ensure 'opencode' is in PATH")
+        }
+        
+        guard FileManager.default.fileExists(atPath: binaryPath.path) else {
+            logger.error("OpenCode CLI binary not accessible at \(binaryPath.path)")
+            throw ProviderError.providerError("OpenCode CLI not accessible at \(binaryPath.path)")
         }
 
         let cachedHistory = loadDailyHistoryFromCache()
@@ -148,7 +268,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
 
         logger.info("OpenCode Zen: $\(String(format: "%.2f", totalCost)) (\(String(format: "%.1f", utilization))% of $\(monthlyLimit) limit)")
 
-        var authSource = "~/.opencode/bin/opencode (CLI)"
+        var authSource = "opencode CLI via \(binarySourceDescription)"
         if statsFetchError != nil {
             authSource += " [stats: cached]"
         }
@@ -381,9 +501,13 @@ final class OpenCodeZenProvider: ProviderProtocol {
     }
 
     private func runOpenCodeStats(days: Int) async throws -> String {
+        guard let binaryPath = opencodePath else {
+            throw ProviderError.providerError("OpenCode CLI not found")
+        }
+        
         return try await withCheckedThrowingContinuation { continuation in
             let process = Process()
-            process.executableURL = opencodePath
+            process.executableURL = binaryPath
             process.arguments = ["stats", "--days", "\(days)", "--models", "10"]
 
             let pipe = Pipe()
