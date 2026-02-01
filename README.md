@@ -95,10 +95,75 @@ open ~/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug
 
 ## Usage
 
+### Menu Bar App
+
 1. **Install OpenCode**: Make sure you have OpenCode installed and authenticated with your providers
 2. **Launch the app**: Run OpenCode Bar
 3. **View usage**: Click the menu bar icon to see all your provider usage
 4. **GitHub Copilot** (optional): Click "Sign In" to add Copilot monitoring via GitHub OAuth
+
+### Command Line Interface (CLI)
+
+OpenCode Bar includes a powerful CLI for querying provider usage programmatically.
+
+#### Installation
+
+```bash
+# Install CLI to /usr/local/bin
+bash scripts/install-cli.sh
+
+# Verify installation
+opencodebar --help
+```
+
+#### Basic Commands
+
+```bash
+# Show all providers and their usage
+opencodebar status
+
+# List all available providers
+opencodebar list
+
+# Get detailed info for a specific provider
+opencodebar provider claude
+opencodebar provider openrouter
+
+# Output as JSON (for scripting)
+opencodebar status --format json
+opencodebar provider openrouter --format json
+```
+
+#### JSON Output Example
+
+```bash
+$ opencodebar status --format json
+{
+  "providers": [
+    {
+      "id": "claude",
+      "name": "Claude",
+      "type": "quota",
+      "usage_percent": 60,
+      "remaining_percent": 40
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "type": "pay_as_you_go",
+      "balance": 37.42,
+      "daily_cost": 2.15
+    }
+  ]
+}
+```
+
+#### Use Cases
+
+- **Monitoring**: Integrate with monitoring systems to track API usage
+- **Automation**: Build scripts that respond to quota thresholds
+- **CI/CD**: Check provider quotas before running expensive operations
+- **Reporting**: Generate usage reports for billing and analysis
 
 ### Menu Structure
 
