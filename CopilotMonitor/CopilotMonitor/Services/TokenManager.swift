@@ -30,10 +30,12 @@ struct OpenCodeAuth: Codable {
     let githubCopilot: OAuth?
     let openrouter: APIKey?
     let opencode: APIKey?
+    let kimiForCoding: APIKey?
 
     enum CodingKeys: String, CodingKey {
         case anthropic, openai, openrouter, opencode
         case githubCopilot = "github-copilot"
+        case kimiForCoding = "kimi-for-coding"
     }
 }
 
@@ -154,11 +156,14 @@ final class TokenManager {
         return auth.openrouter?.key
     }
 
-    /// Gets OpenCode API key from OpenCode auth
-    /// - Returns: API key string if available, nil otherwise
     func getOpenCodeAPIKey() -> String? {
         guard let auth = readOpenCodeAuth() else { return nil }
         return auth.opencode?.key
+    }
+
+    func getKimiAPIKey() -> String? {
+        guard let auth = readOpenCodeAuth() else { return nil }
+        return auth.kimiForCoding?.key
     }
 
     /// Gets Gemini refresh token from Antigravity accounts (active account)

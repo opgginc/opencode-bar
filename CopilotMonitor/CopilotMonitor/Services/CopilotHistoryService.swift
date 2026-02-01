@@ -102,20 +102,68 @@ class CopilotHistoryService {
     // MARK: - Usage Table Fetching
 
     /// Fetches paginated usage table data from GitHub API.
+    /// Combines data from both period=3 (current month) and period=5 (previous month) to ensure
+    /// complete history across month boundaries.
     /// - Parameters:
     ///   - customerId: GitHub customer ID
     ///   - cookies: Valid GitHub cookies
     /// - Returns: Array of DailyUsage sorted by date (most recent first)
     private func fetchUsageTable(customerId: String, cookies: GitHubCookies) async throws -> [DailyUsage] {
+        // Fetch both periods in parallel to get complete history across month boundaries
+        // period=3: current billing period (resets on month change)
+        // period=5: previous month's billing period
+        async let period3Data = fetchUsageTableForPeriod(customerId: customerId, cookies: cookies, period: 3)
+        async let period5Data = fetchUsageTableForPeriod(customerId: customerId, cookies: cookies, period: 5)
+
+        let (history3, history5) = try await (period3Data, period5Data)
+
+        logger.debug("Fetched \(history3.count) rows from period=3, \(history5.count) rows from period=5")
+
+        // Merge results: use date as key, prefer data with higher request counts
+        var mergedByDate: [Date: DailyUsage] = [:]
+
+        // First add all period=5 data (all-time history)
+        for usage in history5 {
+            mergedByDate[usage.date] = usage
+        }
+
+        // Then overlay period=3 data (current month - may have more recent/accurate data)
+        for usage in history3 {
+            if let existing = mergedByDate[usage.date] {
+                // Keep the entry with higher total requests (more complete data)
+                let existingTotal = existing.includedRequests + existing.billedRequests
+                let newTotal = usage.includedRequests + usage.billedRequests
+                if newTotal > existingTotal {
+                    mergedByDate[usage.date] = usage
+                }
+            } else {
+                mergedByDate[usage.date] = usage
+            }
+        }
+
+        let allHistory = Array(mergedByDate.values)
+        logger.info("Merged to \(allHistory.count) unique days of history")
+
+        // Sort by date, most recent first
+        return allHistory.sorted { $0.date > $1.date }
+    }
+
+    /// Fetches paginated usage table data for a specific billing period.
+    /// - Parameters:
+    ///   - customerId: GitHub customer ID
+    ///   - cookies: Valid GitHub cookies
+    ///   - period: Billing period (3=current month, 5=previous month)
+    /// - Returns: Array of DailyUsage for the specified period
+    private func fetchUsageTableForPeriod(customerId: String, cookies: GitHubCookies, period: Int) async throws -> [DailyUsage] {
         var allHistory: [DailyUsage] = []
         var page = 1
         let maxPages = 3  // ~30 days of history (10 rows per page)
 
         while page <= maxPages {
-            let urlString = "https://github.com/settings/billing/copilot_usage_table?customer_id=\(customerId)&group=0&period=3&query=&page=\(page)"
+            let urlString = "https://github.com/settings/billing/copilot_usage_table?customer_id=\(customerId)&group=0&period=\(period)&query=&page=\(page)"
 
             guard let url = URL(string: urlString) else {
-                logger.warning("Failed to construct URL for page \(page)")
+                logger.warning("Failed to construct URL for period=\(period), page=\(page)")
                 break
             }
 
@@ -134,7 +182,7 @@ class CopilotHistoryService {
                 }
 
                 if httpResponse.statusCode != 200 {
-                    logger.warning("Unexpected status code: \(httpResponse.statusCode)")
+                    logger.warning("Unexpected status code for period=\(period): \(httpResponse.statusCode)")
                     break
                 }
             }
@@ -142,24 +190,23 @@ class CopilotHistoryService {
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let table = json["table"] as? [String: Any],
                   let rows = table["rows"] as? [[String: Any]] else {
-                logger.debug("No more data at page \(page) or invalid JSON structure")
+                logger.debug("No more data at period=\(period), page=\(page) or invalid JSON structure")
                 break
             }
 
             if rows.isEmpty {
-                logger.debug("Empty rows at page \(page), stopping pagination")
+                logger.debug("Empty rows at period=\(period), page=\(page), stopping pagination")
                 break
             }
 
             let pageHistory = parseRows(rows)
             allHistory.append(contentsOf: pageHistory)
 
-            logger.debug("Page \(page): parsed \(pageHistory.count) rows")
+            logger.debug("Period=\(period), page=\(page): parsed \(pageHistory.count) rows")
             page += 1
         }
 
-        // Sort by date, most recent first
-        return allHistory.sorted { $0.date > $1.date }
+        return allHistory
     }
 
     // MARK: - Row Parsing

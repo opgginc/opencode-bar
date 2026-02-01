@@ -258,6 +258,50 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
+        case .kimi:
+            if let fiveHour = details.fiveHourUsage {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: String(format: "5h Window: %.0f%%", fiveHour))
+                submenu.addItem(item)
+                if let reset = details.fiveHourReset {
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
+                    formatter.timeZone = TimeZone.current
+                    let resetItem = NSMenuItem()
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    submenu.addItem(resetItem)
+
+                    let paceInfo = calculatePace(usage: fiveHour, resetTime: reset, windowHours: 5)
+                    let paceItem = NSMenuItem()
+                    paceItem.view = createPaceView(paceInfo: paceInfo)
+                    submenu.addItem(paceItem)
+                }
+            }
+            if let weekly = details.sevenDayUsage {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: String(format: "Weekly: %.0f%%", weekly))
+                submenu.addItem(item)
+                if let reset = details.sevenDayReset {
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
+                    formatter.timeZone = TimeZone.current
+                    let resetItem = NSMenuItem()
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    submenu.addItem(resetItem)
+
+                    let paceInfo = calculatePace(usage: weekly, resetTime: reset, windowHours: 168)
+                    let paceItem = NSMenuItem()
+                    paceItem.view = createPaceView(paceInfo: paceInfo)
+                    submenu.addItem(paceItem)
+                }
+            }
+            if let plan = details.planType {
+                submenu.addItem(NSMenuItem.separator())
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Plan: \(plan)")
+                submenu.addItem(item)
+            }
+
         default:
             break
         }
@@ -501,12 +545,12 @@ extension StatusBarController {
     }
 
     func createPaceView(paceInfo: PaceInfo) -> NSView {
-        let menuWidth: CGFloat = 300
-        let itemHeight: CGFloat = 22
-        let leadingOffset: CGFloat = 14
-        let trailingMargin: CGFloat = 14
-        let statusDotSize: CGFloat = 8
-        let fontSize: CGFloat = 13
+        let menuWidth: CGFloat = MenuDesignToken.Dimension.menuWidth
+        let itemHeight: CGFloat = MenuDesignToken.Dimension.itemHeight
+        let leadingOffset: CGFloat = MenuDesignToken.Spacing.leadingOffset
+        let trailingMargin: CGFloat = MenuDesignToken.Spacing.trailingMargin
+        let statusDotSize: CGFloat = MenuDesignToken.Dimension.statusDotSize
+        let fontSize: CGFloat = MenuDesignToken.Dimension.fontSize
 
         let view = NSView(frame: NSRect(x: 0, y: 0, width: menuWidth, height: itemHeight))
 

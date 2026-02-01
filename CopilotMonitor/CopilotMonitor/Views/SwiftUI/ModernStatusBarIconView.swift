@@ -94,6 +94,7 @@ struct SwiftUIProviderAlertView: View {
         case .openRouter: return "dollarsign.circle"
         case .openCode, .openCodeZen: return "chevron.left.forwardslash.chevron.right"
         case .antigravity: return "arrow.up.circle"
+        case .kimi: return "k.circle"
         }
     }
 }

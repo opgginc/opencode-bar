@@ -87,10 +87,51 @@ class GitHubCopilotAPI:
         return self._request(url)
     
     def get_usage_history(self, page: int = 1) -> Dict[str, Any]:
-        """Get daily usage history with model breakdown"""
+        """Get daily usage history with model breakdown.
+        Fetches both period=3 (current month) and period=5 (previous month) to ensure
+        complete history across month boundaries.
+        """
         customer_id = self.get_customer_id()
-        url = f"https://github.com/settings/billing/copilot_usage_table?customer_id={customer_id}&group=0&period=3&query=&page={page}"
-        return self._request(url)
+        url3 = f"https://github.com/settings/billing/copilot_usage_table?customer_id={customer_id}&group=0&period=3&query=&page={page}"
+        url5 = f"https://github.com/settings/billing/copilot_usage_table?customer_id={customer_id}&group=0&period=5&query=&page={page}"
+        
+        data3 = self._request(url3)
+        data5 = self._request(url5)
+        
+        return self._merge_usage_data(data3, data5)
+    
+    def _merge_usage_data(self, data3: Dict[str, Any], data5: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge usage data from period=3 and period=5, preferring entries with higher request counts."""
+        merged_rows: Dict[str, Any] = {}
+        
+        for data in [data5, data3]:
+            for row in data.get('table', {}).get('rows', []):
+                cells = row.get('cells', [])
+                if len(cells) < 5:
+                    continue
+                date_str = cells[0].get('value', '')
+                if not date_str:
+                    continue
+                
+                included_req = float((cells[1].get('value', '0') or '0').replace(',', ''))
+                billed_req = float((cells[2].get('value', '0') or '0').replace(',', ''))
+                total_req = included_req + billed_req
+                
+                if date_str in merged_rows:
+                    existing_cells = merged_rows[date_str].get('cells', [])
+                    if len(existing_cells) >= 3:
+                        existing_included = float((existing_cells[1].get('value', '0') or '0').replace(',', ''))
+                        existing_billed = float((existing_cells[2].get('value', '0') or '0').replace(',', ''))
+                        existing_total = existing_included + existing_billed
+                        if total_req > existing_total:
+                            merged_rows[date_str] = row
+                else:
+                    merged_rows[date_str] = row
+        
+        merged_table = {
+            'rows': list(merged_rows.values())
+        }
+        return {'table': merged_table}
     
     def get_username(self) -> str:
         """Get logged in username"""

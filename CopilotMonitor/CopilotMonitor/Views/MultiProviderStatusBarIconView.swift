@@ -147,8 +147,9 @@ final class MultiProviderStatusBarIconView: NSView {
         case .antigravity:
             iconName = "AntigravityIcon"
         case .openCodeZen:
-            // OpenCode Zen uses same icon as OpenCode
             iconName = "OpencodeIcon"
+        case .kimi:
+            iconName = "k.circle"
         }
 
         guard let icon = NSImage(named: iconName) else {

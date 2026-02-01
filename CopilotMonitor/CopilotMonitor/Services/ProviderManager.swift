@@ -16,7 +16,6 @@ actor ProviderManager {
     /// Note: CopilotProvider requires WebView dependency - managed separately
     private var providers: [ProviderProtocol] = []
 
-    /// Registers providers that don't require external dependencies
     private nonisolated static func makeDefaultProviders() -> [ProviderProtocol] {
         [
             ClaudeProvider(),
@@ -24,7 +23,8 @@ actor ProviderManager {
             GeminiCLIProvider(),
             OpenRouterProvider(),
             AntigravityProvider(),
-            OpenCodeZenProvider()
+            OpenCodeZenProvider(),
+            KimiProvider()
         ]
     }
 

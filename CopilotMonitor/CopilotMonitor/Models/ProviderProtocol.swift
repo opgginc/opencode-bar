@@ -10,24 +10,16 @@ enum ProviderType {
 
 /// Identifies the specific AI provider
 enum ProviderIdentifier: String, CaseIterable {
-    /// GitHub Copilot
     case copilot
-    /// Anthropic Claude
     case claude
-    /// OpenAI Codex/ChatGPT
     case codex
-    /// Google Gemini CLI
     case geminiCLI = "gemini_cli"
-    /// OpenRouter (pay-as-you-go)
     case openRouter = "open_router"
-    /// OpenCode (pay-as-you-go)
     case openCode = "open_code"
-    /// Antigravity (pay-as-you-go)
     case antigravity
-    /// OpenCode Zen (pay-as-you-go)
     case openCodeZen = "open_code_zen"
+    case kimi
 
-    /// Human-readable name for the provider
     var displayName: String {
         switch self {
         case .copilot:
@@ -46,10 +38,11 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Antigravity"
         case .openCodeZen:
             return "OpenCode Zen"
+        case .kimi:
+            return "Kimi"
         }
     }
 
-    /// SF Symbol name for the provider icon
     var iconName: String {
         switch self {
         case .copilot:
@@ -68,6 +61,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "arrow.up.circle"
         case .openCodeZen:
             return "moon.stars"
+        case .kimi:
+            return "k.circle"
         }
     }
 }

@@ -307,11 +307,29 @@ func buildProviderSubmenu() -> [NSMenuItem] {
      - Solution: Add guard clause before range iteration to return early
      - Pattern: `guard remainingDays > 0 else { return (0, 0) }`
      - Context: Usage prediction on last day of month causes EXC_BREAKPOINT crash within 1-3 seconds of app launch
-  - **TimeZone Force Unwrap Safety**:
-     - Force Unwrap Risk: `TimeZone(identifier: "UTC")!` can crash if identifier is invalid
-     - Safe Initialization: Use optional binding with fallback to system timezone
-     - Pattern: `if let utc = TimeZone(identifier: "UTC") { cal.timeZone = utc } else { cal.timeZone = TimeZone.current }`
-     - Application: All calendar instances that require UTC timezone for date calculations
-     - Example Fix: UsagePredictor, UsageHistory, StatusBarController updated with safe initialization
+   - **TimeZone Force Unwrap Safety**:
+      - Force Unwrap Risk: `TimeZone(identifier: "UTC")!` can crash if identifier is invalid
+      - Safe Initialization: Use optional binding with fallback to system timezone
+      - Pattern: `if let utc = TimeZone(identifier: "UTC") { cal.timeZone = utc } else { cal.timeZone = TimeZone.current }`
+      - Application: All calendar instances that require UTC timezone for date calculations
+      - Example Fix: UsagePredictor, UsageHistory, StatusBarController updated with safe initialization
+   - **Menu Structure Validation Logging**:
+      - Validation Helper: Add `logMenuStructure()` function to verify menu completeness after setup
+      - Metrics to Log: Total items, separator count, action items count, submenu count
+      - Debug Output Format: `📋 [Menu] Items: N (sep:X, actions:Y, submenus:Z)`
+      - Verification Method: Use `log stream --predicate 'subsystem == "com.opencodeproviders"'` or check `/tmp/provider_debug.log`
+      - Pattern: Call `logMenuStructure()` at end of `setupMenu()` for initial validation and after updates
+   - **Keyboard Shortcut Logging for Verification**:
+      - Handler Logging: Add log statements to all keyboard shortcut action methods
+      - Log Format: `⌨️ [Keyboard] ⌘<key> <action> triggered`
+      - Benefits: Verify shortcuts work via logs without manual UI testing, catch unassigned shortcuts
+      - Example Patterns: `⌨️ [Keyboard] ⌘R refresh triggered`, `⌨️ [Keyboard] ⌘Q quit triggered`
+      - Search Method: Use `cat /tmp/provider_debug.log | grep "⌨️"` to find all keyboard events
+   - **Loading Menu Item Style Consistency**:
+      - Standard NSMenuItem: Use `NSMenuItem(title:action:keyEquivalent:)` instead of `createDisabledLabelView` for loading states
+      - Disabled State: Set `isEnabled = false` to visually indicate loading without custom views
+      - Alignment Benefits: Standard NSMenuItem aligns perfectly with regular menu items, avoiding custom view pixel mismatches
+      - Pattern: `let item = NSMenuItem(title: "Loading...", action: nil, keyEquivalent: ""); item.isEnabled = false`
+      - Example Fix: Pay-as-you-go, Quota Status, and Gemini CLI loading items unified to use standard NSMenuItem
 
-            <!-- opencode:reflection:end -->
+             <!-- opencode:reflection:end -->

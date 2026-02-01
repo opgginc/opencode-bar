@@ -887,7 +887,7 @@ final class StatusBarController: NSObject {
               insertIndex += 1
           }
 
-           let quotaOrder: [ProviderIdentifier] = [.claude, .codex, .antigravity]
+           let quotaOrder: [ProviderIdentifier] = [.claude, .kimi, .codex, .antigravity]
             for identifier in quotaOrder {
                 guard isProviderEnabled(identifier) else { continue }
 
@@ -1053,6 +1053,8 @@ final class StatusBarController: NSObject {
              image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
          case .openCodeZen:
              image = NSImage(named: "OpencodeIcon")
+         case .kimi:
+             image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
          }
 
          // Resize icons to 16x16 for consistent menu appearance
@@ -1311,14 +1313,19 @@ final class StatusBarController: NSObject {
         let webView = AuthManager.shared.webView
 
         Task { @MainActor in
-            // @TODO: 각 날짜별 requests/premium requests history 는 period=3, 5 둘다 호출해서 결합해야함. (달이 넘어가서 1일이 되면 0으로 초기화됨)
             let js = """
             return await (async function() {
                 try {
-                    const res = await fetch('/settings/billing/copilot_usage_table?customer_id=\(customerId)&group=0&period=3&query=&page=1', {
-                        headers: { 'Accept': 'application/json', 'x-requested-with': 'XMLHttpRequest' }
-                    });
-                    return await res.json();
+                    const [res3, res5] = await Promise.all([
+                        fetch('/settings/billing/copilot_usage_table?customer_id=\(customerId)&group=0&period=3&query=&page=1', {
+                            headers: { 'Accept': 'application/json', 'x-requested-with': 'XMLHttpRequest' }
+                        }),
+                        fetch('/settings/billing/copilot_usage_table?customer_id=\(customerId)&group=0&period=5&query=&page=1', {
+                            headers: { 'Accept': 'application/json', 'x-requested-with': 'XMLHttpRequest' }
+                        })
+                    ]);
+                    const [data3, data5] = await Promise.all([res3.json(), res5.json()]);
+                    return { period3: data3, period5: data5 };
                 } catch(e) { return { error: e.toString() }; }
             })()
             """
@@ -1338,45 +1345,57 @@ final class StatusBarController: NSObject {
                     return
                 }
 
-                guard let table = rootDict["table"] as? [String: Any],
-                      let rows = table["rows"] as? [[String: Any]] else {
-                    logger.error("fetchUsageHistoryNow: failed - failed to parse table/rows")
-                    self.lastHistoryFetchResult = self.usageHistory != nil ? .failedWithCache : .failedNoCache
-                    return
-                }
-
                 let dateFormatter = DateFormatter()
                 dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z 'utc'"
                 dateFormatter.locale = Locale(identifier: "en_US_POSIX")
                 dateFormatter.timeZone = TimeZone(identifier: "UTC")
 
-                var dailyUsages: [DailyUsage] = []
+                var mergedByDate: [Date: DailyUsage] = [:]
 
-                for row in rows {
-                    guard let cells = row["cells"] as? [[String: Any]],
-                          cells.count >= 5 else {
+                for periodKey in ["period5", "period3"] {
+                    guard let periodDict = rootDict[periodKey] as? [String: Any],
+                          let table = periodDict["table"] as? [String: Any],
+                          let rows = table["rows"] as? [[String: Any]] else {
                         continue
                     }
 
-                    guard let dateStr = cells[0]["sortValue"] as? String,
-                          let date = dateFormatter.date(from: dateStr) else {
-                        continue
+                    for row in rows {
+                        guard let cells = row["cells"] as? [[String: Any]],
+                              cells.count >= 5 else {
+                            continue
+                        }
+
+                        guard let dateStr = cells[0]["sortValue"] as? String,
+                              let date = dateFormatter.date(from: dateStr) else {
+                            continue
+                        }
+
+                        let includedRequests = parseDoubleFromCell(cells[1]["value"])
+                        let billedRequests = parseDoubleFromCell(cells[2]["value"])
+                        let grossAmount = parseCurrencyFromCell(cells[3]["value"])
+                        let billedAmount = parseCurrencyFromCell(cells[4]["value"])
+
+                        let usage = DailyUsage(
+                            date: date,
+                            includedRequests: includedRequests,
+                            billedRequests: billedRequests,
+                            grossAmount: grossAmount,
+                            billedAmount: billedAmount
+                        )
+
+                        if let existing = mergedByDate[date] {
+                            let existingTotal = existing.includedRequests + existing.billedRequests
+                            let newTotal = usage.includedRequests + usage.billedRequests
+                            if newTotal > existingTotal {
+                                mergedByDate[date] = usage
+                            }
+                        } else {
+                            mergedByDate[date] = usage
+                        }
                     }
-
-                    let includedRequests = parseDoubleFromCell(cells[1]["value"])
-                    let billedRequests = parseDoubleFromCell(cells[2]["value"])
-                    let grossAmount = parseCurrencyFromCell(cells[3]["value"])
-                    let billedAmount = parseCurrencyFromCell(cells[4]["value"])
-
-                    dailyUsages.append(DailyUsage(
-                        date: date,
-                        includedRequests: includedRequests,
-                        billedRequests: billedRequests,
-                        grossAmount: grossAmount,
-                        billedAmount: billedAmount
-                    ))
                 }
 
+                var dailyUsages = Array(mergedByDate.values)
                 dailyUsages.sort { $0.date > $1.date }
 
                 let history = UsageHistory(fetchedAt: Date(), days: dailyUsages)

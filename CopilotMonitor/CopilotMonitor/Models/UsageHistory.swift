@@ -33,6 +33,6 @@ struct UsageHistory: Codable {
     var totalRequests: Double { days.reduce(0) { $0 + $1.totalRequests } }
     var totalBilledAmount: Double { days.reduce(0) { $0 + $1.billedAmount } }
 
-    // Recent 7 days slice for UI
-    var recentDays: [DailyUsage] { Array(days.prefix(7)) }
+    // Recent 30 days slice for UI
+    var recentDays: [DailyUsage] { Array(days.prefix(30)) }
 }

@@ -49,7 +49,7 @@
         {
             "label": "🐛 Debug: Kill + Build + Run",
             "type": "shell",
-            "command": "pkill -x CopilotMonitor 2>/dev/null; xcodebuild -project CopilotMonitor/CopilotMonitor.xcodeproj -scheme CopilotMonitor -configuration Debug build && ~/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/CopilotMonitor.app/Contents/MacOS/CopilotMonitor",
+            "command": "pkill -x CopilotMonitor 2>/dev/null; xcodebuild -project CopilotMonitor/CopilotMonitor.xcodeproj -scheme CopilotMonitor -configuration Debug build && open ~/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/*.app",
             "group": "test",
             "presentation": {
                 "reveal": "always",
