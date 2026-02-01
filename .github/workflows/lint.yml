@@ -25,12 +25,22 @@ jobs:
       - name: Install SwiftLint
         run: brew install swiftlint
       
-      - name: Run SwiftLint
-        run: swiftlint lint --reporter github-actions-logging CopilotMonitor/CopilotMonitor
-        continue-on-error: true
-      
-      - name: SwiftLint Strict Check
-        run: swiftlint lint --strict CopilotMonitor/CopilotMonitor
+      - name: Run SwiftLint on Changed Files
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            CHANGED_FILES=$(gh pr view ${{ github.event.pull_request.number }} --json files --jq '.files[].path | select(endswith(".swift"))' | tr '\n' ' ')
+            if [ -n "$CHANGED_FILES" ]; then
+              echo "Linting changed files: $CHANGED_FILES"
+              swiftlint lint --strict --reporter github-actions-logging $CHANGED_FILES
+            else
+              echo "No Swift files changed"
+            fi
+          else
+            echo "Linting all files in CopilotMonitor/CopilotMonitor"
+            swiftlint lint --reporter github-actions-logging CopilotMonitor/CopilotMonitor
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   actionlint:
     name: GitHub Actions Lint
