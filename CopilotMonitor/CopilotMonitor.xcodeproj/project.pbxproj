@@ -28,9 +28,6 @@
 		B248782F500D3B09E0CE5AC8 /* ProviderUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4158558E58B121A9D13C48C3 /* ProviderUsage.swift */; };
 		B58BAD3BFD97973070A2A892 /* MenuResultBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54353FD130DDE0500F6B367F /* MenuResultBuilderTests.swift */; };
 		BCDE4599B74AF7A799CE1D /* StatusBarIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0CA52627AF05BD67B56E /* StatusBarIconView.swift */; };
-		C11111111111111111111111 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C22222222222222222222222 /* AuthManager.swift */; };
-		C33333333333333333333333 /* UsageFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C44444444444444444444444 /* UsageFetcher.swift */; };
-		C55555555555555555555555 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C66666666666666666666666 /* LoginView.swift */; };
 		CB3FA9AE43F3466269FA56F4 /* ProviderProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE39D5663A7ABADC7E54B91D /* ProviderProtocol.swift */; };
 		CB4724DEB2377B892281E8CD /* ModernStatusBarIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD8824FD8DE388CEE314F92 /* ModernStatusBarIconView.swift */; };
 		D11111111111111111111111 /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D22222222222222222222222 /* StatusBarController.swift */; };
@@ -93,9 +90,6 @@
 		B63B85E0F2A8C591D7E26AE2 /* GeminiCLIProviderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GeminiCLIProviderTests.swift; sourceTree = "<group>"; };
 		BE39D5663A7ABADC7E54B91D /* ProviderProtocol.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderProtocol.swift; sourceTree = "<group>"; };
 		C1C7C9FDB4600114F02B2915 /* MenuDesignToken.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuDesignToken.swift; sourceTree = "<group>"; };
-		C22222222222222222222222 /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
-		C44444444444444444444444 /* UsageFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageFetcher.swift; sourceTree = "<group>"; };
-		C66666666666666666666666 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		C8493409A9188CFF5B73D5B3 /* MenuDesignTokenTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuDesignTokenTests.swift; sourceTree = "<group>"; };
 		D22222222222222222222222 /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
 		DBF0C48368166F3AD0C79F92 /* TokenManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TokenManager.swift; sourceTree = "<group>"; };
@@ -226,8 +220,6 @@
 		C77777777777777777777777 /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				C22222222222222222222222 /* AuthManager.swift */,
-				C44444444444444444444444 /* UsageFetcher.swift */,
 				F22222222222222222222222 /* UsagePredictor.swift */,
 				DBF0C48368166F3AD0C79F92 /* TokenManager.swift */,
 				18F40F1AC76A49A9B9DF74B0 /* ProviderManager.swift */,
@@ -240,7 +232,6 @@
 		C88888888888888888888888 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				C66666666666666666666666 /* LoginView.swift */,
 				AD0CA52627AF05BD67B56E /* StatusBarIconView.swift */,
 				3FEE31A8C4560737353C8578 /* SwiftUI */,
 				24BD2AE5B12FABC3E915AE27 /* MultiProviderStatusBarIconView.swift */,
@@ -426,9 +417,6 @@
 				PR1111111111111111111111 /* ProviderResult.swift in Sources */,
 				A33333333333333333333333 /* AppDelegate.swift in Sources */,
 				AM1111111111111111111111 /* AppMigrationHelper.swift in Sources */,
-				C11111111111111111111111 /* AuthManager.swift in Sources */,
-				C33333333333333333333333 /* UsageFetcher.swift in Sources */,
-				C55555555555555555555555 /* LoginView.swift in Sources */,
 				BCDE4599B74AF7A799CE1D /* StatusBarIconView.swift in Sources */,
 				ME1111111111111111111111 /* MenuEnums.swift in Sources */,
 				D11111111111111111111111 /* StatusBarController.swift in Sources */,

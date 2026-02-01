@@ -14,45 +14,79 @@ class BrowserCookieService {
 
     private init() {}
 
-    // MARK: - Main Entry Point
+    private func debugLog(_ message: String) {
+        #if DEBUG
+        let msg = "[\(Date())] BrowserCookieService: \(message)\n"
+        if let data = msg.data(using: .utf8) {
+            let path = "/tmp/cookie_debug.log"
+            if FileManager.default.fileExists(atPath: path) {
+                if let handle = FileHandle(forWritingAtPath: path) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                try? data.write(to: URL(fileURLWithPath: path))
+            }
+        }
+        #endif
+    }
 
-    /// Attempts to extract GitHub cookies from available Chromium browsers.
-    /// Tries each browser in order until one succeeds.
-    /// - Returns: GitHubCookies struct with extracted cookie values
-    /// - Throws: BrowserCookieError if no browser found or extraction fails
     func getGitHubCookies() throws -> GitHubCookies {
-        logger.info("Starting GitHub cookie extraction from browsers")
+        debugLog("Starting GitHub cookie extraction from browsers")
 
         for browser in SupportedBrowser.allCases {
-            logger.debug("Trying browser: \(browser.displayName)")
+            debugLog("Trying browser: \(browser.displayName)")
+            let paths = browser.cookieDBPaths
+            debugLog("Available cookie paths: \(paths.count)")
+
             do {
                 let cookies = try extractCookies(from: browser)
+                debugLog("Cookies extracted - userSession: \(cookies.userSession?.prefix(10) ?? "nil")..., loggedIn: \(cookies.loggedIn ?? "nil")")
                 if cookies.isValid {
-                    logger.info("Successfully extracted cookies from \(browser.displayName)")
+                    debugLog("Successfully extracted cookies from \(browser.displayName)")
                     return cookies
                 }
-                logger.debug("Cookies from \(browser.displayName) are not valid (missing user_session or logged_in)")
+                debugLog("Cookies from \(browser.displayName) are not valid (missing user_session or logged_in)")
             } catch {
-                logger.debug("Failed to extract from \(browser.displayName): \(error.localizedDescription)")
+                debugLog("Failed to extract from \(browser.displayName): \(error.localizedDescription)")
                 continue
             }
         }
 
-        logger.error("No browser found with valid GitHub cookies")
+        debugLog("No browser found with valid GitHub cookies")
         throw BrowserCookieError.noBrowserFound
     }
 
     // MARK: - Browser Detection & Cookie Extraction
 
     private func extractCookies(from browser: SupportedBrowser) throws -> GitHubCookies {
-        let cookieDBPath = browser.cookieDBPath
-        guard FileManager.default.fileExists(atPath: cookieDBPath) else {
+        let cookieDBPaths = browser.cookieDBPaths
+        debugLog("Found \(cookieDBPaths.count) cookie paths for \(browser.displayName)")
+
+        guard !cookieDBPaths.isEmpty else {
             throw BrowserCookieError.cookieDBNotFound
         }
 
         let encryptionKey = try getEncryptionKey(for: browser)
         let aesKey = try deriveAESKey(from: encryptionKey)
-        return try readCookies(from: cookieDBPath, aesKey: aesKey)
+
+        for path in cookieDBPaths {
+            debugLog("Trying cookie path: \(path)")
+            do {
+                let cookies = try readCookies(from: path, aesKey: aesKey)
+                if cookies.isValid {
+                    debugLog("Found valid cookies at: \(path)")
+                    return cookies
+                }
+                debugLog("Cookies at \(path) are not valid")
+            } catch {
+                debugLog("Failed to read cookies from \(path): \(error.localizedDescription)")
+                continue
+            }
+        }
+
+        throw BrowserCookieError.noBrowserFound
     }
 
     // MARK: - Keychain Access
@@ -274,17 +308,43 @@ enum SupportedBrowser: CaseIterable {
     }
 
     var cookieDBPath: String {
+        cookieDBPaths.first ?? ""
+    }
+
+    var cookieDBPaths: [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
+        var paths: [String] = []
+
         switch self {
         case .chrome:
-            return "\(home)/Library/Application Support/Google/Chrome/Default/Cookies"
+            let baseDir = "\(home)/Library/Application Support/Google/Chrome"
+            paths.append("\(baseDir)/Default/Cookies")
+            paths.append(contentsOf: findProfilePaths(in: baseDir))
         case .brave:
-            return "\(home)/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"
+            let baseDir = "\(home)/Library/Application Support/BraveSoftware/Brave-Browser"
+            paths.append("\(baseDir)/Default/Cookies")
+            paths.append(contentsOf: findProfilePaths(in: baseDir))
         case .arc:
-            return "\(home)/Library/Application Support/Arc/User Data/Default/Cookies"
+            let baseDir = "\(home)/Library/Application Support/Arc/User Data"
+            paths.append("\(baseDir)/Default/Cookies")
+            paths.append(contentsOf: findProfilePaths(in: baseDir))
         case .edge:
-            return "\(home)/Library/Application Support/Microsoft Edge/Default/Cookies"
+            let baseDir = "\(home)/Library/Application Support/Microsoft Edge"
+            paths.append("\(baseDir)/Default/Cookies")
+            paths.append(contentsOf: findProfilePaths(in: baseDir))
         }
+
+        return paths.filter { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    private func findProfilePaths(in baseDir: String) -> [String] {
+        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: baseDir) else {
+            return []
+        }
+
+        return contents
+            .filter { $0.hasPrefix("Profile ") }
+            .map { "\(baseDir)/\($0)/Cookies" }
     }
 
     var keychainService: String {

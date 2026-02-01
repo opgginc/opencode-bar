@@ -23,11 +23,11 @@ actor ProviderManager {
     // MARK: - Properties
 
     /// All registered providers
-    /// Note: CopilotProvider requires WebView dependency - managed separately
     private var providers: [ProviderProtocol] = []
 
     private nonisolated static func makeDefaultProviders() -> [ProviderProtocol] {
         [
+            CopilotProvider(),
             ClaudeProvider(),
             CodexProvider(),
             GeminiCLIProvider(),
