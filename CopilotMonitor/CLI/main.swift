@@ -1,6 +1,16 @@
 import ArgumentParser
 import Foundation
 
+// MARK: - Exit Codes
+
+enum CLIExitCode: Int32 {
+    case success = 0
+    case generalError = 1
+    case authenticationFailed = 2
+    case networkError = 3
+    case invalidArguments = 4
+}
+
 // MARK: - Formatters
 
 enum FormatterError: LocalizedError {
@@ -219,6 +229,8 @@ struct StatusCommand: ParsableCommand {
                 } else {
                     output = TableFormatter.format(results)
                 }
+            } catch let e as ProviderError {
+                error = e
             } catch let e {
                 error = e
             }
@@ -228,7 +240,24 @@ struct StatusCommand: ParsableCommand {
         semaphore.wait()
         
         if let error = error {
-            throw error
+            let stderr = FileHandle.standardError
+            let message = "Error: \(error.localizedDescription)\n"
+            stderr.write(Data(message.utf8))
+            
+            if let providerError = error as? ProviderError {
+                let exitCode: CLIExitCode
+                switch providerError {
+                case .authenticationFailed:
+                    exitCode = .authenticationFailed
+                case .networkError:
+                    exitCode = .networkError
+                default:
+                    exitCode = .generalError
+                }
+                Foundation.exit(exitCode.rawValue)
+            } else {
+                Foundation.exit(CLIExitCode.generalError.rawValue)
+            }
         }
         
         if let output = output {
@@ -296,6 +325,10 @@ struct ProviderCommand: ParsableCommand {
         let jsonFlag = self.json
         
         guard let identifier = findProvider(name: providerName) else {
+            let stderr = FileHandle.standardError
+            let errorMessage = "Error: Provider '\(providerName)' not found\n"
+            stderr.write(Data(errorMessage.utf8))
+            
             if jsonFlag {
                 let error = ["error": "Provider '\(providerName)' not found"]
                 let encoder = JSONEncoder()
@@ -305,18 +338,20 @@ struct ProviderCommand: ParsableCommand {
                     print(jsonString)
                 }
             } else {
-                print("Error: Provider '\(providerName)' not found")
-                print("\nAvailable providers:")
+                let availableMessage = "\nAvailable providers:\n"
+                stderr.write(Data(availableMessage.utf8))
                 for provider in ProviderIdentifier.allCases.sorted(by: { $0.displayName < $1.displayName }) {
-                    print("  - \(provider.rawValue) (\(provider.displayName))")
+                    let providerLine = "  - \(provider.rawValue) (\(provider.displayName))\n"
+                    stderr.write(Data(providerLine.utf8))
                 }
             }
-            throw ExitCode.failure
+            Foundation.exit(CLIExitCode.invalidArguments.rawValue)
         }
         
         let semaphore = DispatchSemaphore(value: 0)
         var error: Error?
         var output: String?
+        var fetchFailed = false
         
         Task {
             do {
@@ -335,7 +370,7 @@ struct ProviderCommand: ParsableCommand {
                     } else {
                         output = "Error: Failed to fetch data for '\(identifier.displayName)'\nThis provider may not be configured or authentication may have failed."
                     }
-                    error = ExitCode.failure
+                    fetchFailed = true
                     semaphore.signal()
                     return
                 }
@@ -347,6 +382,8 @@ struct ProviderCommand: ParsableCommand {
                     let singleResult = [identifier: result]
                     output = TableFormatter.format(singleResult)
                 }
+            } catch let e as ProviderError {
+                error = e
             } catch let e {
                 error = e
             }
@@ -359,7 +396,34 @@ struct ProviderCommand: ParsableCommand {
             if let output = output {
                 print(output)
             }
-            throw error
+            
+            if let providerError = error as? ProviderError {
+                let exitCode: CLIExitCode
+                switch providerError {
+                case .authenticationFailed:
+                    exitCode = .authenticationFailed
+                case .networkError:
+                    exitCode = .networkError
+                default:
+                    exitCode = .generalError
+                }
+                let stderr = FileHandle.standardError
+                let message = "Error: \(providerError.localizedDescription)\n"
+                stderr.write(Data(message.utf8))
+                Foundation.exit(exitCode.rawValue)
+            } else {
+                let stderr = FileHandle.standardError
+                let message = "Error: \(error.localizedDescription)\n"
+                stderr.write(Data(message.utf8))
+                Foundation.exit(CLIExitCode.generalError.rawValue)
+            }
+        }
+        
+        if fetchFailed {
+            let stderr = FileHandle.standardError
+            let message = "Error: Failed to fetch provider data\n"
+            stderr.write(Data(message.utf8))
+            Foundation.exit(CLIExitCode.generalError.rawValue)
         }
         
         if let output = output {
