@@ -1517,9 +1517,12 @@ final class StatusBarController: NSObject {
         
         debugLog("✅ CLI binary found at: \(cliPath)")
         
-        // Use AppleScript's 'quoted form of' to safely escape the path and prevent command injection
+        // Escape cliPath for safe inclusion in AppleScript string literal
+        let escapedCliPath = cliPath.replacingOccurrences(of: "\"", with: "\\\"")
+        
+        // Use AppleScript's 'quoted form of' to safely escape the path for the shell command and prevent command injection
         let script = """
-        set cliPath to "\(cliPath)"
+        set cliPath to "\(escapedCliPath)"
         do shell script "mkdir -p /usr/local/bin && cp " & quoted form of cliPath & " /usr/local/bin/opencodebar && chmod +x /usr/local/bin/opencodebar" with administrator privileges
         """
         

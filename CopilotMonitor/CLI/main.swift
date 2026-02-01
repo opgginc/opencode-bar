@@ -219,9 +219,11 @@ struct StatusCommand: ParsableCommand {
                 let results = await manager.fetchAll()
                 
                 guard !results.isEmpty else {
-                    output = jsonFlag ? "{}" : "No provider data available. Check your OpenCode authentication."
+                    let stderr = FileHandle.standardError
+                    let message = "Error: No provider data available. Check your OpenCode authentication.\n"
+                    stderr.write(Data(message.utf8))
                     semaphore.signal()
-                    return
+                    Foundation.exit(CLIExitCode.generalError.rawValue)
                 }
                 
                 if jsonFlag {
