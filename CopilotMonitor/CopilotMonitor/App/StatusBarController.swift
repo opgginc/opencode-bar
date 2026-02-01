@@ -1022,7 +1022,7 @@ final class StatusBarController: NSObject {
 
         if let usage = currentUsage {
             let totalCost = calculatePayAsYouGoTotal(providerResults: providerResults, copilotUsage: usage)
-            statusBarIconView?.update(used: usage.usedRequests, limit: usage.limitRequests, cost: totalCost)
+            statusBarIconView?.update(cost: totalCost)
         }
         debugLog("updateMultiProviderMenu: completed successfully")
         logMenuStructure()
@@ -1278,7 +1278,7 @@ final class StatusBarController: NSObject {
 
       private func updateUIForSuccess(usage: CopilotUsage) {
           let totalPayAsYouGoCost = calculatePayAsYouGoTotal(providerResults: providerResults, copilotUsage: usage)
-          statusBarIconView?.update(used: usage.usedRequests, limit: usage.limitRequests, cost: totalPayAsYouGoCost)
+          statusBarIconView?.update(cost: totalPayAsYouGoCost)
           signInItem.isHidden = true
           updateHistorySubmenu()
           updateMultiProviderMenu()

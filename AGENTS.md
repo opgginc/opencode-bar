@@ -6,6 +6,16 @@
 
 ## Coding Rules
 
+### Branding Guides
+- Official Brand: `OpenCode Bar`
+  - Don't use mis-capitalized or malformed forms like `Opencode Bar` or versions without the space (e.g. `OpenCodeBar`).
+- File Name:
+  - `OpenCode Bar` if it allows whitespace.
+  - `OpenCode-Bar` if it allows dash.
+  - `opencode-bar` (all lowercase) if the environment prefers lowercase file names.
+  - `opencodebar` (all lowercase, no separators) if it doesn't allow whitespace or dashes.
+- Bundle ID: `com.copilotmonitor.CopilotMonitor`
+
 ### UI Styling Rules
 - **No colors for text emphasis**: Do NOT use `NSColor` attributes like `.foregroundColor` for menu items or labels.
 - **DO NOT USE SPACES TO ALIGN TEXT**: Don't use spaces like "   Words:" to align the spacing.
