@@ -142,11 +142,28 @@ Quit (⌘Q)
 
 Contributions are welcome! Please submit a Pull Request.
 
+### Development Setup
+
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+3. **Setup Git Hooks** (automated linting before commits):
+   ```bash
+   ./scripts/setup-git-hooks.sh
+   ```
+4. Make your Changes
+5. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+   - SwiftLint will automatically check your code before commit
+   - Fix any violations or use `git commit --no-verify` to bypass (not recommended)
+6. Push to the Branch (`git push origin feature/AmazingFeature`)
+7. Open a Pull Request
+
+### Code Quality
+
+This project uses SwiftLint to maintain code quality. All Swift files are automatically checked:
+
+- **Pre-commit Hook**: Runs on `git commit` (install via `./scripts/setup-git-hooks.sh`)
+- **GitHub Actions**: Runs on all pushes and pull requests
+- **Manual Check**: Run `swiftlint lint CopilotMonitor/CopilotMonitor` anytime
 
 ## License
 

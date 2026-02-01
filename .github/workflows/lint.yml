@@ -2,17 +2,11 @@ name: Lint
 
 on:
   push:
-    branches:
-      - main
-      - develop
     paths:
       - '**.swift'
       - '.github/workflows/lint.yml'
       - '.swiftlint.yml'
   pull_request:
-    branches:
-      - main
-      - develop
     paths:
       - '**.swift'
       - '.github/workflows/lint.yml'
