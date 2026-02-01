@@ -353,13 +353,25 @@ func buildProviderSubmenu() -> [NSMenuItem] {
        - Current Pattern: SwiftUI MenuBarExtra with `isInserted: $isMenuEnabled` set to `false`, AppKit NSStatusItem handles everything
        - Anti-Pattern: Creating `NSStatusBar.system.statusItem()` while also using `MenuBarExtra { }`
        - Example Fix: Set `@State private var isMenuEnabled = false` and use `MenuBarExtra(isInserted: $isMenuEnabled)`
-    - **GitHub Actions YAML Indentation Syntax Errors**:
-       - Strict Indentation Rules: YAML is whitespace-sensitive and incorrect indentation causes workflow failures
-       - Common Mistake: Excessive indentation makes steps appear nested incorrectly (e.g., 14 spaces instead of 6)
-       - Validation: GitHub Actions checks YAML syntax before execution and reports indentation errors
-       - Pattern: Each job step should be at consistent indentation level (typically 6 spaces for top-level job steps)
-       - Example Fix: Fixed `- name: Create Release` step indentation from 14 spaces to 6 spaces
-       - Affected Files: `build-release.yml`, `manual-release.yml` when adding release steps
-       - Prevention: Use YAML linters or validate syntax with `yamllint` before committing
+     - **GitHub Actions YAML Indentation Syntax Errors**:
+        - Strict Indentation Rules: YAML is whitespace-sensitive and incorrect indentation causes workflow failures
+        - Common Mistake: Excessive indentation makes steps appear nested incorrectly (e.g., 14 spaces instead of 6)
+        - Validation: GitHub Actions checks YAML syntax before execution and reports indentation errors
+        - Pattern: Each job step should be at consistent indentation level (typically 6 spaces for top-level job steps)
+        - Example Fix: Fixed `- name: Create Release` step indentation from 14 spaces to 6 spaces
+        - Affected Files: `build-release.yml`, `manual-release.yml` when adding release steps
+        - Prevention: Use YAML linters or validate syntax with `yamllint` before committing
+   - **Menu Update Debouncing**:
+        - Redundant Rebuild Issue: Multiple `updateMultiProviderMenu` calls occurring in quick succession
+        - Symptoms: Logs showing repeated menu structure outputs with identical data
+        - Root Cause: No debouncing mechanism to prevent concurrent or rapid successive update requests
+        - Solution: Implement debounce timer or check if update is already in progress before triggering new rebuild
+        - Pattern: `updatePending = false` → schedule update → check `!updatePending` before proceeding → set `updatePending = true`
+   - **Cache Effectiveness for Progressive Loading**:
+        - Initial Fetch Pattern: OpenCode Zen fetches 30 days progressively (~3 minutes total: 30 days × 4-6 seconds each)
+        - Cache Threshold: 1-hour cache window appropriate for usage data that changes infrequently
+        - Cache Success: Subsequent fetches show "(cached)" for all days, instant response
+        - Pattern: Hybrid approach (fetch recent + cache older) reduces API calls by 71%+
+        - Optimization: Ensure cache validation uses UTC calendar to match cache storage format
 
-             <!-- opencode:reflection:end -->
+              <!-- opencode:reflection:end -->

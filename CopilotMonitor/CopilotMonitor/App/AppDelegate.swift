@@ -26,6 +26,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if AppMigrationHelper.shared.checkAndMigrateIfNeeded() {
+            return
+        }
+        
+        AppMigrationHelper.shared.cleanupLegacyBundlesIfNeeded()
+        
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
             updaterDelegate: nil,

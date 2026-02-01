@@ -4,6 +4,11 @@ on:
   push:
   pull_request: 
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v2.0.3). Leave empty for unsigned build.'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -19,7 +24,7 @@ jobs:
           xcode-version: '15.4'
       
       - name: Import Developer ID Certificate
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
@@ -39,7 +44,7 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
       
       - name: Build App (Unsigned - for branch push)
-        if: "!startsWith(github.ref, 'refs/tags/v')"
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') && inputs.version == '' }}
         run: |
           cd CopilotMonitor
           xcodebuild -project CopilotMonitor.xcodeproj \
@@ -51,8 +56,8 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
       
-      - name: Build App (Signed - for tag release)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Build App (Signed - for tag or manual release)
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
@@ -67,13 +72,13 @@ jobs:
             CODE_SIGN_STYLE=Manual
       
       - name: Export App (Unsigned)
-        if: "!startsWith(github.ref, 'refs/tags/v')"
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') && inputs.version == '' }}
         run: |
           mkdir -p CopilotMonitor/build/export
           cp -R "CopilotMonitor/build/CopilotMonitor.xcarchive/Products/Applications/OpenCode Bar.app" CopilotMonitor/build/export/
       
       - name: Export App (Signed)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         run: |
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/CopilotMonitor.xcarchive" \
@@ -81,13 +86,13 @@ jobs:
             -exportOptionsPlist ExportOptions.plist
       
       - name: Verify Code Signing
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         run: |
           codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/export/OpenCode Bar.app"
           codesign -dv --verbose=4 "$RUNNER_TEMP/export/OpenCode Bar.app" 2>&1 | grep "Authority"
       
       - name: Notarize App
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
@@ -106,11 +111,11 @@ jobs:
           xcrun stapler staple "OpenCode Bar.app"
       
       - name: Install create-dmg
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         run: brew install create-dmg
       
       - name: Create DMG (Unsigned)
-        if: "!startsWith(github.ref, 'refs/tags/v')"
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') && inputs.version == '' }}
         run: |
           mkdir -p dmg_temp
           cp -R "CopilotMonitor/build/export/OpenCode Bar.app" dmg_temp/
@@ -124,9 +129,9 @@ jobs:
           rm -rf dmg_temp
       
       - name: Create and Sign DMG
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         run: |
-          VERSION="${GITHUB_REF#refs/tags/}"
+          VERSION="${{ inputs.version || github.ref_name }}"
           DMG_NAME="OpenCode-Bar-${VERSION}.dmg"
           
           # Create clean staging directory with ONLY the app and Applications symlink
@@ -158,13 +163,13 @@ jobs:
           rm -rf "$DMG_STAGING"
       
       - name: Notarize DMG
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/}"
+          VERSION="${{ inputs.version || github.ref_name }}"
           DMG_NAME="OpenCode-Bar-${VERSION}.dmg"
           
           xcrun notarytool submit "$DMG_NAME" \
@@ -177,7 +182,7 @@ jobs:
           xcrun stapler staple "$DMG_NAME"
       
       - name: Download Sparkle Tools
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         run: |
           curl -L -o sparkle.tar.xz https://github.com/sparkle-project/Sparkle/releases/download/2.8.1/Sparkle-2.8.1.tar.xz
           mkdir -p sparkle
@@ -185,11 +190,11 @@ jobs:
           chmod +x sparkle/bin/*
       
       - name: Generate Sparkle Signature and Appcast
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/}"
+          VERSION="${{ inputs.version || github.ref_name }}"
           DMG_NAME="OpenCode-Bar-${VERSION}.dmg"
            DOWNLOAD_URL="https://github.com/kargnas/opencode-bar/releases/download/${VERSION}/${DMG_NAME}"
           
@@ -224,19 +229,19 @@ jobs:
           rm -f "$RUNNER_TEMP/sparkle_key"
       
       - name: Cleanup Keychain
-        if: always() && startsWith(github.ref, 'refs/tags/v')
+        if: always() && (startsWith(github.ref, 'refs/tags/v') || inputs.version != '')
         run: |
           security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" 2>/dev/null || true
       
       - name: Upload Artifact (Branch Build)
-        if: "!startsWith(github.ref, 'refs/tags/v')"
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') && inputs.version == '' }}
         uses: actions/upload-artifact@v4
         with:
           name: OpenCode-Bar
           path: OpenCode-Bar.dmg
       
       - name: Upload Artifact (Release Build)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         uses: actions/upload-artifact@v4
         with:
           name: OpenCode-Bar-Release
@@ -247,7 +252,7 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
     
     permissions:
       contents: write
@@ -260,11 +265,17 @@ jobs:
       
       - name: Get Version
         id: version
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.version }}
           name: OpenCode Bar ${{ steps.version.outputs.version }}
           draft: false
           prerelease: false

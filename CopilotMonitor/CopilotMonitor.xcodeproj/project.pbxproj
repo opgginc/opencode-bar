@@ -22,6 +22,7 @@
 		A14AF9AC6A646726B7C94978 /* MenuResultBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F6CE62C58ECA852F25FEF30 /* MenuResultBuilder.swift */; };
 		A1BED4A5CA1FEC2DADC461C2 /* MenuDesignTokenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8493409A9188CFF5B73D5B3 /* MenuDesignTokenTests.swift */; };
 		A33333333333333333333333 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44444444444444444444444 /* AppDelegate.swift */; };
+		AM1111111111111111111111 /* AppMigrationHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = AM2222222222222222222222 /* AppMigrationHelper.swift */; };
 		A55555555555555555555555 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A66666666666666666666666 /* Assets.xcassets */; };
 		AD95EBD6AE3134DF4C797577 /* ClaudeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DDC1B4DE6B5118CE4AE8F82 /* ClaudeProvider.swift */; };
 		B248782F500D3B09E0CE5AC8 /* ProviderUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4158558E58B121A9D13C48C3 /* ProviderUsage.swift */; };
@@ -83,6 +84,7 @@
 		8BDA856BBC854D3FF310EA51 /* ProviderViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ViewModels/ProviderViewModel.swift; sourceTree = "<group>"; };
 		9B1085A77EF4A58E5B5EC71B /* CopilotHistoryService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CopilotHistoryService.swift; sourceTree = "<group>"; };
 		A44444444444444444444444 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		AM2222222222222222222222 /* AppMigrationHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMigrationHelper.swift; sourceTree = "<group>"; };
 		A66666666666666666666666 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A77777777777777777777777 /* OpenCode Bar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OpenCode Bar.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A88888888888888888888888 /* CopilotMonitor.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CopilotMonitor.entitlements; sourceTree = "<group>"; };
@@ -214,6 +216,7 @@
 			isa = PBXGroup;
 			children = (
 				A44444444444444444444444 /* AppDelegate.swift */,
+				AM2222222222222222222222 /* AppMigrationHelper.swift */,
 				D22222222222222222222222 /* StatusBarController.swift */,
 				6279E48B0F50E99C3B23C4F3 /* ModernApp.swift */,
 			);
@@ -422,6 +425,7 @@
 			files = (
 				PR1111111111111111111111 /* ProviderResult.swift in Sources */,
 				A33333333333333333333333 /* AppDelegate.swift in Sources */,
+				AM1111111111111111111111 /* AppMigrationHelper.swift in Sources */,
 				C11111111111111111111111 /* AuthManager.swift in Sources */,
 				C33333333333333333333333 /* UsageFetcher.swift in Sources */,
 				C55555555555555555555555 /* LoginView.swift in Sources */,
