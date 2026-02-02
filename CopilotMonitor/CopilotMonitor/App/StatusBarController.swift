@@ -37,6 +37,7 @@ final class StatusBarController: NSObject {
     private var signInItem: NSMenuItem!
     private var resetLoginItem: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
+    private var installCLIItem: NSMenuItem!
     private var refreshIntervalMenu: NSMenu!
     private var refreshTimer: Timer?
 
@@ -207,6 +208,12 @@ final class StatusBarController: NSObject {
         launchAtLoginItem.target = self
         updateLaunchAtLoginState()
         menu.addItem(launchAtLoginItem)
+
+        installCLIItem = NSMenuItem(title: "Install CLI (opencodebar)", action: #selector(installCLIClicked), keyEquivalent: "")
+        installCLIItem.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "Install CLI")
+        installCLIItem.target = self
+        menu.addItem(installCLIItem)
+        updateCLIInstallState()
 
         menu.addItem(NSMenuItem.separator())
 
@@ -1330,6 +1337,88 @@ final class StatusBarController: NSObject {
 
     private func updateLaunchAtLoginState() {
         launchAtLoginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    }
+
+    @objc private func installCLIClicked() {
+        logger.info("⌨️ [Keyboard] Install CLI triggered")
+        debugLog("⌨️ installCLIClicked: Install CLI menu item activated")
+        
+        // Resolve CLI binary path via bundle URL (Contents/MacOS/opencodebar-cli)
+        let cliURL = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/opencodebar-cli")
+        let cliPath = cliURL.path
+        
+        guard FileManager.default.fileExists(atPath: cliPath) else {
+            logger.error("CLI binary not found in app bundle at \(cliPath)")
+            debugLog("❌ CLI binary not found at expected path in app bundle")
+            showAlert(title: "CLI Not Found", message: "CLI binary not found in app bundle. Please reinstall the app.")
+            return
+        }
+        
+        debugLog("✅ CLI binary found at: \(cliPath)")
+        
+        // Escape cliPath for safe inclusion in AppleScript string literal
+        let escapedCliPath = cliPath.replacingOccurrences(of: "\"", with: "\\\"")
+        
+        // Use AppleScript's 'quoted form of' to safely escape the path for the shell command and prevent command injection
+        let script = """
+        set cliPath to "\(escapedCliPath)"
+        do shell script "mkdir -p /usr/local/bin && cp " & quoted form of cliPath & " /usr/local/bin/opencodebar && chmod +x /usr/local/bin/opencodebar" with administrator privileges
+        """
+        
+        debugLog("🔐 Executing AppleScript for privileged installation")
+        var error: NSDictionary?
+        if let scriptObject = NSAppleScript(source: script) {
+            scriptObject.executeAndReturnError(&error)
+            
+            if let error = error {
+                logger.error("CLI installation failed: \(error.description)")
+                debugLog("❌ Installation failed: \(error.description)")
+                showAlert(title: "Installation Failed", message: "Failed to install CLI: \(error.description)")
+            } else {
+                logger.info("CLI installed successfully to /usr/local/bin/opencodebar")
+                debugLog("✅ CLI installed successfully")
+                showAlert(title: "Success", message: "CLI installed to /usr/local/bin/opencodebar\n\nYou can now use 'opencodebar' command in Terminal.")
+                updateCLIInstallState()
+            }
+        } else {
+            logger.error("Failed to create AppleScript object")
+            debugLog("❌ Failed to create AppleScript object")
+            showAlert(title: "Installation Failed", message: "Failed to create installation script.")
+        }
+    }
+
+    private func updateCLIInstallState() {
+        let installed = FileManager.default.fileExists(atPath: "/usr/local/bin/opencodebar")
+        
+        if installed {
+            installCLIItem.title = "CLI Installed (opencodebar)"
+            installCLIItem.state = .on
+            installCLIItem.isEnabled = false
+            debugLog("✅ CLI is installed at /usr/local/bin/opencodebar")
+        } else {
+            installCLIItem.title = "Install CLI (opencodebar)"
+            installCLIItem.state = .off
+            installCLIItem.isEnabled = true
+            debugLog("ℹ️ CLI is not installed")
+        }
+    }
+
+    private func showAlert(title: String, message: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.alertStyle = .informational
+        
+        alert.runModal()
+    }
+
+    private func saveCache(usage: CopilotUsage) {
+        if let data = try? JSONEncoder().encode(CachedUsage(usage: usage, timestamp: Date())) {
+            UserDefaults.standard.set(data, forKey: "copilot.usage.cache")
+        }
     }
 
     private func clearCaches() {

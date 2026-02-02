@@ -14,10 +14,10 @@ enum ProviderIdentifier: String, CaseIterable {
     case claude
     case codex
     case geminiCLI = "gemini_cli"
-    case openRouter = "open_router"
+    case openRouter = "openrouter"
     case openCode = "open_code"
     case antigravity
-    case openCodeZen = "open_code_zen"
+    case openCodeZen = "opencode_zen"
     case kimi
 
     var displayName: String {
