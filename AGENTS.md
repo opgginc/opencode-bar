@@ -167,19 +167,51 @@ func buildProviderSubmenu() -> [NSMenuItem] {
 
 <!-- opencode:reflection:start -->
 ### Error Handling & API Fallbacks
+- **Dynamic Binary Search for External Dependencies**: Don't hardcode paths for external executables
+   - Multiple Strategy Approach: Try 'which' command, login shell PATH, then fallback paths
+   - Installation Variations: Users may install tools via Homebrew, pip, or custom locations
+   - Example Failure: Users with Homebrew installation couldn't use app (hardcoded ~/.opencode/bin/opencode)
+   - Fix: Implement `findBinaryViaWhich()`, `findBinaryViaLoginShell()`, and hardcoded fallback array
+   - Pattern: Lazy initialization with `private lazy var opencodePath` ensures search runs only once
+- **Auth File Discovery Fallback**: Configuration files may exist in multiple locations
+   - Multiple Path Support: Check XDG_DATA_HOME, ~/.local/share, and ~/Library/Application Support
+   - Priority Order: Respect environment variables, then XDG defaults, then platform conventions
+   - Example Failure: Auth file not found error (#15) when using different OpenCode configurations
+   - Fix: Implement `getAuthFilePaths()` with sequential fallback attempts
+   - Pattern: Track `lastFoundAuthPath` for debug visibility and reuse
 - **API Response Type Flexibility**: External APIs may return different types than expected
   - Numeric Fields Can Be Strings: Fields like `balance` may come as String instead of Double/Int
   - Optional Fields May Vary: Some providers return fields that others don't (e.g., `reset_at`, `limit_window_seconds`)
-  - Pattern: Add computed properties for type conversion (e.g., `balanceAsDouble` converts String to Double)
-  - Example Fix: Codex `balance` returned as String, added `balanceAsDouble` computed property for conversion
+   - Pattern: Add computed properties for type conversion (e.g., `balanceAsDouble` converts String to Double)
+   - Example Fix: Codex `balance` returned as String, added `balanceAsDouble` computed property for conversion
+- **Cache Fallback on External Command Failures**: When external CLI/API commands fail, use cached data
+   - Graceful Degradation: Wrap external command calls in try-catch to prevent app crashes
+   - Fallback Calculation: Calculate metrics from cached data when external command fails
+   - Example: OpenCode Zen `stats --days` command failure falls back to cache for totalCost display
+   - Pattern: Add `calculateTotalCostFromCache()` method, wrap stats load in try-catch
+   - UI Feedback: Show `[stats: cached]` label to indicate fallback mode
+   - Benefit: App remains functional even when external tools are temporarily unavailable
+- **Appcast XML Generation in Workflows**: Heredoc can cause XML parsing errors
+   - Problem: Using heredoc to write appcast.xml in GitHub Actions workflows causes parsing failures
+   - Root Cause: Heredoc indentation or whitespace issues corrupt XML structure
+   - Fix: Use `printf` command instead of heredoc for XML generation
+   - Example: Changed from `cat << 'EOF' > appcast.xml` to `printf '%s\n' '...' > appcast.xml`
+   - Pattern: Use printf for structured data files (XML, JSON) in CI/CD workflows
 - **NSNumber Type Handling**: API responses may return `NSNumber` instead of `Int` or `Double`
    - Always check for `NSNumber` type when parsing numeric values from API responses
    - Pattern: `value as? NSNumber` → `doubleValue`/`intValue`
    - Example failure: Cost showing wrong value due to missing NSNumber handling
 - **Menu Bar App (LSUIElement) Special Requirements**:
   - UI Display: Must call `NSApp.activate(ignoringOtherApps: true)` before showing update dialogs
-  - Target Assignment: Menu item targets must be explicitly set to `NSApp.delegate` (not `self`)
-  - Window Management: Close blank Settings windows on app launch
+   - Target Assignment: Menu item targets must be explicitly set to `NSApp.delegate` (not `self`)
+   - Window Management: Close blank Settings windows on app launch
+- **Sparkle Update App Bundle Migration**: When app name changes, old bundles need migration
+   - Problem: Sparkle replaces bundle contents but keeps folder name, causing "damaged" errors
+   - Security: Use native FileManager/NSWorkspace APIs instead of bash scripts for migration
+   - Validation: Check bundle ID before deletion to prevent accidental deletion of unrelated apps
+   - Version Protection: Compare versions before deleting, launch existing app if same/newer
+   - Fix: Add `AppMigrationHelper` to automatically migrate (e.g., CopilotMonitor.app → OpenCode Bar.app)
+   - Pattern: Implement migration on app launch, use CFBundleExecutable for correct resolution
  - **Swift Concurrency & Actor Isolation**:
    - Task Capture: Always use `[weak self]` in Task blocks to avoid retain cycles
    - MainActor: Use `@MainActor [weak self]` pattern when updating UI from async contexts
@@ -328,8 +360,21 @@ func buildProviderSubmenu() -> [NSMenuItem] {
      - Pattern: Use `nonisolated(unsafe)` for `outputData` in async Process handlers
      - Safety Guarantee: Handlers are serialized by Process lifecycle, making this safe
      - Example Fix: OpenCodeZenProvider and AntigravityProvider both use this pattern
-     - Implementation: `nonisolated(unsafe) var outputData = Data()`
-  - **Prediction Range Boundary Safety**:
+      - Implementation: `nonisolated(unsafe) var outputData = Data()`
+   - **Error Status Display Instead of Loading**: Show meaningful status when auth is missing or errors occur
+      - Authentication Errors: Use `isAuthenticationError()` function to detect missing credentials
+      - Status Labels: Show "No Credentials" for auth errors, "Error" for general errors
+      - Infinite Loading Prevention: Remove failed providers from `loadingProviders` set to prevent repeated attempts
+      - Example Fix: Pay-as-you-go, Quota Status, and Gemini CLI sections show proper error states
+      - Pattern: Try-catch wrapper → check error type → update UI with status → remove from loading set
+   - **SwiftUI MenuBarExtra + AppKit NSStatusItem Duplication**:
+      - Problem: Using both SwiftUI `MenuBarExtra` AND creating `NSStatusItem` directly causes TWO menu bar icons
+      - Root Cause: Each approach independently creates a status bar item
+      - Solution: Use ONLY ONE approach - either SwiftUI MenuBarExtra with bridge, or pure AppKit NSStatusItem
+      - Current Pattern: SwiftUI MenuBarExtra with `isInserted: $isMenuEnabled` set to `false`, AppKit NSStatusItem handles everything
+      - Anti-Pattern: Creating `NSStatusBar.system.statusItem()` while also using `MenuBarExtra { }`
+      - Example Fix: Set `@State private var isMenuEnabled = false` and use `MenuBarExtra(isInserted: $isMenuEnabled)`
+   - **Prediction Range Boundary Safety**:
      - Negative Range Assertion: Counting remaining days can result in `remainingDays <= 0` on month-end
      - Crash Location: `1...remainingDays` range assertion fails when negative or zero
      - Solution: Add guard clause before range iteration to return early
@@ -384,7 +429,13 @@ func buildProviderSubmenu() -> [NSMenuItem] {
         - Initial Fetch Pattern: OpenCode Zen fetches 30 days progressively (~3 minutes total: 30 days × 4-6 seconds each)
         - Cache Threshold: 1-hour cache window appropriate for usage data that changes infrequently
         - Cache Success: Subsequent fetches show "(cached)" for all days, instant response
-        - Pattern: Hybrid approach (fetch recent + cache older) reduces API calls by 71%+
-        - Optimization: Ensure cache validation uses UTC calendar to match cache storage format
-
-<!-- opencode:reflection:end -->
+         - Pattern: Hybrid approach (fetch recent + cache older) reduces API calls by 71%+
+         - Optimization: Ensure cache validation uses UTC calendar to match cache storage format
+      - **GitHub Actions Workflow Input Handling**:
+         - Event Type Dependencies: Workflow inputs may not be available on all event types
+         - Example Failure: `inputs.version` undefined on push/PR events, causing workflow failure
+         - Solution: Use environment variable gating with `event_name` checks before accessing inputs
+         - Pattern: Check `github.event_name` to determine if dispatch event with manual inputs
+         - Prevention: Use conditional logic or provide default values for non-dispatch events
+ 
+ <!-- opencode:reflection:end -->

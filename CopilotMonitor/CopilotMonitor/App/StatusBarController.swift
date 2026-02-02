@@ -963,6 +963,9 @@ final class StatusBarController: NSObject {
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
         errorLogText += "Time: \(dateFormatter.string(from: Date()))\n"
         errorLogText += "App Version: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")\n"
+        errorLogText += "\n"
+        errorLogText += TokenManager.shared.getDebugEnvironmentInfo()
+        errorLogText += "\n"
         
         let alert = NSAlert()
         alert.messageText = "Provider Errors Detected"
