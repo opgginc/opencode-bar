@@ -225,12 +225,13 @@
 				OR2222222222222222222222 /* OpenRouterProvider.swift */,
 				F1DA8E47F4CFEFC3571708AD /* AntigravityProvider.swift */,
 				OZ2222222222222222222222 /* OpenCodeZenProvider.swift */,
-				KI2222222222222222222222 /* KimiProvider.swift */,
-			);
-			path = Providers;
-			sourceTree = "<group>";
-		};
-		ABBBBBBBBBBBBBBBBBBBBBBB = {
+			KI2222222222222222222222 /* KimiProvider.swift */,
+			283349002F313176004DADE1 /* ChutesProvider.swift */,
+		);
+		path = Providers;
+		sourceTree = "<group>";
+	};
+	ABBBBBBBBBBBBBBBBBBBBBBB = {
 			isa = PBXGroup;
 			children = (
 				ACCCCCCCCCCCCCCCCCCCCCCC /* CopilotMonitor */,
@@ -314,7 +315,6 @@
 		CLIPROVIDERS333333333333 /* Providers */ = {
 			isa = PBXGroup;
 			children = (
-				283349002F313176004DADE1 /* ChutesProvider.swift */,
 				CLICOPILOT22222222222222 /* CopilotCLIProvider.swift */,
 			);
 			path = Providers;
