@@ -87,7 +87,6 @@ struct AntigravityAccounts: Codable {
         let email: String
         let refreshToken: String
         let projectId: String
-        let rateLimitResetTimes: [String: Int64]?
     }
 
     let version: Int
@@ -386,11 +385,11 @@ final class TokenManager: @unchecked Sendable {
     }
 
     /// Gets all Gemini accounts from Antigravity accounts file
-    /// - Returns: Array of (index, email, refreshToken) tuples for all accounts
-    func getAllGeminiAccounts() -> [(index: Int, email: String, refreshToken: String)] {
+    /// - Returns: Array of (index, email, refreshToken, projectId) tuples for all accounts
+    func getAllGeminiAccounts() -> [(index: Int, email: String, refreshToken: String, projectId: String)] {
         guard let accounts = readAntigravityAccounts() else { return [] }
         return accounts.accounts.enumerated().map { index, account in
-            (index: index, email: account.email, refreshToken: account.refreshToken)
+            (index: index, email: account.email, refreshToken: account.refreshToken, projectId: account.projectId)
         }
     }
 

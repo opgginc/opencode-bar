@@ -29,6 +29,7 @@ echo ""
 for ((i=0; i<ACCOUNT_COUNT; i++)); do
     REFRESH=$(jq -r ".accounts[$i].refreshToken // empty" "$ACCOUNTS_FILE")
     EMAIL=$(jq -r ".accounts[$i].email // \"unknown\"" "$ACCOUNTS_FILE")
+    PROJECT_ID=$(jq -r ".accounts[$i].projectId // empty" "$ACCOUNTS_FILE")
     
     if [[ "$i" -eq "$ACTIVE_INDEX" ]]; then
         ACTIVE_MARKER=" (active)"
@@ -59,10 +60,11 @@ for ((i=0; i<ACCOUNT_COUNT; i++)); do
         continue
     fi
     
+    # project parameter is required to get all models including gemini-3 variants
     curl -s -X POST "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota" \
         -H "Authorization: Bearer $ACCESS" \
         -H "Content-Type: application/json" \
-        -d '{}' | jq '
+        -d "{\"project\": \"$PROJECT_ID\"}" | jq '
     {
         "quotas": [.buckets[] | {
             "model": .modelId,

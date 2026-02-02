@@ -10,7 +10,7 @@ final class GeminiCLIProviderTests: XCTestCase {
         let decoder = JSONDecoder()
         let response = try decoder.decode(GeminiQuotaResponse.self, from: data)
         
-        XCTAssertEqual(response.buckets.count, 3)
+        XCTAssertEqual(response.buckets.count, 5)
         
         XCTAssertEqual(response.buckets[0].modelId, "gemini-2.0-flash")
         XCTAssertEqual(response.buckets[0].remainingFraction, 1.0)
@@ -21,6 +21,12 @@ final class GeminiCLIProviderTests: XCTestCase {
         
         XCTAssertEqual(response.buckets[2].modelId, "gemini-2.5-pro")
         XCTAssertEqual(response.buckets[2].remainingFraction, 0.85)
+        
+        XCTAssertEqual(response.buckets[3].modelId, "gemini-3-flash-preview")
+        XCTAssertEqual(response.buckets[3].remainingFraction, 0.95)
+        
+        XCTAssertEqual(response.buckets[4].modelId, "gemini-3-pro-preview")
+        XCTAssertEqual(response.buckets[4].remainingFraction, 0.80)
     }
     
     func testMinimumRemainingFractionCalculation() throws {
@@ -32,10 +38,10 @@ final class GeminiCLIProviderTests: XCTestCase {
         
         let minFraction = response.buckets.map(\.remainingFraction).min()
         
-        XCTAssertEqual(minFraction, 0.85)
+        XCTAssertEqual(minFraction, 0.80)
         
         let remainingPercentage = (minFraction ?? 0.0) * 100.0
-        XCTAssertEqual(remainingPercentage, 85.0)
+        XCTAssertEqual(remainingPercentage, 80.0)
     }
     
     func testResetTimeParsingFromISO8601() throws {
@@ -50,7 +56,7 @@ final class GeminiCLIProviderTests: XCTestCase {
             formatter.date(from: bucket.resetTime)
         }
         
-        XCTAssertEqual(resetDates.count, 3)
+        XCTAssertEqual(resetDates.count, 5)
         
         let earliestReset = resetDates.min()
         XCTAssertNotNil(earliestReset)
