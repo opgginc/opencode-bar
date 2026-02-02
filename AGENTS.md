@@ -547,5 +547,17 @@ func buildProviderSubmenu() -> [NSMenuItem] {
        - Solution: Compare by numeric cost value instead of string name to ensure unique identification
        - Pattern: Use `cost` field or numeric identifier when comparing/selecting presets with potentially duplicate names
        - Context: Menu item selection relies on accurate preset matching for correct pricing display
+   - **Copilot Quota Reset Date Tracking**:
+        - Missing Reset Date: Copilot quota reset date wasn't tracked in DetailedUsage struct
+        - Usage Prediction Impact: Without reset date, cannot accurately predict end-of-month quota usage
+        - Fix: Add `copilotQuotaResetDateUTC` field to DetailedUsage model and update encoding/decoding
+        - Pattern: When adding provider-specific data, ensure Codable conformance includes all new fields
+        - Example: CopilotProvider now passes `usage.quotaResetDateUTC` to DetailedUsage constructor
+   - **Test Model Alignment**:
+        - Test-Implementation Mismatch: Tests using wrong billing model (payAsYouGo vs quotaBased) cause assertion failures
+        - Example Failure: CodexProviderTests used payAsYouGo model while provider is quotaBased
+        - Fix: Update test models to match actual provider implementation (remaining/entitlement vs utilization/cost)
+        - Pattern: Verify test models match provider type when fixing provider bugs
+        - Validation: Check both assertions and expected field types (Int vs Double, optional vs required)
 
    <!-- opencode:reflection:end -->
