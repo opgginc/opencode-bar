@@ -71,6 +71,12 @@ struct DetailedUsage {
     // Multiple Gemini accounts support
     let geminiAccounts: [GeminiAccountQuota]?
 
+    // Copilot-specific fields (overage tracking)
+    let copilotOverageCost: Double?
+    let copilotOverageRequests: Double?
+    let copilotUsedRequests: Int?
+    let copilotLimitRequests: Int?
+
     init(
         dailyUsage: Double? = nil,
         weeklyUsage: Double? = nil,
@@ -104,7 +110,11 @@ struct DetailedUsage {
         creditsRemaining: Double? = nil,
         creditsTotal: Double? = nil,
         authSource: String? = nil,
-        geminiAccounts: [GeminiAccountQuota]? = nil
+        geminiAccounts: [GeminiAccountQuota]? = nil,
+        copilotOverageCost: Double? = nil,
+        copilotOverageRequests: Double? = nil,
+        copilotUsedRequests: Int? = nil,
+        copilotLimitRequests: Int? = nil
     ) {
         self.dailyUsage = dailyUsage
         self.weeklyUsage = weeklyUsage
@@ -139,6 +149,10 @@ struct DetailedUsage {
         self.creditsTotal = creditsTotal
         self.authSource = authSource
         self.geminiAccounts = geminiAccounts
+        self.copilotOverageCost = copilotOverageCost
+        self.copilotOverageRequests = copilotOverageRequests
+        self.copilotUsedRequests = copilotUsedRequests
+        self.copilotLimitRequests = copilotLimitRequests
     }
 }
 
@@ -153,6 +167,7 @@ extension DetailedUsage: Codable {
         case sessions, messages, avgCostPerDay, email
         case dailyHistory, monthlyCost, creditsRemaining, creditsTotal
         case authSource, geminiAccounts
+        case copilotOverageCost, copilotOverageRequests, copilotUsedRequests, copilotLimitRequests
     }
 
     init(from decoder: Decoder) throws {
@@ -190,6 +205,10 @@ extension DetailedUsage: Codable {
         creditsTotal = try container.decodeIfPresent(Double.self, forKey: .creditsTotal)
         authSource = try container.decodeIfPresent(String.self, forKey: .authSource)
         geminiAccounts = try container.decodeIfPresent([GeminiAccountQuota].self, forKey: .geminiAccounts)
+        copilotOverageCost = try container.decodeIfPresent(Double.self, forKey: .copilotOverageCost)
+        copilotOverageRequests = try container.decodeIfPresent(Double.self, forKey: .copilotOverageRequests)
+        copilotUsedRequests = try container.decodeIfPresent(Int.self, forKey: .copilotUsedRequests)
+        copilotLimitRequests = try container.decodeIfPresent(Int.self, forKey: .copilotLimitRequests)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -227,6 +246,10 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(creditsTotal, forKey: .creditsTotal)
         try container.encodeIfPresent(authSource, forKey: .authSource)
         try container.encodeIfPresent(geminiAccounts, forKey: .geminiAccounts)
+        try container.encodeIfPresent(copilotOverageCost, forKey: .copilotOverageCost)
+        try container.encodeIfPresent(copilotOverageRequests, forKey: .copilotOverageRequests)
+        try container.encodeIfPresent(copilotUsedRequests, forKey: .copilotUsedRequests)
+        try container.encodeIfPresent(copilotLimitRequests, forKey: .copilotLimitRequests)
     }
 }
 
@@ -248,5 +271,7 @@ extension DetailedUsage {
             || dailyHistory != nil || monthlyCost != nil
             || creditsRemaining != nil || creditsTotal != nil
             || authSource != nil || geminiAccounts != nil
+            || copilotOverageCost != nil || copilotOverageRequests != nil
+            || copilotUsedRequests != nil || copilotLimitRequests != nil
     }
 }

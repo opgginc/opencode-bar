@@ -302,6 +302,36 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
+        case .copilot:
+            if let usedRequests = details.copilotUsedRequests,
+               let limitRequests = details.copilotLimitRequests,
+               limitRequests > 0 {
+                let filledBlocks = Int((Double(usedRequests) / Double(limitRequests)) * 10)
+                let emptyBlocks = 10 - filledBlocks
+                let progressBar = String(repeating: "═", count: filledBlocks) + String(repeating: "░", count: emptyBlocks)
+                let progressItem = NSMenuItem()
+                progressItem.view = createDisabledLabelView(text: "[\(progressBar)] \(usedRequests)/\(limitRequests)")
+                submenu.addItem(progressItem)
+
+                let usedItem = NSMenuItem()
+                usedItem.view = createDisabledLabelView(text: "This Month: \(usedRequests) used")
+                submenu.addItem(usedItem)
+
+                let freeItem = NSMenuItem()
+                freeItem.view = createDisabledLabelView(text: "Free Quota: \(limitRequests)")
+                submenu.addItem(freeItem)
+            }
+
+            if let email = details.email {
+                submenu.addItem(NSMenuItem.separator())
+                let emailItem = NSMenuItem()
+                emailItem.view = createDisabledLabelView(
+                    text: "Email: \(email)",
+                    icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Email")
+                )
+                submenu.addItem(emailItem)
+            }
+
         default:
             break
         }

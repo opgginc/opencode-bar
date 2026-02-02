@@ -1,5 +1,4 @@
 import Foundation
-import WebKit
 import os.log
 
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "CopilotProvider")
@@ -8,38 +7,54 @@ private let logger = Logger(subsystem: "com.opencodeproviders", category: "Copil
 
 /// Provider for GitHub Copilot usage tracking
 /// Uses quota-based model with overage cost calculation
+/// Authentication via browser cookies (Chrome/Brave/Arc/Edge)
 final class CopilotProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .copilot
     let type: ProviderType = .quotaBased
 
-    private let webView: WKWebView
     private let cacheKey = "cached_copilot_usage"
-    private var cachedUserEmail: String?
+    private let cacheQueue = DispatchQueue(label: "com.opencodeproviders.CopilotProvider.cache")
+    private var _cachedUserEmail: String?
+    private var _cachedCustomerId: String?
 
-    /// Initialize with WebView for API access
-    /// - Parameter webView: WebView instance from AuthManager for authenticated requests
-    init(webView: WKWebView) {
-        self.webView = webView
+    private var cachedUserEmail: String? {
+        get { cacheQueue.sync { _cachedUserEmail } }
+        set { cacheQueue.sync { _cachedUserEmail = newValue } }
+    }
+
+    private var cachedCustomerId: String? {
+        get { cacheQueue.sync { _cachedCustomerId } }
+        set { cacheQueue.sync { _cachedCustomerId = newValue } }
+    }
+
+    init() {
+        logger.info("CopilotProvider: Initialized (cookie-based authentication)")
     }
 
     // MARK: - ProviderProtocol Implementation
 
-    /// Fetches Copilot usage data from GitHub internal API
-    /// - Returns: ProviderResult.quotaBased with remaining, entitlement, and overage
-    /// - Throws: ProviderError if fetch fails (falls back to cached data)
     func fetch() async throws -> ProviderResult {
-        logger.info("CopilotProvider: Starting fetch")
+        let cookies: GitHubCookies
+        do {
+            cookies = try BrowserCookieService.shared.getGitHubCookies()
+        } catch {
+            logger.warning("CopilotProvider: Failed to get cookies: \(error.localizedDescription)")
+            return try loadCachedUsageWithEmail()
+        }
 
-        await fetchUserEmail()
+        guard cookies.isValid else {
+            logger.warning("CopilotProvider: Invalid cookies, trying cache")
+            return try loadCachedUsageWithEmail()
+        }
 
-        guard let customerId = await fetchCustomerId() else {
+        guard let customerId = await fetchCustomerId(cookies: cookies) else {
             logger.warning("CopilotProvider: Failed to get customer ID, trying cache")
             return try loadCachedUsageWithEmail()
         }
 
         logger.info("CopilotProvider: Customer ID obtained - \(customerId)")
 
-        guard let usage = await fetchUsageData(customerId: customerId) else {
+        guard let usage = await fetchUsageData(customerId: customerId, cookies: cookies) else {
             logger.warning("CopilotProvider: Failed to fetch usage data, trying cache")
             return try loadCachedUsageWithEmail()
         }
@@ -70,167 +85,72 @@ final class CopilotProvider: ProviderProtocol {
             details: DetailedUsage(
                 email: cachedUserEmail,
                 dailyHistory: dailyHistory,
-                authSource: "Browser Cookies (Chrome/Brave/Arc/Edge)"
+                authSource: "Browser Cookies (Chrome/Brave/Arc/Edge)",
+                copilotOverageCost: usage.netBilledAmount,
+                copilotOverageRequests: usage.netQuantity,
+                copilotUsedRequests: usage.usedRequests,
+                copilotLimitRequests: usage.limitRequests
             )
         )
     }
 
     // MARK: - Customer ID Fetching
 
-    /// Attempts to fetch customer ID using multiple strategies
-    /// - Returns: Customer ID string or nil if all strategies fail
-    private func fetchCustomerId() async -> String? {
-        // Strategy 1: API endpoint
-        if let apiId = await fetchCustomerIdFromAPI() {
-            return apiId
+    private func fetchCustomerId(cookies: GitHubCookies) async -> String? {
+        if let cached = cachedCustomerId {
+            return cached
         }
 
-        // Strategy 2: DOM extraction
-        if let domId = await fetchCustomerIdFromDOM() {
-            return domId
-        }
-
-        // Strategy 3: HTML regex
-        if let htmlId = await fetchCustomerIdFromHTML() {
+        if let htmlId = await fetchCustomerIdFromBillingPage(cookies: cookies) {
+            cachedCustomerId = htmlId
             return htmlId
         }
 
+        logger.warning("CopilotProvider: All customer ID strategies failed")
         return nil
     }
 
-    /// Fetch user email from GitHub API
-    private func fetchUserEmail() async {
-        logger.info("CopilotProvider: Fetching user email")
+    // MARK: - Billing Page Customer ID Extraction
+    /// - Parameter cookies: Valid GitHub cookies
+    /// - Returns: Customer ID or nil
+    private func fetchCustomerIdFromBillingPage(cookies: GitHubCookies) async -> String? {
+        logger.info("CopilotProvider: [Step 2] Trying billing page HTML extraction")
 
-        let userApiJS = """
-        return await (async function() {
-            try {
-                const response = await fetch('/api/v3/user', {
-                    headers: { 'Accept': 'application/json' }
-                });
-                if (!response.ok) return JSON.stringify({ error: 'HTTP ' + response.status });
-                const data = await response.json();
-                return JSON.stringify(data);
-            } catch (e) {
-                return JSON.stringify({ error: e.toString() });
-            }
-        })()
-        """
+        guard let url = URL(string: "https://github.com/settings/billing") else { return nil }
+
+        var request = URLRequest(url: url)
+        request.setValue(cookies.cookieHeader, forHTTPHeaderField: "Cookie")
+        request.setValue("text/html", forHTTPHeaderField: "Accept")
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
 
         do {
-            let result = try await webView.callAsyncJavaScript(userApiJS, arguments: [:], in: nil, contentWorld: .defaultClient)
+            let (data, response) = try await URLSession.shared.data(for: request)
 
-            if let jsonString = result as? String,
-               let data = jsonString.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                    logger.warning("CopilotProvider: Billing page auth failed (HTTP \(httpResponse.statusCode))")
+                    return nil
+                }
+            }
 
-                let email = json["email"] as? String
-                let login = json["login"] as? String
+            guard let html = String(data: data, encoding: .utf8) else { return nil }
 
-                if let userEmail = email ?? login {
-                    self.cachedUserEmail = userEmail
-                    logger.info("CopilotProvider: User email obtained - \(userEmail)")
+            // Try multiple regex patterns for robustness
+            let patterns = [
+                #""customerId":\s*(\d+)"#,      // JSON in script
+                #""customerId&quot;:(\d+)"#,    // HTML-encoded JSON
+                #"customer_id=(\d+)"#,          // URL parameter
+                #"customerId":(\d+)"#           // Without quotes
+            ]
+
+            for pattern in patterns {
+                if let customerId = extractCustomerIdWithPattern(pattern, from: html) {
+                    logger.info("CopilotProvider: Billing page extraction successful - \(customerId)")
+                    return customerId
                 }
             }
         } catch {
-            logger.error("CopilotProvider: Failed to fetch email - \(error.localizedDescription)")
-        }
-    }
-
-    /// Fetch customer ID and user info from GitHub API endpoint
-    /// Also extracts email and login for display purposes
-    private func fetchCustomerIdFromAPI() async -> String? {
-        logger.info("CopilotProvider: [Step 1] Trying API (/api/v3/user)")
-
-        let userApiJS = """
-        return await (async function() {
-            try {
-                const response = await fetch('/api/v3/user', {
-                    headers: { 'Accept': 'application/json' }
-                });
-                if (!response.ok) return JSON.stringify({ error: 'HTTP ' + response.status });
-                const data = await response.json();
-                return JSON.stringify(data);
-            } catch (e) {
-                return JSON.stringify({ error: e.toString() });
-            }
-        })()
-        """
-
-        do {
-            let result = try await webView.callAsyncJavaScript(userApiJS, arguments: [:], in: nil, contentWorld: .defaultClient)
-
-            if let jsonString = result as? String,
-               let data = jsonString.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let id = json["id"] as? Int {
-
-                let email = json["email"] as? String
-                let login = json["login"] as? String
-
-                if let userEmail = email ?? login {
-                    self.cachedUserEmail = userEmail
-                    logger.info("CopilotProvider: User info obtained - \(userEmail)")
-                }
-
-                logger.info("CopilotProvider: API ID obtained - \(id)")
-                return String(id)
-            }
-        } catch {
-            logger.error("CopilotProvider: API call error - \(error.localizedDescription)")
-        }
-
-        return nil
-    }
-
-    /// Extract customer ID from DOM script tag
-    private func fetchCustomerIdFromDOM() async -> String? {
-        logger.info("CopilotProvider: [Step 2] Trying DOM extraction")
-
-        let extractionJS = """
-        return (function() {
-            const el = document.querySelector('script[data-target="react-app.embeddedData"]');
-            if (el) {
-                try {
-                    const data = JSON.parse(el.textContent);
-                    if (data && data.payload && data.payload.customer && data.payload.customer.customerId) {
-                        return data.payload.customer.customerId.toString();
-                    }
-                } catch(e) {}
-            }
-            return null;
-        })()
-        """
-
-        if let extracted = try? await evalJSONString(extractionJS) {
-            logger.info("CopilotProvider: DOM extraction successful - \(extracted)")
-            return extracted
-        }
-
-        return nil
-    }
-
-    /// Extract customer ID from HTML using regex patterns
-    private func fetchCustomerIdFromHTML() async -> String? {
-        logger.info("CopilotProvider: [Step 3] Trying HTML regex")
-
-        let htmlJS = "return document.documentElement.outerHTML"
-        guard let html = try? await webView.callAsyncJavaScript(htmlJS, arguments: [:], in: nil, contentWorld: .defaultClient) as? String else {
-            return nil
-        }
-
-        let patterns = [
-            #"customerId":(\d+)"#,
-            #"customerId&quot;:(\d+)"#,
-            #"customer_id=(\d+)"#,
-            #"data-customer-id="(\d+)""#
-        ]
-
-        for pattern in patterns {
-            if let customerId = extractCustomerIdWithPattern(pattern, from: html) {
-                logger.info("CopilotProvider: HTML extraction successful - \(customerId)")
-                return customerId
-            }
+            logger.error("CopilotProvider: Billing page fetch error - \(error.localizedDescription)")
         }
 
         return nil
@@ -248,42 +168,51 @@ final class CopilotProvider: ProviderProtocol {
 
     // MARK: - Usage Data Fetching
 
-    /// Fetch usage data from GitHub billing API
-    /// - Parameter customerId: GitHub customer ID
+    /// Fetch usage data from GitHub billing API using cookies
+    /// - Parameters:
+    ///   - customerId: GitHub customer ID
+    ///   - cookies: Valid GitHub cookies
     /// - Returns: CopilotUsage or nil if fetch fails
-    private func fetchUsageData(customerId: String) async -> CopilotUsage? {
-        let cardJS = """
-        return await (async function() {
-            try {
-                const res = await fetch('/settings/billing/copilot_usage_card?customer_id=\(customerId)&period=3', {
-                    headers: { 'Accept': 'application/json', 'x-requested-with': 'XMLHttpRequest' }
-                });
-                const text = await res.text();
-                try {
-                    const json = JSON.parse(text);
-                    json._debug_timestamp = new Date().toISOString();
-                    return json;
-                } catch (e) {
-                    return { error: 'JSON Parse Error', body: text };
-                }
-            } catch(e) { return { error: e.toString() }; }
-        })()
-        """
+    private func fetchUsageData(customerId: String, cookies: GitHubCookies) async -> CopilotUsage? {
+        let urlString = "https://github.com/settings/billing/copilot_usage_card?customer_id=\(customerId)&period=3"
+
+        guard let url = URL(string: urlString) else {
+            logger.error("CopilotProvider: Invalid usage URL")
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue(cookies.cookieHeader, forHTTPHeaderField: "Cookie")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
 
         do {
-            let result = try await webView.callAsyncJavaScript(cardJS, arguments: [:], in: nil, contentWorld: .defaultClient)
+            let (data, response) = try await URLSession.shared.data(for: request)
 
-            guard let rootDict = result as? [String: Any] else {
-                logger.error("CopilotProvider: Invalid response type")
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                    logger.warning("CopilotProvider: Usage API auth failed (HTTP \(httpResponse.statusCode))")
+                    return nil
+                }
+
+                if httpResponse.statusCode != 200 {
+                    logger.warning("CopilotProvider: Usage API returned HTTP \(httpResponse.statusCode)")
+                    return nil
+                }
+            }
+
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                logger.error("CopilotProvider: Failed to parse usage JSON")
                 return nil
             }
 
-            if let usage = parseUsageFromResponse(rootDict) {
-                logger.info("CopilotProvider: Usage data parsed successfully")
+            if let usage = parseUsageFromResponse(json) {
+                logger.info("CopilotProvider: Usage data parsed - used: \(usage.usedRequests), limit: \(usage.limitRequests)")
                 return usage
             }
         } catch {
-            logger.error("CopilotProvider: JS execution error - \(error.localizedDescription)")
+            logger.error("CopilotProvider: Usage fetch error - \(error.localizedDescription)")
         }
 
         return nil
@@ -348,23 +277,6 @@ final class CopilotProvider: ProviderProtocol {
         return 0
     }
 
-    // MARK: - Helper Methods
-
-    /// Evaluate JavaScript and return result as String
-    private func evalJSONString(_ js: String) async throws -> String {
-        let result = try await webView.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .defaultClient)
-
-        if let json = result as? String {
-            return json
-        } else if let dict = result as? [String: Any],
-                  let data = try? JSONSerialization.data(withJSONObject: dict),
-                  let json = String(data: data, encoding: .utf8) {
-            return json
-        } else {
-            throw ProviderError.providerError("Invalid JavaScript result type")
-        }
-    }
-
     // MARK: - Caching
 
     /// Save usage data to UserDefaults cache
@@ -374,28 +286,6 @@ final class CopilotProvider: ProviderProtocol {
             UserDefaults.standard.set(encoded, forKey: cacheKey)
             logger.info("CopilotProvider: Cache saved")
         }
-    }
-
-    /// Load cached usage data and convert to ProviderResult
-    /// - Throws: ProviderError.providerError if no cache available
-    private func loadCachedUsage() throws -> ProviderResult {
-        guard let data = UserDefaults.standard.data(forKey: cacheKey),
-              let cached = try? JSONDecoder().decode(CachedUsage.self, from: data) else {
-            logger.error("CopilotProvider: No cached data available")
-            throw ProviderError.providerError("No cached data available")
-        }
-
-        let usage = cached.usage
-        let remaining = usage.limitRequests - usage.usedRequests
-
-        logger.info("CopilotProvider: Using cached data from \(cached.timestamp)")
-
-        let providerUsage = ProviderUsage.quotaBased(
-            remaining: remaining,
-            entitlement: usage.limitRequests,
-            overagePermitted: true
-        )
-        return ProviderResult(usage: providerUsage, details: nil)
     }
 
     /// Load cached usage data with email and convert to ProviderResult

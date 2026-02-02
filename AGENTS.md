@@ -69,19 +69,22 @@ let rightX = MenuDesignToken.rightElementX  // 270 (computed)
 - When adding new constants, add them to `MenuDesignToken.swift` first, then update this section
 
 ### Build & Run Commands
+1. Find my DerivedData directory. (`~/Library/Developer/Xcode/DerivedData/CopilotMonitor-??????` -> DerivedDataDirectory: `CopilotMonitor-??????`)
+2. Use DerivedData directory name in this script:
+
 ```bash
 # Build
 xcodebuild -project CopilotMonitor/CopilotMonitor.xcodeproj \
   -scheme CopilotMonitor -configuration Debug build
 
 # Run (after build)
-open ~/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/*.app
+open ~/Library/Developer/Xcode/DerivedData/{DerivedDataDirectory}/Build/Products/Debug/*.app
 
 # Kill + Build + Run (one-liner)
 pkill -x "OpenCode Bar" 2>/dev/null; \
 xcodebuild -project CopilotMonitor/CopilotMonitor.xcodeproj \
   -scheme CopilotMonitor -configuration Debug build && \
-open ~/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/*.app
+open ~/Library/Developer/Xcode/DerivedData/{DerivedDataDirectory}/Build/Products/Debug/*.app
 
 # Watch logs
 log stream --predicate 'subsystem == "com.opencodeproviders"' --level debug
