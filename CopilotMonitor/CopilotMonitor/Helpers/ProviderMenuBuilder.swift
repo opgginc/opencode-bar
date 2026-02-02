@@ -442,10 +442,11 @@ extension StatusBarController {
 
         case .chutes:
             if let daily = details.dailyUsage,
-               let limit = details.limit {
+               let limit = details.limit,
+               let limitRemaining = details.limitRemaining {
                 let used = Int(daily)
                 let total = Int(limit)
-                let remaining = max(0, total - used)
+                let remaining = Int(limitRemaining)
                 let percentage = total > 0 ? Int((Double(used) / Double(total)) * 100) : 0
 
                 let item = NSMenuItem()

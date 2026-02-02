@@ -5,37 +5,42 @@ private let logger = Logger(subsystem: "com.opencodeproviders", category: "Chute
 
 // MARK: - Chutes API Response Models
 
-/// Response structure from Chutes quota API
-struct ChutesQuotaResponse: Codable {
-    let quota: Int?
-    let used: Int?
-    let remaining: Int?
-    let resetAt: String?
-    let tier: String?
+/// Response from /users/me/quotas endpoint (returns array)
+struct ChutesQuotaItem: Codable {
+    let updatedAt: String
+    let userId: String
+    let chuteId: String
+    let isDefault: Bool
+    let paymentRefreshDate: String?
+    let quota: Int
 
     enum CodingKeys: String, CodingKey {
+        case updatedAt = "updated_at"
+        case userId = "user_id"
+        case chuteId = "chute_id"
+        case isDefault = "is_default"
+        case paymentRefreshDate = "payment_refresh_date"
         case quota
-        case used
-        case remaining
-        case resetAt = "reset_at"
-        case tier
     }
+}
+
+/// Response from /users/me/quota_usage/{chute_id} endpoint
+struct ChutesQuotaUsage: Codable {
+    let quota: Int
+    let used: Int
 }
 
 // MARK: - ChutesProvider Implementation
 
 /// Provider for Chutes AI API usage tracking
 /// Uses quota-based model with daily limits (300/2000/5000 per day)
-/// Resets at 00:00 UTC daily
+/// Combines data from /users/me/quotas and /users/me/quota_usage/* endpoints
 final class ChutesProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .chutes
     let type: ProviderType = .quotaBased
 
     private let tokenManager: TokenManager
     private let session: URLSession
-
-    /// Known quota tiers for Chutes
-    private static let quotaTiers = [300, 2000, 5000]
 
     init(tokenManager: TokenManager = .shared, session: URLSession = .shared) {
         self.tokenManager = tokenManager
@@ -44,20 +49,70 @@ final class ChutesProvider: ProviderProtocol {
 
     // MARK: - ProviderProtocol Implementation
 
-    /// Fetches Chutes quota usage from API
-    /// - Returns: ProviderResult with remaining quota
+    /// Fetches Chutes quota usage from both API endpoints
+    /// 1. Gets quota info from /users/me/quotas
+    /// 2. Gets usage from /users/me/quota_usage/*
+    /// - Returns: ProviderResult with combined quota and usage data
     /// - Throws: ProviderError if fetch fails
     func fetch() async throws -> ProviderResult {
-        // Get API key from TokenManager
         guard let apiKey = tokenManager.getChutesAPIKey() else {
             logger.error("Chutes API key not found")
             throw ProviderError.authenticationFailed("Chutes API key not available")
         }
 
-        // Build request
+        // Fetch both endpoints in parallel
+        async let quotasTask = fetchQuotas(apiKey: apiKey)
+        async let usageTask = fetchQuotaUsage(apiKey: apiKey)
+
+        let quotaItems = try await quotasTask
+        let usage = try await usageTask
+
+        // Find the default quota (is_default: true) or first item
+        guard let quotaItem = quotaItems.first(where: { $0.isDefault }) ?? quotaItems.first else {
+            logger.error("No quota information found in Chutes response")
+            throw ProviderError.decodingError("No quota data available")
+        }
+
+        let quota = quotaItem.quota
+        let used = usage.used
+        let remaining = max(0, quota - used)
+        let remainingPercentage = Int((Double(remaining) / Double(quota)) * 100)
+
+        logger.info("Chutes usage fetched: \(used)/\(quota) used, \(remaining) remaining (\(remainingPercentage)%)")
+
+        let providerUsage = ProviderUsage.quotaBased(
+            remaining: remainingPercentage,
+            entitlement: 100,
+            overagePermitted: false
+        )
+
+        // Parse payment refresh date if available
+        let resetPeriod: String
+        if let paymentDate = quotaItem.paymentRefreshDate,
+           let date = Self.parseISO8601Date(paymentDate) {
+            resetPeriod = Self.formatResetTime(date)
+        } else {
+            resetPeriod = Self.formatResetTime(Self.calculateNextUTCReset())
+        }
+
+        let details = DetailedUsage(
+            dailyUsage: Double(used),
+            limit: Double(quota),
+            limitRemaining: Double(remaining),
+            resetPeriod: resetPeriod,
+            planType: "\(quota)/day",
+            authSource: tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+        )
+
+        return ProviderResult(usage: providerUsage, details: details)
+    }
+
+    // MARK: - Private Helpers
+
+    /// Fetches quota information from /users/me/quotas
+    private func fetchQuotas(apiKey: String) async throws -> [ChutesQuotaItem] {
         guard let url = URL(string: "https://api.chutes.ai/users/me/quotas") else {
-            logger.error("Invalid Chutes API URL")
-            throw ProviderError.networkError("Invalid API endpoint")
+            throw ProviderError.networkError("Invalid quotas URL")
         }
 
         var request = URLRequest(url: url)
@@ -65,124 +120,75 @@ final class ChutesProvider: ProviderProtocol {
         request.setValue(apiKey, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        // Execute request
         let (data, response) = try await session.data(for: request)
 
-        // Check HTTP status
         guard let httpResponse = response as? HTTPURLResponse else {
-            logger.error("Invalid response type from Chutes API")
             throw ProviderError.networkError("Invalid response type")
         }
 
-        // Handle authentication errors
         if httpResponse.statusCode == 401 {
-            logger.warning("Chutes API returned 401 - API key invalid or expired")
-            throw ProviderError.authenticationFailed("API key invalid or expired")
+            throw ProviderError.authenticationFailed("API key invalid")
         }
 
-        // Handle other HTTP errors
         guard (200...299).contains(httpResponse.statusCode) else {
-            logger.error("Chutes API returned status \(httpResponse.statusCode)")
             throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
         }
 
-        // Parse response
         do {
-            let decoder = JSONDecoder()
-            let quotaResponse = try decoder.decode(ChutesQuotaResponse.self, from: data)
-
-            let quota = quotaResponse.quota ?? 0
-            let used = quotaResponse.used ?? 0
-            let remaining = quotaResponse.remaining ?? max(0, quota - used)
-
-            guard quota > 0 else {
-                logger.error("Chutes API returned invalid quota: \(quota)")
-                throw ProviderError.decodingError("Invalid quota value from API")
-            }
-
-            let remainingPercentage = Int((Double(remaining) / Double(quota)) * 100)
-
-            let resetDate: Date
-            if let resetAtString = quotaResponse.resetAt {
-                resetDate = Self.parseResetTime(resetAtString) ?? Self.calculateNextUTCReset()
-            } else {
-                resetDate = Self.calculateNextUTCReset()
-            }
-
-            logger.info("Chutes usage fetched: \(used)/\(quota) used, \(remaining) remaining (\(remainingPercentage)%)")
-
-            let usage = ProviderUsage.quotaBased(
-                remaining: remainingPercentage,
-                entitlement: 100,
-                overagePermitted: false
-            )
-
-            let details = DetailedUsage(
-                dailyUsage: Double(used),
-                limit: Double(quota),
-                limitRemaining: Double(remaining),
-                resetPeriod: Self.formatResetTime(resetDate),
-                planType: quotaResponse.tier ?? "\(quota)/day",
-                authSource: tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
-            )
-
-            return ProviderResult(usage: usage, details: details)
-        } catch let error as DecodingError {
-            logger.error("Failed to decode Chutes response: \(error.localizedDescription)")
-            throw ProviderError.decodingError("Invalid response format: \(error.localizedDescription)")
+            return try JSONDecoder().decode([ChutesQuotaItem].self, from: data)
         } catch {
-            logger.error("Unexpected error parsing Chutes response: \(error.localizedDescription)")
-            throw ProviderError.providerError("Failed to parse response: \(error.localizedDescription)")
+            logger.error("Failed to decode quotas: \(error.localizedDescription)")
+            throw ProviderError.decodingError("Invalid quotas format")
         }
     }
 
-    // MARK: - Private Helpers
-
-    /// Parses tier string to quota amount
-    /// - Parameter tier: Tier string (e.g., "300", "2000", "5000", "free", "pro", "enterprise")
-    /// - Returns: Quota amount if recognized, nil otherwise
-    private static func parseTierToQuota(_ tier: String) -> Int? {
-        // Direct numeric tier
-        if let numericQuota = Int(tier), quotaTiers.contains(numericQuota) {
-            return numericQuota
+    /// Fetches usage from /users/me/quota_usage/*
+    private func fetchQuotaUsage(apiKey: String) async throws -> ChutesQuotaUsage {
+        guard let url = URL(string: "https://api.chutes.ai/users/me/quota_usage/*") else {
+            throw ProviderError.networkError("Invalid quota_usage URL")
         }
 
-        // Named tiers
-        switch tier.lowercased() {
-        case "free", "basic":
-            return 300
-        case "pro", "standard":
-            return 2000
-        case "enterprise", "unlimited":
-            return 5000
-        default:
-            return nil
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(apiKey, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ProviderError.networkError("Invalid response type")
+        }
+
+        if httpResponse.statusCode == 401 {
+            throw ProviderError.authenticationFailed("API key invalid")
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
+        }
+
+        do {
+            return try JSONDecoder().decode(ChutesQuotaUsage.self, from: data)
+        } catch {
+            logger.error("Failed to decode quota_usage: \(error.localizedDescription)")
+            throw ProviderError.decodingError("Invalid quota_usage format")
         }
     }
 
-    /// Parses reset time string to Date
-    /// - Parameter resetString: ISO8601 date string or time string
-    /// - Returns: Parsed date or nil if parsing fails
-    private static func parseResetTime(_ resetString: String) -> Date? {
-        // Try ISO8601 with fractional seconds first
+    /// Parses ISO8601 date string
+    private static func parseISO8601Date(_ string: String) -> Date? {
         let formatterWithFrac = ISO8601DateFormatter()
         formatterWithFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatterWithFrac.date(from: resetString) {
+        if let date = formatterWithFrac.date(from: string) {
             return date
         }
 
-        // Try ISO8601 without fractional seconds
         let formatterWithoutFrac = ISO8601DateFormatter()
         formatterWithoutFrac.formatOptions = [.withInternetDateTime]
-        if let date = formatterWithoutFrac.date(from: resetString) {
-            return date
-        }
-
-        return nil
+        return formatterWithoutFrac.date(from: string)
     }
 
     /// Calculates the next 00:00 UTC reset time
-    /// - Returns: Date for next midnight UTC
     private static func calculateNextUTCReset() -> Date {
         var calendar = Calendar.current
         calendar.timeZone = TimeZone(identifier: "UTC") ?? TimeZone.current
@@ -193,12 +199,10 @@ final class ChutesProvider: ProviderProtocol {
         components.minute = 0
         components.second = 0
 
-        // Get start of today in UTC
         guard let todayMidnight = calendar.date(from: components) else {
-            return now.addingTimeInterval(24 * 60 * 60) // Fallback: 24 hours from now
+            return now.addingTimeInterval(24 * 60 * 60)
         }
 
-        // If already past midnight, return next day's midnight
         if now > todayMidnight {
             return calendar.date(byAdding: .day, value: 1, to: todayMidnight) ?? now.addingTimeInterval(24 * 60 * 60)
         }
@@ -207,8 +211,6 @@ final class ChutesProvider: ProviderProtocol {
     }
 
     /// Formats reset time for display
-    /// - Parameter date: The reset date
-    /// - Returns: Formatted string showing time until reset
     private static func formatResetTime(_ date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
