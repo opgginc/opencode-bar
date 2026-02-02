@@ -408,11 +408,31 @@ final class StatusBarController: NSObject {
            logger.debug("🟢 [StatusBarController] filteredResults: \(filteredNames)")
 
            self.providerResults = filteredResults
-           
-           let filteredErrors = fetchResult.errors.filter { identifier, _ in
-               isProviderEnabled(identifier)
-           }
-           self.lastProviderErrors = filteredErrors
+            
+            // Extract CopilotUsage from provider result if available
+            if let copilotResult = filteredResults[.copilot],
+               let details = copilotResult.details,
+               let usedRequests = details.copilotUsedRequests,
+               let limitRequests = details.copilotLimitRequests {
+                self.currentUsage = CopilotUsage(
+                    netBilledAmount: details.copilotOverageCost ?? 0.0,
+                    netQuantity: details.copilotOverageRequests ?? 0.0,
+                    discountQuantity: Double(usedRequests),
+                    userPremiumRequestEntitlement: limitRequests,
+                    filteredUserPremiumRequestEntitlement: 0,
+                    copilotPlan: details.planType,
+                    quotaResetDateUTC: details.copilotQuotaResetDateUTC
+                )
+                debugLog("🟢 fetchMultiProviderData: currentUsage set from Copilot provider - used: \(usedRequests), limit: \(limitRequests)")
+                logger.info("🟢 [StatusBarController] currentUsage set from Copilot provider")
+            } else {
+                debugLog("🟡 fetchMultiProviderData: No Copilot data available, currentUsage not set")
+            }
+            
+            let filteredErrors = fetchResult.errors.filter { identifier, _ in
+                isProviderEnabled(identifier)
+            }
+            self.lastProviderErrors = filteredErrors
 
            for identifier in filteredResults.keys {
                loadingProviders.remove(identifier)
@@ -505,19 +525,9 @@ final class StatusBarController: NSObject {
 
           let payAsYouGoTotal = calculatePayAsYouGoTotal(providerResults: providerResults, copilotUsage: currentUsage)
           let subscriptionTotal = SubscriptionSettingsManager.shared.getTotalMonthlySubscriptionCost()
-          let grandTotal = payAsYouGoTotal + subscriptionTotal
-          
-          let headerTitle: String
-          if subscriptionTotal > 0 && payAsYouGoTotal > 0 {
-              headerTitle = String(format: "Total: $%.2f (Subs: $%.0f + Usage: $%.2f)", grandTotal, subscriptionTotal, payAsYouGoTotal)
-          } else if subscriptionTotal > 0 {
-              headerTitle = String(format: "Total: $%.2f (Subscriptions)", grandTotal)
-          } else {
-              headerTitle = String(format: "Pay-as-you-go: $%.2f", payAsYouGoTotal)
-          }
           
           let payAsYouGoHeader = NSMenuItem()
-          payAsYouGoHeader.view = createHeaderView(title: headerTitle)
+          payAsYouGoHeader.view = createHeaderView(title: String(format: "Pay-as-you-go: $%.2f", payAsYouGoTotal))
           payAsYouGoHeader.tag = 999
           menu.insertItem(payAsYouGoHeader, at: insertIndex)
           insertIndex += 1
@@ -644,7 +654,10 @@ final class StatusBarController: NSObject {
         insertIndex += 1
 
          let quotaHeader = NSMenuItem()
-         quotaHeader.view = createHeaderView(title: "Quota Status")
+         let quotaTitle = subscriptionTotal > 0
+             ? String(format: "Quota Status: $%.0f/m", subscriptionTotal)
+             : "Quota Status"
+         quotaHeader.view = createHeaderView(title: quotaTitle)
          quotaHeader.tag = 999
          menu.insertItem(quotaHeader, at: insertIndex)
          insertIndex += 1
@@ -833,11 +846,9 @@ final class StatusBarController: NSObject {
         separator3.tag = 999
         menu.insertItem(separator3, at: insertIndex)
 
-        if let usage = currentUsage {
-            let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: usage)
-            statusBarIconView?.update(cost: totalCost)
-        }
-        debugLog("updateMultiProviderMenu: completed successfully")
+        let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
+        statusBarIconView?.update(cost: totalCost)
+        debugLog("updateMultiProviderMenu: completed successfully, totalCost=$\(totalCost)")
         logMenuStructure()
     }
 

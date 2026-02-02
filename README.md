@@ -30,14 +30,34 @@
 
 | Provider | Type | Key Metrics |
 |----------|------|-------------|
+| **OpenRouter** | Pay-as-you-go | Credits balance, daily/weekly/monthly cost |
+| **OpenCode Zen** | Pay-as-you-go | Daily history (30 days), model breakdown |
 | **Claude** | Quota-based | 5h/7d usage windows, Sonnet/Opus breakdown |
 | **Codex** | Quota-based | Primary/Secondary quotas, plan type |
 | **Gemini CLI** | Quota-based | Per-model quotas, multi-account support |
 | **Kimi for Coding (Kimi K2.5)** | Quota-based | Usage limits, membership level, reset time |
-| **OpenRouter** | Pay-as-you-go | Credits balance, daily/weekly/monthly cost |
-| **OpenCode Zen** | Pay-as-you-go | Daily history (30 days), model breakdown |
-| **Antigravity** | Pay-as-you-go | Local language server monitoring |
+| **Antigravity** | Quota-based | Local language server monitoring |
 | **GitHub Copilot** | Quota-based | Daily history, overage tracking, EOM prediction |
+
+### Provider Categories
+
+Providers are organized into two categories based on their billing model:
+
+#### Pay-as-you-go Providers
+> **No subscription settings** - these providers charge based on actual usage.
+
+- **OpenRouter** - Credits-based billing
+- **OpenCode Zen** - Usage-based billing
+
+#### Quota-based Providers
+> **Subscription settings available** - configure your plan to track costs accurately.
+
+- **Claude** - Time-window based quotas (5h/7d)
+- **Codex** - Primary/Secondary quota tiers
+- **Gemini CLI** - Per-model quota limits
+- **Kimi** - Time-window based quotas
+- **Antigravity** - Local server monitoring
+- **GitHub Copilot** - Request-based quotas with overage billing
 
 ## Features
 
@@ -58,10 +78,11 @@
 - **EOM Prediction**: Estimates end-of-month totals using weighted averages
 - **Add-on Cost Tracking**: Shows additional costs when exceeding limits
 
-### Subscription Settings
-- **Per-Provider Plans**: Configure your subscription tier for each provider
+### Subscription Settings (Quota-based Providers Only)
+- **Per-Provider Plans**: Configure your subscription tier for quota-based providers
 - **Cost Tracking**: Accurate monthly cost calculation based on your plan
-- **Supported Plans**: Copilot ($10-$39/m), Kimi ($19-$199/m), custom amounts
+- **Supported Plans**: Copilot ($10-$39/m), Claude ($20-$200/m), Codex, Gemini CLI, Kimi ($19-$199/m), Antigravity
+- **Note**: Pay-as-you-go providers (OpenRouter, OpenCode Zen) do not have subscription settings
 
 ### Convenience
 - **Auto Refresh**: Configurable intervals (10 seconds to 30 minutes)
@@ -227,11 +248,11 @@ $ opencodebar status --json
 
 ```
 ─────────────────────────────
-Pay-as-you-go
+Pay-as-you-go: $37.61
   OpenRouter       $37.42    ▸
   OpenCode Zen     $0.19     ▸
 ─────────────────────────────
-Quota Status
+Quota Status: $219/m
   Copilot          0%        ▸
   Claude           60%       ▸
   Codex            100%      ▸
@@ -246,6 +267,15 @@ Settings                  ▸
 Version 2.1.0
 Quit (⌘Q)
 ```
+
+#### Menu Group Titles
+
+| Group | Format | Description |
+|-------|--------|-------------|
+| **Pay-as-you-go** | `Pay-as-you-go: $XX.XX` | Sum of all pay-as-you-go provider costs (OpenRouter + OpenCode Zen) |
+| **Quota Status** | `Quota Status: $XXX/m` | Shows total monthly subscription cost if any quota-based providers have subscription settings configured. If no subscriptions are set, shows just "Quota Status". |
+
+> **Note**: Subscription settings are only available for quota-based providers. Pay-as-you-go providers do not have subscription options since they charge based on actual usage.
 
 ## How It Works
 

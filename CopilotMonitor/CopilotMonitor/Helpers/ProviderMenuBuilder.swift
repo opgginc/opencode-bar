@@ -13,7 +13,6 @@ extension StatusBarController {
                 item.view = createDisabledLabelView(text: String(format: "Credits: $%.0f", remaining))
                 submenu.addItem(item)
             }
-            addSubscriptionItems(to: submenu, provider: .openRouter)
 
         case .openCodeZen:
             if let avg = details.avgCostPerDay {
@@ -105,8 +104,6 @@ extension StatusBarController {
 
             historyItem.submenu = historySubmenu
             submenu.addItem(historyItem)
-
-            addSubscriptionItems(to: submenu, provider: .openCodeZen)
 
         case .claude:
             if let fiveHour = details.fiveHourUsage {
