@@ -944,24 +944,24 @@ final class StatusBarController: NSObject {
         return item
     }
 
-     private func iconForProvider(_ identifier: ProviderIdentifier) -> NSImage? {
-         var image: NSImage?
+    private func iconForProvider(_ identifier: ProviderIdentifier) -> NSImage? {
+        var image: NSImage?
 
-         switch identifier {
-         case .copilot:
-             image = NSImage(named: "CopilotIcon")
-         case .claude:
-             image = NSImage(named: "ClaudeIcon")
-         case .codex:
-             image = NSImage(named: "CodexIcon")
-         case .geminiCLI:
-             image = NSImage(named: "GeminiIcon")
-         case .openCode:
-             image = NSImage(named: "OpencodeIcon")
-         case .openRouter:
-             image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: identifier.displayName)
-         case .antigravity:
-             image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
+        switch identifier {
+        case .copilot:
+            image = NSImage(named: "CopilotIcon")
+        case .claude:
+            image = NSImage(named: "ClaudeIcon")
+        case .codex:
+            image = NSImage(named: "CodexIcon")
+        case .geminiCLI:
+            image = NSImage(named: "GeminiIcon")
+        case .openCode:
+            image = NSImage(named: "OpencodeIcon")
+        case .openRouter:
+            image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: identifier.displayName)
+        case .antigravity:
+            image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
         case .openCodeZen:
             image = NSImage(named: "OpencodeIcon")
         case .kimi:

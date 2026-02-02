@@ -103,7 +103,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
             "/usr/local/bin/opencode",              // Intel Homebrew
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".opencode/bin/opencode").path,  // OpenCode default
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/opencode").path,     // pip/pipx
-            "/usr/bin/opencode",                    // System-wide
+            "/usr/bin/opencode"                     // System-wide
         ]
         
         for path in fallbackPaths {
