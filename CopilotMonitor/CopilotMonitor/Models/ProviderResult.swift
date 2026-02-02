@@ -76,6 +76,7 @@ struct DetailedUsage {
     let copilotOverageRequests: Double?
     let copilotUsedRequests: Int?
     let copilotLimitRequests: Int?
+    let copilotQuotaResetDateUTC: Date?
 
     init(
         dailyUsage: Double? = nil,
@@ -114,7 +115,8 @@ struct DetailedUsage {
         copilotOverageCost: Double? = nil,
         copilotOverageRequests: Double? = nil,
         copilotUsedRequests: Int? = nil,
-        copilotLimitRequests: Int? = nil
+        copilotLimitRequests: Int? = nil,
+        copilotQuotaResetDateUTC: Date? = nil
     ) {
         self.dailyUsage = dailyUsage
         self.weeklyUsage = weeklyUsage
@@ -153,6 +155,7 @@ struct DetailedUsage {
         self.copilotOverageRequests = copilotOverageRequests
         self.copilotUsedRequests = copilotUsedRequests
         self.copilotLimitRequests = copilotLimitRequests
+        self.copilotQuotaResetDateUTC = copilotQuotaResetDateUTC
     }
 }
 
@@ -167,7 +170,7 @@ extension DetailedUsage: Codable {
         case sessions, messages, avgCostPerDay, email
         case dailyHistory, monthlyCost, creditsRemaining, creditsTotal
         case authSource, geminiAccounts
-        case copilotOverageCost, copilotOverageRequests, copilotUsedRequests, copilotLimitRequests
+        case copilotOverageCost, copilotOverageRequests, copilotUsedRequests, copilotLimitRequests, copilotQuotaResetDateUTC
     }
 
     init(from decoder: Decoder) throws {
@@ -209,6 +212,7 @@ extension DetailedUsage: Codable {
         copilotOverageRequests = try container.decodeIfPresent(Double.self, forKey: .copilotOverageRequests)
         copilotUsedRequests = try container.decodeIfPresent(Int.self, forKey: .copilotUsedRequests)
         copilotLimitRequests = try container.decodeIfPresent(Int.self, forKey: .copilotLimitRequests)
+        copilotQuotaResetDateUTC = try container.decodeIfPresent(Date.self, forKey: .copilotQuotaResetDateUTC)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -250,6 +254,7 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(copilotOverageRequests, forKey: .copilotOverageRequests)
         try container.encodeIfPresent(copilotUsedRequests, forKey: .copilotUsedRequests)
         try container.encodeIfPresent(copilotLimitRequests, forKey: .copilotLimitRequests)
+        try container.encodeIfPresent(copilotQuotaResetDateUTC, forKey: .copilotQuotaResetDateUTC)
     }
 }
 
@@ -273,5 +278,6 @@ extension DetailedUsage {
             || authSource != nil || geminiAccounts != nil
             || copilotOverageCost != nil || copilotOverageRequests != nil
             || copilotUsedRequests != nil || copilotLimitRequests != nil
+            || copilotQuotaResetDateUTC != nil
     }
 }

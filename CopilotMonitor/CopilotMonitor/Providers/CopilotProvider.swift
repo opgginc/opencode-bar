@@ -110,7 +110,8 @@ final class CopilotProvider: ProviderProtocol {
                 copilotOverageCost: usage.netBilledAmount,
                 copilotOverageRequests: usage.netQuantity,
                 copilotUsedRequests: usage.usedRequests,
-                copilotLimitRequests: usage.limitRequests
+                copilotLimitRequests: usage.limitRequests,
+                copilotQuotaResetDateUTC: usage.quotaResetDateUTC
             )
         )
     }
