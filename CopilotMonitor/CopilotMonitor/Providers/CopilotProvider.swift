@@ -74,7 +74,11 @@ final class CopilotProvider: ProviderProtocol {
             details: DetailedUsage(
                 email: cachedUserEmail,
                 dailyHistory: dailyHistory,
-                authSource: "Browser Cookies (Chrome/Brave/Arc/Edge)"
+                authSource: "Browser Cookies (Chrome/Brave/Arc/Edge)",
+                copilotOverageCost: usage.netBilledAmount,
+                copilotOverageRequests: usage.netQuantity,
+                copilotUsedRequests: usage.usedRequests,
+                copilotLimitRequests: usage.limitRequests
             )
         )
     }

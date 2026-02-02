@@ -502,6 +502,70 @@ final class StatusBarController: NSObject {
                 }
            }
 
+            // Copilot Add-on (always show, even when $0.00)
+            if isProviderEnabled(.copilot) {
+                if let copilotResult = providerResults[.copilot],
+                   let details = copilotResult.details,
+                   let overageCost = details.copilotOverageCost {
+                    hasPayAsYouGo = true
+                    let addOnItem = NSMenuItem(
+                        title: String(format: "Copilot Add-on ($%.2f)", overageCost),
+                        action: nil, keyEquivalent: ""
+                    )
+                    addOnItem.image = iconForProvider(.copilot)
+                    addOnItem.tag = 999
+
+                    let submenu = NSMenu()
+                    let overageRequests = details.copilotOverageRequests ?? 0
+                    let overageItem = NSMenuItem()
+                    overageItem.view = createDisabledLabelView(text: String(format: "Overage Requests: %.0f", overageRequests))
+                    submenu.addItem(overageItem)
+
+                    submenu.addItem(NSMenuItem.separator())
+                    let historyItem = NSMenuItem(title: "Usage History", action: nil, keyEquivalent: "")
+                    historyItem.image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Usage History")
+                    debugLog("updateMultiProviderMenu: calling createCopilotHistorySubmenu")
+                    historyItem.submenu = createCopilotHistorySubmenu()
+                    debugLog("updateMultiProviderMenu: createCopilotHistorySubmenu completed")
+                    submenu.addItem(historyItem)
+
+                    submenu.addItem(NSMenuItem.separator())
+
+                    if let email = details.email {
+                        let emailItem = NSMenuItem()
+                        emailItem.view = createDisabledLabelView(
+                            text: "Email: \(email)",
+                            icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Email"),
+                            multiline: false
+                        )
+                        submenu.addItem(emailItem)
+                    }
+
+                    if let authSource = details.authSource {
+                        let authItem = NSMenuItem()
+                        authItem.view = createDisabledLabelView(
+                            text: "Token From: \(authSource)",
+                            icon: NSImage(systemSymbolName: "key", accessibilityDescription: "Auth Source"),
+                            multiline: true
+                        )
+                        submenu.addItem(authItem)
+                    }
+
+                    addOnItem.submenu = submenu
+                    menu.insertItem(addOnItem, at: insertIndex)
+                    insertIndex += 1
+                    debugLog("updateMultiProviderMenu: Copilot Add-on inserted with cost $\(overageCost)")
+                } else if loadingProviders.contains(.copilot) {
+                    hasPayAsYouGo = true
+                    let item = NSMenuItem(title: "Copilot Add-on (Loading...)", action: nil, keyEquivalent: "")
+                    item.image = iconForProvider(.copilot)
+                    item.isEnabled = false
+                    item.tag = 999
+                    menu.insertItem(item, at: insertIndex)
+                    insertIndex += 1
+                }
+            }
+
         if !hasPayAsYouGo {
             let noItem = NSMenuItem()
             noItem.view = createDisabledLabelView(text: "No providers")
