@@ -87,12 +87,13 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/kargn
 git clone https://github.com/kargnas/opencode-bar.git
 cd opencode-bar
 
-# Build and run
+# Build
 xcodebuild -project CopilotMonitor/CopilotMonitor.xcodeproj \
   -scheme CopilotMonitor -configuration Debug build
 
-# Open the app
-open ~/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/*.app
+# Open the app (find your DerivedData path first)
+ls ~/Library/Developer/Xcode/DerivedData/ | grep CopilotMonitor
+# Then open: ~/Library/Developer/Xcode/DerivedData/<your-path>/Build/Products/Debug/OpenCode\ Bar.app
 ```
 
 **Requirements:**

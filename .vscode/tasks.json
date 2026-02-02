@@ -2,55 +2,13 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "☠️ Kill CopilotMonitor",
+            "label": "🐛 Debug: Kill + Build + Run",
             "type": "shell",
-            "command": "pkill -x CopilotMonitor || true",
-            "presentation": {
-                "reveal": "silent",
-                "close": true
-            }
-        },
-        {
-            "label": "🔨 Build CopilotMonitor",
-            "type": "shell",
-            "command": "xcodebuild",
-            "args": [
-                "-project", "CopilotMonitor/CopilotMonitor.xcodeproj",
-                "-scheme", "CopilotMonitor",
-                "-configuration", "Debug",
-                "build"
-            ],
+            "command": "pkill -x 'OpenCode Bar' 2>/dev/null; xcodebuild -project CopilotMonitor/CopilotMonitor.xcodeproj -scheme CopilotMonitor -configuration Debug build && open \"$(xcodebuild -project CopilotMonitor/CopilotMonitor.xcodeproj -scheme CopilotMonitor -configuration Debug -showBuildSettings 2>/dev/null | awk '/^[[:space:]]*BUILT_PRODUCTS_DIR = /{print $3}')/OpenCode Bar.app\"",
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared"
-            },
-            "problemMatcher": []
-        },
-        {
-            "label": "🔄 Kill + Build CopilotMonitor",
-            "dependsOn": ["☠️ Kill CopilotMonitor", "🔨 Build CopilotMonitor"],
-            "dependsOrder": "sequence",
-            "group": "build",
-            "problemMatcher": []
-        },
-        {
-            "label": "▶️ Run CopilotMonitor",
-            "type": "shell",
-            "command": "open ~/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/*.app",
-            "presentation": {
-                "reveal": "silent",
-                "close": true
-            }
-        },
-        {
-            "label": "🐛 Debug: Kill + Build + Run",
-            "type": "shell",
-            "command": "pkill -x CopilotMonitor 2>/dev/null; xcodebuild -project CopilotMonitor/CopilotMonitor.xcodeproj -scheme CopilotMonitor -configuration Debug build && open ~/Library/Developer/Xcode/DerivedData/CopilotMonitor-*/Build/Products/Debug/*.app",
-            "group": "test",
             "presentation": {
                 "reveal": "always",
                 "panel": "dedicated",
@@ -58,18 +16,6 @@
                 "clear": true
             },
             "isBackground": false,
-            "problemMatcher": []
-        },
-        {
-            "label": "📜 Debug: Watch Logs",
-            "type": "shell",
-            "command": "log stream --predicate 'subsystem == \"com.opencodeproviders\"' --level debug",
-            "presentation": {
-                "reveal": "always",
-                "panel": "new",
-                "focus": false
-            },
-            "isBackground": true,
             "problemMatcher": []
         }
     ]
