@@ -114,11 +114,33 @@ jobs:
             CODE_SIGN_STYLE=Manual
       
       - name: Export Archive
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Generate ExportOptions.plist dynamically with Team ID
+          cat > "$RUNNER_TEMP/ExportOptions.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>developer-id</string>
+              <key>teamID</key>
+              <string>${APPLE_TEAM_ID}</string>
+              <key>destination</key>
+              <string>export</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>signingCertificate</key>
+              <string>Developer ID Application</string>
+          </dict>
+          </plist>
+          EOF
+          
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/CopilotMonitor.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
-            -exportOptionsPlist ExportOptions.plist
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
       
       - name: Verify Code Signing
         run: |
