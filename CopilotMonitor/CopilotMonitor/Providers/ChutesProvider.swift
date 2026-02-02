@@ -11,6 +11,7 @@ struct ChutesUserProfile: Codable {
     let paymentAddress: String?
     let imageCount: Int?
     let chuteCount: Int?
+    let balance: Double
 
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
@@ -18,12 +19,8 @@ struct ChutesUserProfile: Codable {
         case paymentAddress = "payment_address"
         case imageCount = "image_count"
         case chuteCount = "chute_count"
+        case balance
     }
-}
-
-struct ChutesBalance: Codable {
-    let balance: Double
-    let currency: String?
 }
 
 /// Response from /users/me/quotas endpoint (returns array)
@@ -82,15 +79,12 @@ final class ChutesProvider: ProviderProtocol {
         }
 
         let userProfile = try await fetchUserProfile(apiKey: apiKey)
-        let userId = userProfile.userId
 
         async let quotasTask = fetchQuotas(apiKey: apiKey)
         async let usageTask = fetchQuotaUsage(apiKey: apiKey)
-        async let balanceTask = fetchBalance(apiKey: apiKey, userId: userId)
 
         let quotaItems = try await quotasTask
         let usage = try await usageTask
-        let balance = try await balanceTask
 
         guard let quotaItem = quotaItems.first(where: { $0.isDefault }) ?? quotaItems.first else {
             logger.error("No quota information found in Chutes response")
@@ -105,7 +99,7 @@ final class ChutesProvider: ProviderProtocol {
 
         let planTier = Self.getPlanTier(from: quota)
 
-        logger.info("Chutes fetched: \(used)/\(quota) used (\(usedPercentage)%), tier: \(planTier), balance: \(balance?.balance ?? 0)")
+        logger.info("Chutes fetched: \(used)/\(quota) used (\(usedPercentage)%), tier: \(planTier), balance: \(userProfile.balance)")
 
         let providerUsage = ProviderUsage.quotaBased(
             remaining: remainingPercentage,
@@ -127,7 +121,7 @@ final class ChutesProvider: ProviderProtocol {
             limitRemaining: Double(remaining),
             resetPeriod: resetPeriod,
             planType: planTier,
-            creditsBalance: balance?.balance,
+            creditsBalance: userProfile.balance,
             authSource: tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
         )
 
@@ -231,44 +225,6 @@ final class ChutesProvider: ProviderProtocol {
         } catch {
             logger.error("Failed to decode user profile: \(error.localizedDescription)")
             throw ProviderError.decodingError("Invalid user profile format")
-        }
-    }
-
-    private func fetchBalance(apiKey: String, userId: String) async throws -> ChutesBalance? {
-        guard let url = URL(string: "https://api.chutes.ai/users/\(userId)/balance") else {
-            throw ProviderError.networkError("Invalid balance URL")
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue(apiKey, forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ProviderError.networkError("Invalid response type")
-        }
-
-        if httpResponse.statusCode == 401 {
-            logger.warning("Balance endpoint returned 401 - may require admin privileges")
-            return nil
-        }
-
-        if httpResponse.statusCode == 403 {
-            logger.warning("Balance endpoint returned 403 - insufficient permissions")
-            return nil
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
-        }
-
-        do {
-            return try JSONDecoder().decode(ChutesBalance.self, from: data)
-        } catch {
-            logger.error("Failed to decode balance: \(error.localizedDescription)")
-            return nil
         }
     }
 
