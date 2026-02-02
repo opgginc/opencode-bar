@@ -13,8 +13,19 @@ final class CopilotProvider: ProviderProtocol {
     let type: ProviderType = .quotaBased
 
     private let cacheKey = "cached_copilot_usage"
-    private var cachedUserEmail: String?
-    private var cachedCustomerId: String?
+    private let cacheQueue = DispatchQueue(label: "com.opencodeproviders.CopilotProvider.cache")
+    private var _cachedUserEmail: String?
+    private var _cachedCustomerId: String?
+
+    private var cachedUserEmail: String? {
+        get { cacheQueue.sync { _cachedUserEmail } }
+        set { cacheQueue.sync { _cachedUserEmail = newValue } }
+    }
+
+    private var cachedCustomerId: String? {
+        get { cacheQueue.sync { _cachedCustomerId } }
+        set { cacheQueue.sync { _cachedCustomerId = newValue } }
+    }
 
     init() {
         logger.info("CopilotProvider: Initialized (cookie-based authentication)")
