@@ -35,9 +35,8 @@ struct JSONFormatter {
             var providerDict: [String: Any] = [:]
             
             switch result.usage {
-            case .payAsYouGo(let utilization, let cost, let resetsAt):
+            case .payAsYouGo(_, let cost, let resetsAt):
                 providerDict["type"] = "pay-as-you-go"
-                providerDict["utilization"] = utilization
                 if let cost = cost {
                     providerDict["cost"] = cost
                 }
@@ -52,6 +51,19 @@ struct JSONFormatter {
                 providerDict["entitlement"] = entitlement
                 providerDict["overagePermitted"] = overagePermitted
                 providerDict["usagePercentage"] = result.usage.usagePercentage
+            }
+            
+            if identifier == .geminiCLI, let accounts = result.details?.geminiAccounts, !accounts.isEmpty {
+                var accountsArray: [[String: Any]] = []
+                for account in accounts {
+                    var accountDict: [String: Any] = [:]
+                    accountDict["index"] = account.accountIndex
+                    accountDict["email"] = account.email
+                    accountDict["remainingPercentage"] = account.remainingPercentage
+                    accountDict["modelBreakdown"] = account.modelBreakdown
+                    accountsArray.append(accountDict)
+                }
+                providerDict["accounts"] = accountsArray
             }
             
             jsonDict[identifier.rawValue] = providerDict
@@ -91,8 +103,17 @@ struct TableFormatter {
         }
         
         for (identifier, result) in sortedResults {
-            output += formatRow(identifier: identifier, result: result)
-            output += "\n"
+            if identifier == .geminiCLI,
+               let accounts = result.details?.geminiAccounts,
+               accounts.count > 1 {
+                for account in accounts {
+                    output += formatGeminiAccountRow(account: account)
+                    output += "\n"
+                }
+            } else {
+                output += formatRow(identifier: identifier, result: result)
+                output += "\n"
+            }
         }
         
         return output
@@ -137,14 +158,26 @@ struct TableFormatter {
     }
     
     private static func formatUsagePercentage(_ result: ProviderResult) -> String {
-        let percentage = result.usage.usagePercentage
-        
         switch result.usage {
         case .payAsYouGo:
-            return String(format: "%.1f%%", percentage)
+            // Pay-as-you-go doesn't have meaningful usage percentage - show dash
+            return "-"
         case .quotaBased:
+            let percentage = result.usage.usagePercentage
             return String(format: "%.0f%%", percentage)
         }
+    }
+    
+    private static func formatGeminiAccountRow(account: GeminiAccountQuota) -> String {
+        let accountName = "Gemini (#\(account.accountIndex + 1))"
+        let providerPadded = accountName.padding(toLength: columnWidths.provider, withPad: " ", startingAt: 0)
+        let typePadded = "Quota-based".padding(toLength: columnWidths.type, withPad: " ", startingAt: 0)
+        let usageStr = String(format: "%.0f%%", 100 - account.remainingPercentage)
+        let usagePadded = usageStr.padding(toLength: columnWidths.usage, withPad: " ", startingAt: 0)
+        
+        let metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email))"
+        
+        return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)"
     }
     
     private static func formatMetrics(_ result: ProviderResult) -> String {
