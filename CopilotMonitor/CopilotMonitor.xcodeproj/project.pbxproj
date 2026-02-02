@@ -116,7 +116,7 @@
 		18F40F1AC76A49A9B9DF74B0 /* ProviderManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderManager.swift; sourceTree = "<group>"; };
 		24BD2AE5B12FABC3E915AE27 /* MultiProviderStatusBarIconView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MultiProviderStatusBarIconView.swift; sourceTree = "<group>"; };
 		2707EF99248FCDEFDEE3DA9C /* BrowserCookieService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrowserCookieService.swift; sourceTree = "<group>"; };
-		283349002F313176004DADE1 /* ChutesProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChutesProvider.swift; sourceTree = "<group>"; };
+		283349002F313176004DADE1 /* ChutesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChutesProvider.swift; sourceTree = "<group>"; };
 		2D2B4000E33060BA5E00351B /* DependencyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DependencyTests.swift; sourceTree = "<group>"; };
 		2DD8824FD8DE388CEE314F92 /* ModernStatusBarIconView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModernStatusBarIconView.swift; sourceTree = "<group>"; };
 		4158558E58B121A9D13C48C3 /* ProviderUsage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderUsage.swift; sourceTree = "<group>"; };
