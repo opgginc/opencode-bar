@@ -1,0 +1,10 @@
+warn: CPU lacks AVX support, strange crashes may occur. Reinstall Bun or use *-baseline build:
+  https://github.com/oven-sh/bun/releases/download/bun-v1.2.19/bun-darwin-x64-baseline.zip
+warn: CPU lacks AVX support, strange crashes may occur. Reinstall Bun or use *-baseline build:
+  https://github.com/oven-sh/bun/releases/download/bun-v1.2.19/bun-darwin-x64-baseline.zip
+Resolving dependencies
+Resolved, downloaded and extracted [2]
+Saved lockfile
+warn: CPU lacks AVX support, strange crashes may occur. Reinstall Bun or use *-baseline build:
+  https://github.com/oven-sh/bun/releases/download/bun-v1.2.19/bun-darwin-x64-baseline.zip
+Server running on http://127.0.0.1:51234

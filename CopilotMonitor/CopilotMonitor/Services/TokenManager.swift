@@ -32,9 +32,10 @@ struct OpenCodeAuth: Codable {
     let opencode: APIKey?
     let kimiForCoding: APIKey?
     let zaiCodingPlan: APIKey?
+    let chutes: APIKey?
 
     enum CodingKeys: String, CodingKey {
-        case anthropic, openai, openrouter, opencode
+        case anthropic, openai, openrouter, opencode, chutes
         case githubCopilot = "github-copilot"
         case kimiForCoding = "kimi-for-coding"
         case zaiCodingPlan = "zai-coding-plan"
@@ -360,6 +361,11 @@ final class TokenManager: @unchecked Sendable {
     func getZaiCodingPlanAPIKey() -> String? {
         guard let auth = readOpenCodeAuth() else { return nil }
         return auth.zaiCodingPlan?.key
+    }
+
+    func getChutesAPIKey() -> String? {
+        guard let auth = readOpenCodeAuth() else { return nil }
+        return auth.chutes?.key
     }
 
     /// Gets Gemini refresh token from Antigravity accounts (active account)

@@ -440,6 +440,34 @@ extension StatusBarController {
 
             addSubscriptionItems(to: submenu, provider: .zaiCodingPlan)
 
+        case .chutes:
+            if let daily = details.dailyUsage,
+               let limit = details.limit {
+                let used = Int(daily)
+                let total = Int(limit)
+                let remaining = max(0, total - used)
+                let percentage = total > 0 ? Int((Double(used) / Double(total)) * 100) : 0
+
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: String(format: "Daily: %d/%d (%d%%)", used, total, percentage))
+                submenu.addItem(item)
+
+                if let resetPeriod = details.resetPeriod {
+                    let resetItem = NSMenuItem()
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(resetPeriod)", indent: 18)
+                    submenu.addItem(resetItem)
+                }
+            }
+
+            if let plan = details.planType {
+                submenu.addItem(NSMenuItem.separator())
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Tier: \(plan)")
+                submenu.addItem(item)
+            }
+
+            addSubscriptionItems(to: submenu, provider: .chutes)
+
         default:
             break
         }
