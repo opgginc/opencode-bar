@@ -115,7 +115,7 @@ extension StatusBarController {
                     formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
                     formatter.timeZone = TimeZone.current
                     let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: MenuDesignToken.Spacing.leadingOffset)
                     submenu.addItem(resetItem)
 
                     let paceInfo = calculatePace(usage: fiveHour, resetTime: reset, windowHours: 5)
@@ -133,7 +133,7 @@ extension StatusBarController {
                     formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
                     formatter.timeZone = TimeZone.current
                     let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: MenuDesignToken.Spacing.leadingOffset)
                     submenu.addItem(resetItem)
 
                     let paceInfo = calculatePace(usage: sevenDay, resetTime: reset, windowHours: 168)
@@ -152,7 +152,7 @@ extension StatusBarController {
                     formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
                     formatter.timeZone = TimeZone.current
                     let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: MenuDesignToken.Spacing.leadingOffset)
                     submenu.addItem(resetItem)
 
                     let paceInfo = calculatePace(usage: sonnet, resetTime: reset, windowHours: 168)
@@ -170,7 +170,7 @@ extension StatusBarController {
                     formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
                     formatter.timeZone = TimeZone.current
                     let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: MenuDesignToken.Spacing.leadingOffset)
                     submenu.addItem(resetItem)
 
                     let paceInfo = calculatePace(usage: opus, resetTime: reset, windowHours: 168)
@@ -197,7 +197,7 @@ extension StatusBarController {
                     formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
                     formatter.timeZone = TimeZone.current
                     let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: MenuDesignToken.Spacing.leadingOffset)
                     submenu.addItem(resetItem)
 
                     let paceInfo = calculatePace(usage: primary, resetTime: reset, windowHours: 24)
@@ -215,7 +215,7 @@ extension StatusBarController {
                     formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
                     formatter.timeZone = TimeZone.current
                     let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: MenuDesignToken.Spacing.leadingOffset)
                     submenu.addItem(resetItem)
 
                     let paceInfo = calculatePace(usage: secondary, resetTime: reset, windowHours: 24)
@@ -292,7 +292,7 @@ extension StatusBarController {
                     formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
                     formatter.timeZone = TimeZone.current
                     let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: MenuDesignToken.Spacing.leadingOffset)
                     submenu.addItem(resetItem)
 
                     let paceInfo = calculatePace(usage: fiveHour, resetTime: reset, windowHours: 5)
@@ -310,7 +310,7 @@ extension StatusBarController {
                     formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
                     formatter.timeZone = TimeZone.current
                     let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: MenuDesignToken.Spacing.leadingOffset)
                     submenu.addItem(resetItem)
 
                     let paceInfo = calculatePace(usage: weekly, resetTime: reset, windowHours: 168)
@@ -343,7 +343,7 @@ extension StatusBarController {
                     formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
                     formatter.timeZone = TimeZone.current
                     let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: MenuDesignToken.Spacing.leadingOffset)
                     submenu.addItem(resetItem)
 
                     let paceInfo = calculatePace(usage: tokenUsage, resetTime: reset, windowHours: 5)
@@ -371,7 +371,7 @@ extension StatusBarController {
                     formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
                     formatter.timeZone = TimeZone.current
                     let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: MenuDesignToken.Spacing.leadingOffset)
                     submenu.addItem(resetItem)
 
                     let paceInfo = calculateMonthlyPace(usagePercent: mcpUsage, resetDate: reset)
@@ -450,7 +450,7 @@ extension StatusBarController {
                     formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
                     formatter.timeZone = TimeZone.current
                     let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
+                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: MenuDesignToken.Spacing.leadingOffset)
                     submenu.addItem(resetItem)
 
                     let paceInfo = calculatePace(usage: fiveHour, resetTime: reset, windowHours: 5)
@@ -557,7 +557,7 @@ extension StatusBarController {
 
             if let resetDate = account.modelResetTimes[model] {
                 let resetItem = NSMenuItem()
-                resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: resetDate))", indent: 18)
+                resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: resetDate))", indent: MenuDesignToken.Spacing.leadingOffset)
                 submenu.addItem(resetItem)
 
                 let usagePercent = 100 - quota

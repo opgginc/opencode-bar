@@ -704,7 +704,7 @@ final class StatusBarController: NSObject {
                   formatter.dateFormat = "yyyy-MM-dd HH:mm"
                   formatter.timeZone = TimeZone(identifier: "UTC") ?? TimeZone(secondsFromGMT: 0)!
                   let resetItem = NSMenuItem()
-                  resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: resetDate)) UTC", indent: 18)
+                  resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: resetDate)) UTC", indent: MenuDesignToken.Spacing.leadingOffset)
                   submenu.addItem(resetItem)
 
                   let paceInfo = calculateMonthlyPace(usagePercent: usagePercent, resetDate: resetDate)
