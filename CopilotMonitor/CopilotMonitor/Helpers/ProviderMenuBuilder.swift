@@ -196,10 +196,12 @@ extension StatusBarController {
             addSubscriptionItems(to: submenu, provider: .codex)
 
         case .geminiCLI:
+            // modelBreakdown stores remaining% — convert to used% at display layer
             if let models = details.modelBreakdown, !models.isEmpty {
-                for (model, quota) in models.sorted(by: { $0.key < $1.key }) {
+                for (model, remainingPercent) in models.sorted(by: { $0.key < $1.key }) {
+                    let usedPercent = 100 - remainingPercent
                     let item = NSMenuItem()
-                    item.view = createDisabledLabelView(text: String(format: "%@: %.0f%%", model, quota))
+                    item.view = createDisabledLabelView(text: String(format: "%@: %.0f%% used", model, usedPercent))
                     submenu.addItem(item)
                 }
             }
@@ -216,25 +218,25 @@ extension StatusBarController {
             addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: details.email)
 
         case .antigravity:
+            // modelBreakdown stores remaining% — convert to used% at display layer
             if let models = details.modelBreakdown, !models.isEmpty {
-                for (model, quota) in models.sorted(by: { $0.key < $1.key }) {
+                for (model, remainingPercent) in models.sorted(by: { $0.key < $1.key }) {
+                    let usedPercent = 100 - remainingPercent
                     let item = NSMenuItem()
-                    item.view = createDisabledLabelView(text: String(format: "%@: %.0f%%", model, quota))
+                    item.view = createDisabledLabelView(text: String(format: "%@: %.0f%% used", model, usedPercent))
                     submenu.addItem(item)
                 }
             }
-            if details.planType != nil || details.email != nil {
-                submenu.addItem(NSMenuItem.separator())
-            }
+
+            var accountItems: [(sfSymbol: String, text: String)] = []
             if let plan = details.planType {
-                let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: "Plan: \(plan)")
-                submenu.addItem(item)
+                accountItems.append((sfSymbol: "crown", text: "Plan: \(plan)"))
             }
             if let email = details.email {
-                let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: "Email: \(email)")
-                submenu.addItem(item)
+                accountItems.append((sfSymbol: "person.circle", text: "Email: \(email)"))
+            }
+            if !accountItems.isEmpty {
+                createAccountInfoSection(items: accountItems).forEach { submenu.addItem($0) }
             }
 
             addSubscriptionItems(to: submenu, provider: .antigravity)
@@ -434,46 +436,24 @@ extension StatusBarController {
     func createGeminiAccountSubmenu(_ account: GeminiAccountQuota) -> NSMenu {
         let submenu = NSMenu()
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
-        formatter.timeZone = TimeZone.current
-
-        for (model, quota) in account.modelBreakdown.sorted(by: { $0.key < $1.key }) {
-            let item = NSMenuItem()
-            item.view = createDisabledLabelView(text: String(format: "%@: %.0f%%", model, quota))
-            submenu.addItem(item)
-
-            if let resetDate = account.modelResetTimes[model] {
-                let resetItem = NSMenuItem()
-                resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: resetDate))", indent: 18)
-                submenu.addItem(resetItem)
-
-                let usagePercent = 100 - quota
-                let paceInfo = calculatePace(usage: usagePercent, resetTime: resetDate, windowHours: 24)
-                let paceItem = NSMenuItem()
-                paceItem.view = createPaceView(paceInfo: paceInfo)
-                submenu.addItem(paceItem)
-            }
+        // modelBreakdown stores remaining% — convert to used% at display layer
+        // Gemini models have 24-hour quota windows
+        for (model, remainingPercent) in account.modelBreakdown.sorted(by: { $0.key < $1.key }) {
+            let usedPercent = 100 - remainingPercent
+            let items = createUsageWindowRow(
+                label: model,
+                usagePercent: usedPercent,
+                resetDate: account.modelResetTimes[model],
+                windowHours: 24
+            )
+            items.forEach { submenu.addItem($0) }
         }
 
-        submenu.addItem(NSMenuItem.separator())
-
-        let emailItem = NSMenuItem()
-        emailItem.view = createDisabledLabelView(
-            text: "Email: \(account.email)",
-            icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Email")
-        )
-        submenu.addItem(emailItem)
-
-        submenu.addItem(NSMenuItem.separator())
-
-        let authItem = NSMenuItem()
-        authItem.view = createDisabledLabelView(
-            text: "Token From: \(account.authSource)",
-            icon: NSImage(systemSymbolName: "key", accessibilityDescription: "Auth Source"),
-            multiline: true
-        )
-        submenu.addItem(authItem)
+        let accountItems: [(sfSymbol: String, text: String)] = [
+            (sfSymbol: "person.circle", text: "Email: \(account.email)"),
+            (sfSymbol: "key", text: "Token From: \(account.authSource)")
+        ]
+        createAccountInfoSection(items: accountItems).forEach { submenu.addItem($0) }
 
         addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: account.email)
 
