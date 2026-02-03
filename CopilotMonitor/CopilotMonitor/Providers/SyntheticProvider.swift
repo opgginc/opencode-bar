@@ -65,7 +65,8 @@ final class SyntheticProvider: ProviderProtocol {
 
             let limit = apiResponse.subscription.limit
             let requests = apiResponse.subscription.requests
-            let remaining = max(0, Int(Double(limit) - requests))  // Handle fractional requests
+            let remainingVal = Double(limit) - requests
+            let remaining = max(0, Int(remainingVal))  // Handle fractional requests
             let usagePercent = limit > 0 ? (Double(requests) / Double(limit) * 100) : 0
 
             let renewsAt: Date?
