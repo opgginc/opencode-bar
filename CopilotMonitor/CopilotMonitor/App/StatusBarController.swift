@@ -31,6 +31,12 @@ enum UsageFetcherError: LocalizedError {
 
 @MainActor
 final class StatusBarController: NSObject {
+    static let resetDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
+        return formatter
+    }()
+
     private var statusItem: NSStatusItem?
     private var statusBarIconView: StatusBarIconView?
     private var menu: NSMenu!
@@ -1217,8 +1223,8 @@ final class StatusBarController: NSObject {
         
         errorLogText += String(repeating: "─", count: 40) + "\n"
         
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
+        let dateFormatter = Self.resetDateFormatter
+        dateFormatter.timeZone = TimeZone.current
         errorLogText += "Time: \(dateFormatter.string(from: Date()))\n"
         errorLogText += "App Version: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")\n"
         errorLogText += "\n"
