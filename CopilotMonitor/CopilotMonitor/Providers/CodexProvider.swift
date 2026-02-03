@@ -46,7 +46,7 @@ final class CodexProvider: ProviderProtocol {
             throw ProviderError.authenticationFailed("OpenAI access token not found")
         }
 
-        guard let accountId = TokenManager.shared.readOpenCodeAuth()?.openai?.accountId else {
+        guard let accountId = TokenManager.shared.getOpenAIAccountId() else {
             logger.error("Failed to retrieve ChatGPT account ID")
             throw ProviderError.authenticationFailed("ChatGPT account ID not found")
         }
@@ -112,7 +112,13 @@ final class CodexProvider: ProviderProtocol {
 
         logger.info("Successfully fetched Codex usage: primary=\(primaryUsedPercent)%, secondary=\(secondaryUsedPercent)%, plan=\(codexResponse.plan_type ?? "unknown"), credits=\(codexResponse.credits?.balance ?? "0")")
 
-        // Populate DetailedUsage with all available fields
+        let authSource: String
+        if TokenManager.shared.readOpenCodeAuth()?.openai != nil {
+            authSource = "~/.local/share/opencode/auth.json"
+        } else {
+            authSource = "~/.codex/auth.json"
+        }
+
         let details = DetailedUsage(
             dailyUsage: primaryUsedPercent,
             secondaryUsage: secondaryUsedPercent,
@@ -120,7 +126,7 @@ final class CodexProvider: ProviderProtocol {
             primaryReset: primaryResetDate,
             creditsBalance: codexResponse.credits?.balanceAsDouble,
             planType: codexResponse.plan_type,
-            authSource: "~/.local/share/opencode/auth.json"
+            authSource: authSource
         )
 
         let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: entitlement, overagePermitted: false)

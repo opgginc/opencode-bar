@@ -81,6 +81,34 @@ struct OpenCodeAuth: Codable {
     }
 }
 
+/// Codex CLI native auth structure for ~/.codex/auth.json
+/// Different format from OpenCode auth - used as fallback when OpenCode has no OpenAI token
+struct CodexAuth: Codable {
+    struct Tokens: Codable {
+        let accessToken: String?
+        let accountId: String?
+        let idToken: String?
+        let refreshToken: String?
+
+        enum CodingKeys: String, CodingKey {
+            case accessToken = "access_token"
+            case accountId = "account_id"
+            case idToken = "id_token"
+            case refreshToken = "refresh_token"
+        }
+    }
+
+    let openaiAPIKey: String?
+    let tokens: Tokens?
+    let lastRefresh: String?
+
+    enum CodingKeys: String, CodingKey {
+        case openaiAPIKey = "OPENAI_API_KEY"
+        case tokens
+        case lastRefresh = "last_refresh"
+    }
+}
+
 /// Antigravity Accounts structure for ~/.config/opencode/antigravity-accounts.json
 struct AntigravityAccounts: Codable {
     struct Account: Codable {
@@ -204,6 +232,42 @@ final class TokenManager: @unchecked Sendable {
         }
     }
 
+    // MARK: - Codex Native Auth File Reading
+
+    private var cachedCodexAuth: CodexAuth?
+    private var codexCacheTimestamp: Date?
+
+    func readCodexAuth() -> CodexAuth? {
+        return queue.sync {
+            if let cached = cachedCodexAuth,
+               let timestamp = codexCacheTimestamp,
+               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+                return cached
+            }
+
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser
+            let codexAuthPath = homeDir
+                .appendingPathComponent(".codex")
+                .appendingPathComponent("auth.json")
+
+            guard FileManager.default.fileExists(atPath: codexAuthPath.path) else {
+                return nil
+            }
+
+            do {
+                let data = try Data(contentsOf: codexAuthPath)
+                let auth = try JSONDecoder().decode(CodexAuth.self, from: data)
+                cachedCodexAuth = auth
+                codexCacheTimestamp = Date()
+                logger.info("Successfully loaded Codex native auth from: \(codexAuthPath.path)")
+                return auth
+            } catch {
+                logger.warning("Failed to parse Codex auth at \(codexAuthPath.path): \(error.localizedDescription)")
+                return nil
+            }
+        }
+    }
+
     // MARK: - Antigravity Accounts File Reading
 
     /// Thread-safe read of Antigravity accounts with caching
@@ -249,11 +313,32 @@ final class TokenManager: @unchecked Sendable {
         return auth.anthropic?.access
     }
 
-    /// Gets OpenAI access token from OpenCode auth
-    /// - Returns: Access token string if available, nil otherwise
+    /// Gets OpenAI access token, first from OpenCode auth, then falling back to Codex CLI native auth (~/.codex/auth.json)
     func getOpenAIAccessToken() -> String? {
-        guard let auth = readOpenCodeAuth() else { return nil }
-        return auth.openai?.access
+        // Primary: OpenCode auth
+        if let auth = readOpenCodeAuth(), let access = auth.openai?.access {
+            return access
+        }
+        // Fallback: Codex CLI native auth (~/.codex/auth.json)
+        if let codexAuth = readCodexAuth(), let access = codexAuth.tokens?.accessToken {
+            logger.info("Using Codex native auth (~/.codex/auth.json) as fallback for OpenAI access token")
+            return access
+        }
+        return nil
+    }
+
+    /// Gets OpenAI account ID, first from OpenCode auth, then falling back to Codex CLI native auth
+    func getOpenAIAccountId() -> String? {
+        // Primary: OpenCode auth
+        if let auth = readOpenCodeAuth(), let accountId = auth.openai?.accountId {
+            return accountId
+        }
+        // Fallback: Codex CLI native auth (~/.codex/auth.json)
+        if let codexAuth = readCodexAuth(), let accountId = codexAuth.tokens?.accountId {
+            logger.info("Using Codex native auth (~/.codex/auth.json) as fallback for OpenAI account ID")
+            return accountId
+        }
+        return nil
     }
 
     /// Gets GitHub Copilot access token from OpenCode auth
@@ -596,6 +681,23 @@ final class TokenManager: @unchecked Sendable {
             debugLines.append("  [Antigravity] NOT CONFIGURED")
         }
 
+        // 5. Codex native auth (~/.codex/auth.json) - fallback for OpenAI token
+        debugLines.append("")
+        debugLines.append("Codex Native Auth (~/.codex/auth.json):")
+        let codexAuthPath = homeDir.appendingPathComponent(".codex").appendingPathComponent("auth.json")
+        if fileManager.fileExists(atPath: codexAuthPath.path) {
+            if let codexAuth = readCodexAuth() {
+                let hasToken = codexAuth.tokens?.accessToken != nil
+                let hasAccountId = codexAuth.tokens?.accountId != nil
+                let hasAPIKey = codexAuth.openaiAPIKey != nil
+                debugLines.append("  [EXISTS] token: \(hasToken ? "YES" : "NO"), accountId: \(hasAccountId ? "YES" : "NO"), apiKey: \(hasAPIKey ? "YES" : "NO")")
+            } else {
+                debugLines.append("  [PARSE FAILED]")
+            }
+        } else {
+            debugLines.append("  [NOT FOUND]")
+        }
+
         debugLines.append(String(repeating: "─", count: 40))
 
         return debugLines.joined(separator: "\n")
@@ -837,6 +939,28 @@ final class TokenManager: @unchecked Sendable {
             }
         } else {
             debugLines.append("[Antigravity Accounts] NOT FOUND or PARSE FAILED")
+        }
+
+        // 7. Codex native auth (~/.codex/auth.json)
+        debugLines.append("---------- Codex Native Auth ----------")
+        let codexAuthPath = homeDir.appendingPathComponent(".codex").appendingPathComponent("auth.json")
+        if fileManager.fileExists(atPath: codexAuthPath.path) {
+            if let codexAuth = readCodexAuth() {
+                debugLines.append("[Codex Auth] EXISTS at \(codexAuthPath.path)")
+                if let tokens = codexAuth.tokens {
+                    debugLines.append("  - Access Token: \(tokens.accessToken != nil ? "\(tokens.accessToken!.count) chars" : "nil")")
+                    debugLines.append("  - Account ID: \(tokens.accountId ?? "nil")")
+                    debugLines.append("  - Refresh Token: \(tokens.refreshToken != nil ? "\(tokens.refreshToken!.count) chars" : "nil")")
+                } else {
+                    debugLines.append("  - Tokens: nil")
+                }
+                debugLines.append("  - OPENAI_API_KEY: \(codexAuth.openaiAPIKey != nil ? "SET" : "nil")")
+                debugLines.append("  - Last Refresh: \(codexAuth.lastRefresh ?? "nil")")
+            } else {
+                debugLines.append("[Codex Auth] PARSE FAILED at \(codexAuthPath.path)")
+            }
+        } else {
+            debugLines.append("[Codex Auth] NOT FOUND at \(codexAuthPath.path)")
         }
 
         debugLines.append("================================================")
