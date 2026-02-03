@@ -350,6 +350,11 @@ MIT License - See [LICENSE](LICENSE) file for details.
 - [OpenCode](https://opencode.ai) - The AI coding assistant that powers this monitor
 - [GitHub Copilot](https://github.com/features/copilot)
 
+## Credits
+
+- [OP.GG](https://op.gg)
+- [Sangrak Choi](https://kargn.as)
+
 ---
 
 <p align="center">
