@@ -240,42 +240,27 @@ extension StatusBarController {
             addSubscriptionItems(to: submenu, provider: .antigravity)
 
         case .kimi:
+            // === Usage Windows ===
             if let fiveHour = details.fiveHourUsage {
-                let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "5h Window: %.0f%%", fiveHour))
-                submenu.addItem(item)
-                if let reset = details.fiveHourReset {
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
-                    formatter.timeZone = TimeZone.current
-                    let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
-                    submenu.addItem(resetItem)
-
-                    let paceInfo = calculatePace(usage: fiveHour, resetTime: reset, windowHours: 5)
-                    let paceItem = NSMenuItem()
-                    paceItem.view = createPaceView(paceInfo: paceInfo)
-                    submenu.addItem(paceItem)
-                }
+                let items = createUsageWindowRow(
+                    label: "5h",
+                    usagePercent: fiveHour,
+                    resetDate: details.fiveHourReset,
+                    windowHours: 5
+                )
+                items.forEach { submenu.addItem($0) }
             }
             if let weekly = details.sevenDayUsage {
-                let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Weekly: %.0f%%", weekly))
-                submenu.addItem(item)
-                if let reset = details.sevenDayReset {
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
-                    formatter.timeZone = TimeZone.current
-                    let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
-                    submenu.addItem(resetItem)
-
-                    let paceInfo = calculatePace(usage: weekly, resetTime: reset, windowHours: 168)
-                    let paceItem = NSMenuItem()
-                    paceItem.view = createPaceView(paceInfo: paceInfo)
-                    submenu.addItem(paceItem)
-                }
+                let items = createUsageWindowRow(
+                    label: "Weekly",
+                    usagePercent: weekly,
+                    resetDate: details.sevenDayReset,
+                    windowHours: 168
+                )
+                items.forEach { submenu.addItem($0) }
             }
+
+            // === Plan ===
             if let plan = details.planType {
                 submenu.addItem(NSMenuItem.separator())
                 let item = NSMenuItem()
@@ -283,68 +268,44 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
+            // === Subscription ===
             addSubscriptionItems(to: submenu, provider: .kimi)
 
         case .zaiCodingPlan:
+            // === Token Usage ===
+            if let tokenUsage = details.tokenUsagePercent {
+                let items = createUsageWindowRow(
+                    label: "Tokens (5h)",
+                    usagePercent: tokenUsage,
+                    resetDate: details.tokenUsageReset,
+                    windowHours: 5
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if let tokenUsed = details.tokenUsageUsed, let tokenTotal = details.tokenUsageTotal {
+                let item = createLimitRow(label: "Tokens", used: Double(tokenUsed), total: Double(tokenTotal))
+                submenu.addItem(item)
+            }
+
+            // === MCP Usage ===
+            if let mcpUsage = details.mcpUsagePercent {
+                let items = createUsageWindowRow(
+                    label: "MCP (Monthly)",
+                    usagePercent: mcpUsage,
+                    resetDate: details.mcpUsageReset,
+                    isMonthly: true
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if let mcpUsed = details.mcpUsageUsed, let mcpTotal = details.mcpUsageTotal {
+                let item = createLimitRow(label: "MCP", used: Double(mcpUsed), total: Double(mcpTotal))
+                submenu.addItem(item)
+            }
+
+            // === Last 24h stats (provider-specific, keep as-is) ===
             let numberFormatter = NumberFormatter()
             numberFormatter.numberStyle = .decimal
             numberFormatter.maximumFractionDigits = 0
-
-            if let tokenUsage = details.tokenUsagePercent {
-                let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Tokens (5h): %.0f%% used", tokenUsage))
-                submenu.addItem(item)
-
-                if let reset = details.tokenUsageReset {
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
-                    formatter.timeZone = TimeZone.current
-                    let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
-                    submenu.addItem(resetItem)
-
-                    let paceInfo = calculatePace(usage: tokenUsage, resetTime: reset, windowHours: 5)
-                    let paceItem = NSMenuItem()
-                    paceItem.view = createPaceView(paceInfo: paceInfo)
-                    submenu.addItem(paceItem)
-                }
-            }
-
-            if let tokenUsed = details.tokenUsageUsed, let tokenTotal = details.tokenUsageTotal {
-                let usedText = numberFormatter.string(from: NSNumber(value: tokenUsed)) ?? "\(tokenUsed)"
-                let totalText = numberFormatter.string(from: NSNumber(value: tokenTotal)) ?? "\(tokenTotal)"
-                let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: "Tokens Used: \(usedText) / \(totalText)")
-                submenu.addItem(item)
-            }
-
-            if let mcpUsage = details.mcpUsagePercent {
-                let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "MCP (Month): %.0f%% used", mcpUsage))
-                submenu.addItem(item)
-
-                if let reset = details.mcpUsageReset {
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
-                    formatter.timeZone = TimeZone.current
-                    let resetItem = NSMenuItem()
-                    resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
-                    submenu.addItem(resetItem)
-
-                    let paceInfo = calculateMonthlyPace(usagePercent: mcpUsage, resetDate: reset)
-                    let paceItem = NSMenuItem()
-                    paceItem.view = createPaceView(paceInfo: paceInfo)
-                    submenu.addItem(paceItem)
-                }
-            }
-
-            if let mcpUsed = details.mcpUsageUsed, let mcpTotal = details.mcpUsageTotal {
-                let usedText = numberFormatter.string(from: NSNumber(value: mcpUsed)) ?? "\(mcpUsed)"
-                let totalText = numberFormatter.string(from: NSNumber(value: mcpTotal)) ?? "\(mcpTotal)"
-                let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: "MCP Used: \(usedText) / \(totalText)")
-                submenu.addItem(item)
-            }
 
             if details.modelUsageTokens != nil || details.modelUsageCalls != nil {
                 submenu.addItem(NSMenuItem.separator())
@@ -395,6 +356,7 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
+            // === Subscription ===
             addSubscriptionItems(to: submenu, provider: .zaiCodingPlan)
 
         default:
