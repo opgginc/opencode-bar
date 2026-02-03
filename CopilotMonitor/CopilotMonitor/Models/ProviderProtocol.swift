@@ -72,7 +72,7 @@ enum ProviderIdentifier: String, CaseIterable {
         case .zaiCodingPlan:
             return "globe"
         case .chutes:
-            return "chutes"
+            return "c.circle"
         }
     }
 }
