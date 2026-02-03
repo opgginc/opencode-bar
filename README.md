@@ -83,7 +83,7 @@
 ### Homebrew (Recommended)
 
 ```bash
-brew tap kargnas/opencode-bar
+brew tap opgginc/opencode-bar
 brew install --cask opencode-bar
 ```
 
