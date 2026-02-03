@@ -2,19 +2,8 @@ import XCTest
 @testable import CopilotMonitor
 
 final class SyntheticProviderTests: XCTestCase {
-    private final class MockTokenManager: SyntheticTokenProviding {
-        var apiKey: String?
-        var lastFoundAuthPath: URL?
-
-        init(apiKey: String?, lastFoundAuthPath: URL? = nil) {
-            self.apiKey = apiKey
-            self.lastFoundAuthPath = lastFoundAuthPath
-        }
-
-        func getSyntheticAPIKey() -> String? {
-            return apiKey
-        }
-    }
+    private var authRootURL: URL?
+    private var authFileURL: URL?
 
     private final class MockURLProtocol: URLProtocol {
         static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
@@ -57,7 +46,31 @@ final class SyntheticProviderTests: XCTestCase {
         return HTTPURLResponse(url: url, statusCode: statusCode, httpVersion: nil, headerFields: nil)!
     }
 
+    override func setUp() {
+        super.setUp()
+        let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent("opencode-tests-\(UUID().uuidString)")
+        let authDirectory = rootURL.appendingPathComponent("opencode")
+        try? FileManager.default.createDirectory(at: authDirectory, withIntermediateDirectories: true)
+        let authURL = authDirectory.appendingPathComponent("auth.json")
+        let json = """
+        {
+          "synthetic": {
+            "type": "apiKey",
+            "key": "synthetic-key"
+          }
+        }
+        """
+        try? json.data(using: .utf8)!.write(to: authURL)
+        setenv("XDG_DATA_HOME", rootURL.path, 1)
+        authRootURL = rootURL
+        authFileURL = authURL
+    }
+
     override func tearDown() {
+        if let authRootURL = authRootURL {
+            try? FileManager.default.removeItem(at: authRootURL)
+        }
+        unsetenv("XDG_DATA_HOME")
         MockURLProtocol.requestHandler = nil
         super.tearDown()
     }
@@ -73,12 +86,8 @@ final class SyntheticProviderTests: XCTestCase {
     }
 
     func testFetchSuccessCreatesProviderResult() async throws {
-        let tokenManager = MockTokenManager(
-            apiKey: "synthetic-key",
-            lastFoundAuthPath: URL(fileURLWithPath: "/tmp/opencode/auth.json")
-        )
         let session = makeSession()
-        let provider = SyntheticProvider(tokenManager: tokenManager, session: session)
+        let provider = SyntheticProvider(tokenManager: .shared, session: session)
 
         let json = """
         {
@@ -109,13 +118,12 @@ final class SyntheticProviderTests: XCTestCase {
         XCTAssertEqual(result.details?.limitRemaining, 149)
         XCTAssertEqual(result.details?.fiveHourUsage, 25.25, accuracy: 0.01)
         XCTAssertNotNil(result.details?.fiveHourReset)
-        XCTAssertEqual(result.details?.authSource, "/tmp/opencode/auth.json")
+        XCTAssertEqual(result.details?.authSource, authFileURL?.path)
     }
 
     func testFetchReturnsAuthenticationErrorOn401() async {
-        let tokenManager = MockTokenManager(apiKey: "synthetic-key")
         let session = makeSession()
-        let provider = SyntheticProvider(tokenManager: tokenManager, session: session)
+        let provider = SyntheticProvider(tokenManager: .shared, session: session)
 
         let data = Data("{}".utf8)
         MockURLProtocol.requestHandler = { _ in
@@ -138,9 +146,8 @@ final class SyntheticProviderTests: XCTestCase {
     }
 
     func testFetchReturnsNetworkErrorOnNon200() async {
-        let tokenManager = MockTokenManager(apiKey: "synthetic-key")
         let session = makeSession()
-        let provider = SyntheticProvider(tokenManager: tokenManager, session: session)
+        let provider = SyntheticProvider(tokenManager: .shared, session: session)
 
         let data = Data("{}".utf8)
         MockURLProtocol.requestHandler = { _ in
@@ -163,9 +170,8 @@ final class SyntheticProviderTests: XCTestCase {
     }
 
     func testFetchReturnsDecodingErrorOnMalformedJSON() async {
-        let tokenManager = MockTokenManager(apiKey: "synthetic-key")
         let session = makeSession()
-        let provider = SyntheticProvider(tokenManager: tokenManager, session: session)
+        let provider = SyntheticProvider(tokenManager: .shared, session: session)
 
         let data = Data("{".utf8)
         MockURLProtocol.requestHandler = { _ in
@@ -188,9 +194,8 @@ final class SyntheticProviderTests: XCTestCase {
     }
 
     func testFetchParsesDateWithoutFractionalSeconds() async throws {
-        let tokenManager = MockTokenManager(apiKey: "synthetic-key")
         let session = makeSession()
-        let provider = SyntheticProvider(tokenManager: tokenManager, session: session)
+        let provider = SyntheticProvider(tokenManager: .shared, session: session)
 
         let json = """
         {
