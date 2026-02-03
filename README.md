@@ -28,8 +28,8 @@
 
 ### Supported Providers (Auto-detected from OpenCode)
 
-| Provider | Type | Key Metrics |
-|----------|------|-------------|
+| Provider | Type | Key Metrics | Additional Details |
+|----------|------|-------------|--------------------|
 | **OpenRouter** | Pay-as-you-go | Credits balance, daily/weekly/monthly cost |
 | **OpenCode Zen** | Pay-as-you-go | Daily history (30 days), model breakdown |
 | **GitHub Copilot Add-on** | Pay-as-you-go | Usage-based billing after exceeding quota |
@@ -72,6 +72,11 @@
 - **Launch at Login**: Start automatically with macOS
 - **Parallel Fetching**: All providers update simultaneously for speed
 - **Auto Updates**: Seamless background updates via Sparkle framework
+
+### Bonus
+- **Support additional auth methods**
+  - **Codex for Mac** - Auto-detected through `~/.codex/auth.json`
+  - **Codex CLI** - Auto-detected through `~/.codex/auth.json`
 
 ## Installation
 
