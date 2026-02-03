@@ -10,17 +10,30 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kargnas/opencode-bar/releases/latest">
-    <img src="https://img.shields.io/github/v/release/kargnas/opencode-bar?style=flat-square" alt="Release">
+  <a href="https://github.com/opgginc/opencode-bar/releases/latest">
+    <img src="https://img.shields.io/github/v/release/opgginc/opencode-bar?style=flat-square" alt="Release">
   </a>
-  <a href="https://github.com/kargnas/opencode-bar/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/kargnas/opencode-bar?style=flat-square" alt="License">
+  <a href="https://github.com/opgginc/opencode-bar/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/opgginc/opencode-bar?style=flat-square" alt="License">
   </a>
   <img src="https://img.shields.io/badge/platform-macOS%2013%2B-blue?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/swift-5.9-orange?style=flat-square" alt="Swift">
 </p>
 
 ---
+
+## Installation
+
+### Homebrew (Easy)
+
+```bash
+brew tap opgginc/opencode-bar
+brew install --cask opencode-bar
+```
+
+### Download
+
+Download the latest `.dmg` file from the [**Releases**](https://github.com/opgginc/opencode-bar/releases/latest) page.
 
 ## Overview
 
@@ -40,6 +53,13 @@
 | **Z.AI Coding Plan** | Quota-based | Token/MCP quotas, model usage, tool usage (24h) |
 | **Antigravity** | Quota-based | Local language server monitoring |
 | **GitHub Copilot** | Quota-based | Daily history, overage tracking |
+
+### Custom Providers
+
+- **Antigravity/Gemini**
+  - `NoeFabris/opencode-antigravity-auth`
+  - `jenslys/opencode-gemini-auth`
+- **Claude**: `anomalyco/opencode-anthropic-auth`
 
 ## Features
 
@@ -68,22 +88,18 @@
 - **Parallel Fetching**: All providers update simultaneously for speed
 - **Auto Updates**: Seamless background updates via Sparkle framework
 
-## Installation
+### Bonus
+- **Support additional auth methods**
+  - **Codex for Mac** - Auto-detected through `~/.codex/auth.json`
+  - **Codex CLI** - Auto-detected through `~/.codex/auth.json`
 
-### Download (Recommended)
-
-Download the latest `.dmg` file from the [**Releases**](https://github.com/kargnas/opencode-bar/releases/latest) page.
-
-> **Note**: If you see a "App is damaged" error, run this command in Terminal:
-> ```bash
-> xattr -cr "/Applications/OpenCode Bar.app"
-> ```
+## Development
 
 ### Build from Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/kargnas/opencode-bar.git
+git clone https://github.com/opgginc/opencode-bar.git
 cd opencode-bar
 
 # Build
@@ -330,6 +346,11 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 - [OpenCode](https://opencode.ai) - The AI coding assistant that powers this monitor
 - [GitHub Copilot](https://github.com/features/copilot)
+
+## Credits
+
+- [OP.GG](https://op.gg)
+- [Sangrak Choi](https://kargn.as)
 
 ---
 

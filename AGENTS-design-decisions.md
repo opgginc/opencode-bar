@@ -16,10 +16,10 @@ Pay-as-you-go: $37.61
   OpenCode Zen     $0.19     ▸
 ─────────────────────────────
 Quota Status: $219/m
-  Copilot          0%        ▸
-  Claude           60%       ▸
-  Codex            100%      ▸
-  Gemini CLI (#1)  100%      ▸
+  Copilot (0%)           ▸
+  Claude (60%)           ▸
+  Codex (100%)           ▸
+  Gemini CLI #1 (100%)   ▸
 ─────────────────────────────
 Predicted EOM: $451
 ─────────────────────────────

@@ -86,6 +86,34 @@ struct OpenCodeAuth: Codable {
     }
 }
 
+/// Codex CLI native auth structure for ~/.codex/auth.json
+/// Different format from OpenCode auth - used as fallback when OpenCode has no OpenAI token
+struct CodexAuth: Codable {
+    struct Tokens: Codable {
+        let accessToken: String?
+        let accountId: String?
+        let idToken: String?
+        let refreshToken: String?
+
+        enum CodingKeys: String, CodingKey {
+            case accessToken = "access_token"
+            case accountId = "account_id"
+            case idToken = "id_token"
+            case refreshToken = "refresh_token"
+        }
+    }
+
+    let openaiAPIKey: String?
+    let tokens: Tokens?
+    let lastRefresh: String?
+
+    enum CodingKeys: String, CodingKey {
+        case openaiAPIKey = "OPENAI_API_KEY"
+        case tokens
+        case lastRefresh = "last_refresh"
+    }
+}
+
 /// Antigravity Accounts structure for ~/.config/opencode/antigravity-accounts.json
 struct AntigravityAccounts: Codable {
     struct Account: Codable {
@@ -97,6 +125,59 @@ struct AntigravityAccounts: Codable {
     let version: Int
     let accounts: [Account]
     let activeIndex: Int
+}
+
+/// Auth source types for Gemini CLI fallback handling
+enum GeminiAuthSource {
+    case antigravity
+    case opencodeAuth
+}
+
+/// Unified Gemini account model used by the provider layer
+struct GeminiAuthAccount {
+    let index: Int
+    let email: String?
+    let refreshToken: String
+    let projectId: String
+    let authSource: String
+    let clientId: String
+    let clientSecret: String
+    let source: GeminiAuthSource
+}
+
+/// Minimal OpenCode auth payload for Gemini OAuth stored under "google"
+struct OpenCodeGeminiAuthContainer: Decodable {
+    let google: GeminiOAuthAuth?
+}
+
+/// Gemini OAuth payload as stored in OpenCode auth.json
+struct GeminiOAuthAuth: Decodable {
+    let type: String?
+    let refresh: String?
+    let access: String?
+    let expires: Int64?
+
+    enum CodingKeys: String, CodingKey {
+        case type, refresh, access, expires
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try? container.decode(String.self, forKey: .type)
+        refresh = try? container.decode(String.self, forKey: .refresh)
+        access = try? container.decode(String.self, forKey: .access)
+
+        if let expiresValue = try? container.decode(Int64.self, forKey: .expires) {
+            expires = expiresValue
+        } else if let expiresValue = try? container.decode(Double.self, forKey: .expires) {
+            expires = Int64(expiresValue)
+        } else if let expiresValue = try? container.decode(String.self, forKey: .expires),
+                  let numericValue = Int64(expiresValue) {
+            expires = numericValue
+        } else {
+            expires = nil
+        }
+    }
 }
 
 /// Gemini OAuth token response structure
@@ -122,6 +203,13 @@ final class TokenManager: @unchecked Sendable {
     /// Cached antigravity accounts
     private var cachedAntigravityAccounts: AntigravityAccounts?
     private var antigravityCacheTimestamp: Date?
+    
+    /// Cached Gemini OAuth auth payload (OpenCode auth.json)
+    private var cachedGeminiOAuthAuth: GeminiOAuthAuth?
+    private var geminiOAuthCacheTimestamp: Date?
+    
+    /// Path where Gemini OAuth auth was found (OpenCode auth.json)
+    private(set) var lastFoundGeminiOAuthPath: URL?
 
     private init() {
         logger.info("TokenManager initialized")
@@ -209,7 +297,50 @@ final class TokenManager: @unchecked Sendable {
         }
     }
 
+    // MARK: - Codex Native Auth File Reading
+
+    private var cachedCodexAuth: CodexAuth?
+    private var codexCacheTimestamp: Date?
+
+    func readCodexAuth() -> CodexAuth? {
+        return queue.sync {
+            if let cached = cachedCodexAuth,
+               let timestamp = codexCacheTimestamp,
+               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+                return cached
+            }
+
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser
+            let codexAuthPath = homeDir
+                .appendingPathComponent(".codex")
+                .appendingPathComponent("auth.json")
+
+            guard FileManager.default.fileExists(atPath: codexAuthPath.path) else {
+                return nil
+            }
+
+            do {
+                let data = try Data(contentsOf: codexAuthPath)
+                let auth = try JSONDecoder().decode(CodexAuth.self, from: data)
+                cachedCodexAuth = auth
+                codexCacheTimestamp = Date()
+                logger.info("Successfully loaded Codex native auth from: \(codexAuthPath.path)")
+                return auth
+            } catch {
+                logger.warning("Failed to parse Codex auth at \(codexAuthPath.path): \(error.localizedDescription)")
+                return nil
+            }
+        }
+    }
+
     // MARK: - Antigravity Accounts File Reading
+
+    private func antigravityAccountsPath() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config")
+            .appendingPathComponent("opencode")
+            .appendingPathComponent("antigravity-accounts.json")
+    }
 
     /// Thread-safe read of Antigravity accounts with caching
     func readAntigravityAccounts() -> AntigravityAccounts? {
@@ -221,11 +352,7 @@ final class TokenManager: @unchecked Sendable {
             }
             
             let fileManager = FileManager.default
-            let homeDir = fileManager.homeDirectoryForCurrentUser
-            let accountsPath = homeDir
-                .appendingPathComponent(".config")
-                .appendingPathComponent("opencode")
-                .appendingPathComponent("antigravity-accounts.json")
+            let accountsPath = antigravityAccountsPath()
             
             guard fileManager.fileExists(atPath: accountsPath.path) else {
                 return nil
@@ -245,6 +372,77 @@ final class TokenManager: @unchecked Sendable {
         }
     }
 
+    // MARK: - Gemini OAuth Auth File Reading (OpenCode auth.json)
+
+    private struct GeminiRefreshParts {
+        let refreshToken: String
+        let projectId: String?
+        let managedProjectId: String?
+    }
+
+    private func parseGeminiRefreshParts(_ refresh: String) -> GeminiRefreshParts {
+        let trimmed = refresh.trimmingCharacters(in: .whitespacesAndNewlines)
+        let segments = trimmed.split(separator: "|", omittingEmptySubsequences: false)
+        let refreshToken = segments.indices.contains(0) ? String(segments[0]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let projectRaw = segments.indices.contains(1) ? String(segments[1]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let managedRaw = segments.indices.contains(2) ? String(segments[2]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        return GeminiRefreshParts(
+            refreshToken: refreshToken,
+            projectId: projectRaw.isEmpty ? nil : projectRaw,
+            managedProjectId: managedRaw.isEmpty ? nil : managedRaw
+        )
+    }
+
+    /// Thread-safe read of Gemini OAuth auth stored under "google" in OpenCode auth.json
+    func readGeminiOAuthAuth() -> GeminiOAuthAuth? {
+        return queue.sync {
+            if let cached = cachedGeminiOAuthAuth,
+               let timestamp = geminiOAuthCacheTimestamp,
+               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+                return cached
+            }
+
+            let fileManager = FileManager.default
+            let paths = getAuthFilePaths()
+
+            for authPath in paths {
+                guard fileManager.fileExists(atPath: authPath.path) else {
+                    continue
+                }
+
+                do {
+                    let data = try Data(contentsOf: authPath)
+                    let container = try JSONDecoder().decode(OpenCodeGeminiAuthContainer.self, from: data)
+                    guard let geminiAuth = container.google else {
+                        continue
+                    }
+                    guard geminiAuth.type?.lowercased() == "oauth" else {
+                        continue
+                    }
+                    let refresh = geminiAuth.refresh?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    guard !refresh.isEmpty else {
+                        logger.warning("Gemini OAuth entry exists but refresh token is empty in \(authPath.path)")
+                        continue
+                    }
+
+                    lastFoundGeminiOAuthPath = authPath
+                    cachedGeminiOAuthAuth = geminiAuth
+                    geminiOAuthCacheTimestamp = Date()
+                    logger.info("Successfully loaded Gemini OAuth auth from: \(authPath.path)")
+                    return geminiAuth
+                } catch {
+                    logger.warning("Failed to parse Gemini OAuth auth at \(authPath.path): \(error.localizedDescription)")
+                    continue
+                }
+            }
+
+            lastFoundGeminiOAuthPath = nil
+            cachedGeminiOAuthAuth = nil
+            geminiOAuthCacheTimestamp = nil
+            return nil
+        }
+    }
+
     // MARK: - Token Accessors
 
     /// Gets Anthropic (Claude) access token from OpenCode auth
@@ -254,11 +452,32 @@ final class TokenManager: @unchecked Sendable {
         return auth.anthropic?.access
     }
 
-    /// Gets OpenAI access token from OpenCode auth
-    /// - Returns: Access token string if available, nil otherwise
+    /// Gets OpenAI access token, first from OpenCode auth, then falling back to Codex CLI native auth (~/.codex/auth.json)
     func getOpenAIAccessToken() -> String? {
-        guard let auth = readOpenCodeAuth() else { return nil }
-        return auth.openai?.access
+        // Primary: OpenCode auth
+        if let auth = readOpenCodeAuth(), let access = auth.openai?.access {
+            return access
+        }
+        // Fallback: Codex CLI native auth (~/.codex/auth.json)
+        if let codexAuth = readCodexAuth(), let access = codexAuth.tokens?.accessToken {
+            logger.info("Using Codex native auth (~/.codex/auth.json) as fallback for OpenAI access token")
+            return access
+        }
+        return nil
+    }
+
+    /// Gets OpenAI account ID, first from OpenCode auth, then falling back to Codex CLI native auth
+    func getOpenAIAccountId() -> String? {
+        // Primary: OpenCode auth
+        if let auth = readOpenCodeAuth(), let accountId = auth.openai?.accountId {
+            return accountId
+        }
+        // Fallback: Codex CLI native auth (~/.codex/auth.json)
+        if let codexAuth = readCodexAuth(), let accountId = codexAuth.tokens?.accountId {
+            logger.info("Using Codex native auth (~/.codex/auth.json) as fallback for OpenAI account ID")
+            return accountId
+        }
+        return nil
     }
 
     /// Gets GitHub Copilot access token from OpenCode auth
@@ -373,39 +592,66 @@ final class TokenManager: @unchecked Sendable {
     }
 
     /// Gets Gemini refresh token from Antigravity accounts (active account)
+    /// Gets Gemini refresh token from storage (primary: Antigravity accounts, fallback: OpenCode auth.json)
     /// - Returns: Refresh token string if available, nil otherwise
     func getGeminiRefreshToken() -> String? {
-        guard let accounts = readAntigravityAccounts() else { return nil }
-        guard accounts.activeIndex >= 0 && accounts.activeIndex < accounts.accounts.count else {
-            logger.warning("Invalid activeIndex: \(accounts.activeIndex)")
-            return nil
-        }
-        return accounts.accounts[accounts.activeIndex].refreshToken
+        return getAllGeminiAccounts().first?.refreshToken
     }
 
-    /// Gets Gemini account email from Antigravity accounts (active account)
+    /// Gets Gemini account email from storage (primary: Antigravity accounts, fallback: OpenCode auth.json)
     /// - Returns: Email string if available, nil otherwise
     func getGeminiAccountEmail() -> String? {
-        guard let accounts = readAntigravityAccounts() else { return nil }
-        guard accounts.activeIndex >= 0 && accounts.activeIndex < accounts.accounts.count else {
-            logger.warning("Invalid activeIndex: \(accounts.activeIndex)")
-            return nil
-        }
-        return accounts.accounts[accounts.activeIndex].email
+        return getAllGeminiAccounts().first?.email
     }
 
-    /// Gets all Gemini accounts from Antigravity accounts file
-    /// - Returns: Array of (index, email, refreshToken, projectId) tuples for all accounts
-    func getAllGeminiAccounts() -> [(index: Int, email: String, refreshToken: String, projectId: String)] {
-        guard let accounts = readAntigravityAccounts() else { return [] }
-        return accounts.accounts.enumerated().map { index, account in
-            (index: index, email: account.email, refreshToken: account.refreshToken, projectId: account.projectId)
+    /// Gets all Gemini accounts (primary: Antigravity accounts, fallback: OpenCode auth.json)
+    func getAllGeminiAccounts() -> [GeminiAuthAccount] {
+        if let accounts = readAntigravityAccounts(), !accounts.accounts.isEmpty {
+            let authSource = antigravityAccountsPath().path
+            return accounts.accounts.enumerated().map { index, account in
+                GeminiAuthAccount(
+                    index: index,
+                    email: account.email,
+                    refreshToken: account.refreshToken,
+                    projectId: account.projectId,
+                    authSource: authSource,
+                    clientId: TokenManager.geminiClientId,
+                    clientSecret: TokenManager.geminiClientSecret,
+                    source: .antigravity
+                )
+            }
         }
+
+        guard let geminiAuth = readGeminiOAuthAuth() else { return [] }
+        let refresh = geminiAuth.refresh?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let parts = parseGeminiRefreshParts(refresh)
+        guard !parts.refreshToken.isEmpty else {
+            logger.warning("Gemini OAuth refresh token missing or empty")
+            return []
+        }
+        let projectId = parts.projectId ?? parts.managedProjectId ?? ""
+        if projectId.isEmpty {
+            logger.warning("Gemini OAuth auth found but project ID is missing")
+        }
+
+        let authSource = lastFoundGeminiOAuthPath?.path ?? "auth.json"
+        return [
+            GeminiAuthAccount(
+                index: 0,
+                email: nil,
+                refreshToken: parts.refreshToken,
+                projectId: projectId,
+                authSource: authSource,
+                clientId: TokenManager.geminiAuthPluginClientId,
+                clientSecret: TokenManager.geminiAuthPluginClientSecret,
+                source: .opencodeAuth
+            )
+        ]
     }
 
     /// Gets the count of registered Gemini accounts
     func getGeminiAccountCount() -> Int {
-        return readAntigravityAccounts()?.accounts.count ?? 0
+        return getAllGeminiAccounts().count
     }
 
     // MARK: - Gemini OAuth Token Refresh
@@ -415,6 +661,10 @@ final class TokenManager: @unchecked Sendable {
     /// See: https://developers.google.com/identity/protocols/oauth2/native-app
     private static let geminiClientId = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
     private static let geminiClientSecret = "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"
+    
+    /// OAuth client used by opencode-gemini-auth plugin
+    private static let geminiAuthPluginClientId = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
+    private static let geminiAuthPluginClientSecret = "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"
 
     /// Refreshes Gemini OAuth access token using refresh token
     /// - Parameters:
@@ -478,12 +728,16 @@ final class TokenManager: @unchecked Sendable {
     /// Convenience method to refresh Gemini token using stored refresh token
     /// - Returns: New access token if successful, nil otherwise
     func refreshGeminiAccessTokenFromStorage() async -> String? {
-        guard let refreshToken = getGeminiRefreshToken() else {
+        guard let account = getAllGeminiAccounts().first else {
             logger.warning("No Gemini refresh token found in storage")
             return nil
         }
 
-        return await refreshGeminiAccessToken(refreshToken: refreshToken)
+        return await refreshGeminiAccessToken(
+            refreshToken: account.refreshToken,
+            clientId: account.clientId,
+            clientSecret: account.clientSecret
+        )
     }
 
     // MARK: - Debug Environment Info
@@ -604,6 +858,23 @@ final class TokenManager: @unchecked Sendable {
             debugLines.append("  [Antigravity] \(accounts.accounts.count) account(s), active index: \(accounts.activeIndex)\(invalidMarker)")
         } else {
             debugLines.append("  [Antigravity] NOT CONFIGURED")
+        }
+
+        // 5. Codex native auth (~/.codex/auth.json) - fallback for OpenAI token
+        debugLines.append("")
+        debugLines.append("Codex Native Auth (~/.codex/auth.json):")
+        let codexAuthPath = homeDir.appendingPathComponent(".codex").appendingPathComponent("auth.json")
+        if fileManager.fileExists(atPath: codexAuthPath.path) {
+            if let codexAuth = readCodexAuth() {
+                let hasToken = codexAuth.tokens?.accessToken != nil
+                let hasAccountId = codexAuth.tokens?.accountId != nil
+                let hasAPIKey = codexAuth.openaiAPIKey != nil
+                debugLines.append("  [EXISTS] token: \(hasToken ? "YES" : "NO"), accountId: \(hasAccountId ? "YES" : "NO"), apiKey: \(hasAPIKey ? "YES" : "NO")")
+            } else {
+                debugLines.append("  [PARSE FAILED]")
+            }
+        } else {
+            debugLines.append("  [NOT FOUND]")
         }
 
         debugLines.append(String(repeating: "─", count: 40))
@@ -847,6 +1118,28 @@ final class TokenManager: @unchecked Sendable {
             }
         } else {
             debugLines.append("[Antigravity Accounts] NOT FOUND or PARSE FAILED")
+        }
+
+        // 7. Codex native auth (~/.codex/auth.json)
+        debugLines.append("---------- Codex Native Auth ----------")
+        let codexAuthPath = homeDir.appendingPathComponent(".codex").appendingPathComponent("auth.json")
+        if fileManager.fileExists(atPath: codexAuthPath.path) {
+            if let codexAuth = readCodexAuth() {
+                debugLines.append("[Codex Auth] EXISTS at \(codexAuthPath.path)")
+                if let tokens = codexAuth.tokens {
+                    debugLines.append("  - Access Token: \(tokens.accessToken != nil ? "\(tokens.accessToken!.count) chars" : "nil")")
+                    debugLines.append("  - Account ID: \(tokens.accountId ?? "nil")")
+                    debugLines.append("  - Refresh Token: \(tokens.refreshToken != nil ? "\(tokens.refreshToken!.count) chars" : "nil")")
+                } else {
+                    debugLines.append("  - Tokens: nil")
+                }
+                debugLines.append("  - OPENAI_API_KEY: \(codexAuth.openaiAPIKey != nil ? "SET" : "nil")")
+                debugLines.append("  - Last Refresh: \(codexAuth.lastRefresh ?? "nil")")
+            } else {
+                debugLines.append("[Codex Auth] PARSE FAILED at \(codexAuthPath.path)")
+            }
+        } else {
+            debugLines.append("[Codex Auth] NOT FOUND at \(codexAuthPath.path)")
         }
 
         debugLines.append("================================================")

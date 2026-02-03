@@ -199,7 +199,7 @@ jobs:
         run: |
           VERSION="${{ env.VERSION_INPUT }}"
           DMG_NAME="OpenCode-Bar-${VERSION}.dmg"
-           DOWNLOAD_URL="https://github.com/kargnas/opencode-bar/releases/download/${VERSION}/${DMG_NAME}"
+          DOWNLOAD_URL="https://github.com/opgginc/opencode-bar/releases/download/${VERSION}/${DMG_NAME}"
           
           echo "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle_key"
           # Extract just the signature string from the output
@@ -212,7 +212,7 @@ jobs:
             '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">' \
             '  <channel>' \
             '    <title>OpenCode Bar Updates</title>' \
-            '    <link>https://github.com/kargnas/opencode-bar/releases/latest/download/appcast.xml</link>' \
+            '    <link>https://github.com/opgginc/opencode-bar/releases/latest/download/appcast.xml</link>' \
             '    <description>Most recent changes with links to updates.</description>' \
             '    <language>en</language>' \
             '    <item>' \
