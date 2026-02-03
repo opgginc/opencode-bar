@@ -452,6 +452,11 @@ extension StatusBarController {
                     let resetItem = NSMenuItem()
                     resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: reset))", indent: 18)
                     submenu.addItem(resetItem)
+
+                    let paceInfo = calculatePace(usage: fiveHour, resetTime: reset, windowHours: 5)
+                    let paceItem = NSMenuItem()
+                    paceItem.view = createPaceView(paceInfo: paceInfo)
+                    submenu.addItem(paceItem)
                 }
             }
             if let limit = details.limit, let remaining = details.limitRemaining {
