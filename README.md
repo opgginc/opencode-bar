@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kargnas/opencode-bar/releases/latest">
-    <img src="https://img.shields.io/github/v/release/kargnas/opencode-bar?style=flat-square" alt="Release">
+  <a href="https://github.com/opgginc/opencode-bar/releases/latest">
+    <img src="https://img.shields.io/github/v/release/opgginc/opencode-bar?style=flat-square" alt="Release">
   </a>
-  <a href="https://github.com/kargnas/opencode-bar/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/kargnas/opencode-bar?style=flat-square" alt="License">
+  <a href="https://github.com/opgginc/opencode-bar/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/opgginc/opencode-bar?style=flat-square" alt="License">
   </a>
   <img src="https://img.shields.io/badge/platform-macOS%2013%2B-blue?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/swift-5.9-orange?style=flat-square" alt="Swift">
@@ -85,13 +85,13 @@
 ### Homebrew (Recommended)
 
 ```bash
-brew tap kargnas/opencode-bar
+brew tap opgginc/opencode-bar
 brew install --cask opencode-bar
 ```
 
 ### Download
 
-Download the latest `.dmg` file from the [**Releases**](https://github.com/kargnas/opencode-bar/releases/latest) page.
+Download the latest `.dmg` file from the [**Releases**](https://github.com/opgginc/opencode-bar/releases/latest) page.
 
 > **Note**: If you see a "App is damaged" error, run this command in Terminal:
 > ```bash
@@ -102,7 +102,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/kargn
 
 ```bash
 # Clone the repository
-git clone https://github.com/kargnas/opencode-bar.git
+git clone https://github.com/opgginc/opencode-bar.git
 cd opencode-bar
 
 # Build
