@@ -84,7 +84,12 @@ final class ClaudeProvider: ProviderProtocol {
             throw ProviderError.providerError("All Claude account fetches failed")
         }
 
-        let merged = dedupeCandidates(candidates)
+        let merged = CandidateDedupe.merge(
+            candidates,
+            accountId: { $0.accountId },
+            isSameUsage: isSameUsage,
+            priority: { sourcePriority($0.source) }
+        )
         let sorted = merged.sorted { lhs, rhs in
             sourcePriority(lhs.source) > sourcePriority(rhs.source)
         }
@@ -225,31 +230,6 @@ final class ClaudeProvider: ProviderProtocol {
             logger.error("Unexpected error parsing Claude response: \(error.localizedDescription)")
             throw ProviderError.providerError("Failed to parse response: \(error.localizedDescription)")
         }
-    }
-
-    private func dedupeCandidates(_ candidates: [ClaudeAccountCandidate]) -> [ClaudeAccountCandidate] {
-        var results: [ClaudeAccountCandidate] = []
-
-        for candidate in candidates {
-            if let accountId = candidate.accountId,
-               let index = results.firstIndex(where: { $0.accountId == accountId }) {
-                if sourcePriority(candidate.source) > sourcePriority(results[index].source) {
-                    results[index] = candidate
-                }
-                continue
-            }
-
-            if let index = results.firstIndex(where: { isSameUsage($0, candidate) }) {
-                if sourcePriority(candidate.source) > sourcePriority(results[index].source) {
-                    results[index] = candidate
-                }
-                continue
-            }
-
-            results.append(candidate)
-        }
-
-        return results
     }
 
     private func isSameUsage(_ lhs: ClaudeAccountCandidate, _ rhs: ClaudeAccountCandidate) -> Bool {

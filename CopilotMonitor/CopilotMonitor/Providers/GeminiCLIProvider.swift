@@ -63,7 +63,15 @@ final class GeminiCLIProvider: ProviderProtocol {
             throw ProviderError.providerError("All account quota fetches failed")
         }
 
-        let deduped = dedupeCandidates(candidates)
+        let deduped = CandidateDedupe.merge(
+            candidates,
+            accountId: { candidate in
+                let email = candidate.quota.email.trimmingCharacters(in: .whitespacesAndNewlines)
+                return email == "Unknown" || email.isEmpty ? nil : email
+            },
+            isSameUsage: { isSameUsage($0.quota, $1.quota) },
+            priority: { sourcePriority($0.source) }
+        )
         let sorted = deduped.sorted { lhs, rhs in
             sourcePriority(lhs.source) > sourcePriority(rhs.source)
         }
@@ -121,32 +129,6 @@ final class GeminiCLIProvider: ProviderProtocol {
         case .antigravity:
             return 1
         }
-    }
-
-    private func dedupeCandidates(_ candidates: [GeminiAccountCandidate]) -> [GeminiAccountCandidate] {
-        var results: [GeminiAccountCandidate] = []
-
-        for candidate in candidates {
-            let email = candidate.quota.email.trimmingCharacters(in: .whitespacesAndNewlines)
-            if email != "Unknown", !email.isEmpty,
-               let index = results.firstIndex(where: { $0.quota.email == email }) {
-                if sourcePriority(candidate.source) > sourcePriority(results[index].source) {
-                    results[index] = candidate
-                }
-                continue
-            }
-
-            if let index = results.firstIndex(where: { isSameUsage($0.quota, candidate.quota) }) {
-                if sourcePriority(candidate.source) > sourcePriority(results[index].source) {
-                    results[index] = candidate
-                }
-                continue
-            }
-
-            results.append(candidate)
-        }
-
-        return results
     }
 
     private func isSameUsage(_ lhs: GeminiAccountQuota, _ rhs: GeminiAccountQuota) -> Bool {

@@ -333,6 +333,14 @@ final class TokenManager: @unchecked Sendable {
                 guard fileManager.fileExists(atPath: authPath.path) else {
                     continue
                 }
+                guard fileManager.isReadableFile(atPath: authPath.path) else {
+                    logger.warning("Gemini OAuth auth file not readable at \(authPath.path)")
+                    continue
+                }
+                guard fileManager.isReadableFile(atPath: authPath.path) else {
+                    logger.warning("Auth file not readable at \(authPath.path)")
+                    continue
+                }
                 
                 do {
                     let data = try Data(contentsOf: authPath)
@@ -374,7 +382,12 @@ final class TokenManager: @unchecked Sendable {
                 .appendingPathComponent(".codex")
                 .appendingPathComponent("auth.json")
 
-            guard FileManager.default.fileExists(atPath: codexAuthPath.path) else {
+            let fileManager = FileManager.default
+            guard fileManager.fileExists(atPath: codexAuthPath.path) else {
+                return nil
+            }
+            guard fileManager.isReadableFile(atPath: codexAuthPath.path) else {
+                logger.warning("Codex auth file not readable at \(codexAuthPath.path)")
                 return nil
             }
 
@@ -401,7 +414,12 @@ final class TokenManager: @unchecked Sendable {
     }
 
     private func readJSONDictionary(at url: URL) -> [String: Any]? {
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        guard fileManager.isReadableFile(atPath: url.path) else {
+            logger.warning("JSON file not readable at \(url.path)")
+            return nil
+        }
         do {
             let data = try Data(contentsOf: url)
             let json = try JSONSerialization.jsonObject(with: data, options: [])
@@ -512,6 +530,10 @@ final class TokenManager: @unchecked Sendable {
             let accountsPath = antigravityAccountsPath()
             
             guard fileManager.fileExists(atPath: accountsPath.path) else {
+                return nil
+            }
+            guard fileManager.isReadableFile(atPath: accountsPath.path) else {
+                logger.warning("Antigravity accounts file not readable at \(accountsPath.path)")
                 return nil
             }
             

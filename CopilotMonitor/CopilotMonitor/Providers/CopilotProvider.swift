@@ -359,7 +359,12 @@ final class CopilotProvider: ProviderProtocol {
         candidates: [CopilotAccountCandidate],
         cookieCandidate: CopilotAccountCandidate?
     ) -> ProviderResult {
-        let merged = dedupeCandidates(candidates)
+        let merged = CandidateDedupe.merge(
+            candidates,
+            accountId: { $0.accountId },
+            isSameUsage: isSameUsage,
+            priority: { $0.sourcePriority }
+        )
         let sorted = merged.sorted { $0.sourcePriority > $1.sourcePriority }
 
         let accountResults: [ProviderAccountResult] = sorted.enumerated().map { index, candidate in
@@ -387,31 +392,6 @@ final class CopilotProvider: ProviderProtocol {
             details: primaryDetails,
             accounts: accountResults
         )
-    }
-
-    private func dedupeCandidates(_ candidates: [CopilotAccountCandidate]) -> [CopilotAccountCandidate] {
-        var results: [CopilotAccountCandidate] = []
-
-        for candidate in candidates {
-            if let accountId = candidate.accountId,
-               let index = results.firstIndex(where: { $0.accountId == accountId }) {
-                if candidate.sourcePriority > results[index].sourcePriority {
-                    results[index] = candidate
-                }
-                continue
-            }
-
-            if let index = results.firstIndex(where: { isSameUsage($0, candidate) }) {
-                if candidate.sourcePriority > results[index].sourcePriority {
-                    results[index] = candidate
-                }
-                continue
-            }
-
-            results.append(candidate)
-        }
-
-        return results
     }
 
     private func isSameUsage(_ lhs: CopilotAccountCandidate, _ rhs: CopilotAccountCandidate) -> Bool {

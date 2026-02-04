@@ -352,6 +352,39 @@ extension DetailedUsage: Codable {
     }
 }
 
+/// Shared helper for deduplicating multi-account provider candidates.
+struct CandidateDedupe {
+    static func merge<T>(
+        _ candidates: [T],
+        accountId: (T) -> String?,
+        isSameUsage: (T, T) -> Bool,
+        priority: (T) -> Int
+    ) -> [T] {
+        var results: [T] = []
+
+        for candidate in candidates {
+            if let candidateId = accountId(candidate),
+               let index = results.firstIndex(where: { accountId($0) == candidateId }) {
+                if priority(candidate) > priority(results[index]) {
+                    results[index] = candidate
+                }
+                continue
+            }
+
+            if let index = results.firstIndex(where: { isSameUsage($0, candidate) }) {
+                if priority(candidate) > priority(results[index]) {
+                    results[index] = candidate
+                }
+                continue
+            }
+
+            results.append(candidate)
+        }
+
+        return results
+    }
+}
+
 extension DetailedUsage {
     var hasAnyValue: Bool {
         return dailyUsage != nil || weeklyUsage != nil || monthlyUsage != nil
