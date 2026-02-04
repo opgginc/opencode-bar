@@ -336,10 +336,6 @@ final class TokenManager: @unchecked Sendable {
                     continue
                 }
                 guard fileManager.isReadableFile(atPath: authPath.path) else {
-                    logger.warning("Gemini OAuth auth file not readable at \(authPath.path)")
-                    continue
-                }
-                guard fileManager.isReadableFile(atPath: authPath.path) else {
                     logger.warning("Auth file not readable at \(authPath.path)")
                     continue
                 }
