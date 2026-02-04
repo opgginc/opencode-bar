@@ -35,7 +35,8 @@ actor ProviderManager {
             OpenRouterProvider(),
             AntigravityProvider(),
             OpenCodeZenProvider(),
-            KimiProvider()
+            KimiProvider(),
+            ChutesProvider()
         ]
     }
 

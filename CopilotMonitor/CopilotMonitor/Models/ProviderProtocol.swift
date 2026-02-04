@@ -20,6 +20,7 @@ enum ProviderIdentifier: String, CaseIterable {
     case openCodeZen = "opencode_zen"
     case kimi
     case zaiCodingPlan = "zai_coding_plan"
+    case chutes
 
     var displayName: String {
         switch self {
@@ -43,6 +44,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Kimi for Coding"
         case .zaiCodingPlan:
             return "Z.AI Coding Plan"
+        case .chutes:
+            return "Chutes"
         }
     }
 
@@ -68,6 +71,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "k.circle"
         case .zaiCodingPlan:
             return "globe"
+        case .chutes:
+            return "c.circle"
         }
     }
 }

@@ -32,6 +32,9 @@ enum MenuDesignToken {
         /// Right margin for menu items
         static let trailingMargin: CGFloat = 14
         
+        /// Indent for sub-items within a menu section (e.g., reset time under usage row)
+        static let submenuIndent: CGFloat = 18
+        
         /// Y position offset for single-line text
         static let textYOffset: CGFloat = 3
         

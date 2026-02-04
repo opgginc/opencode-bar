@@ -7,12 +7,19 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		CLI1111111111111111111111 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLI2222222222222222222222 /* main.swift */; };
-		CLI3333333333333333333333 /* ArgumentParser in Frameworks */ = {isa = PBXBuildFile; productRef = CLI4444444444444444444444 /* ArgumentParser */; };
 		0B6CF8BEB936A2055F19AA8C /* CodexProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76783C44AA2329AE3FA7E981 /* CodexProvider.swift */; };
 		0EA5E7A5BCD47582D6C2175B /* TokenManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF0C48368166F3AD0C79F92 /* TokenManager.swift */; };
 		23AA5FD37F2062EACCA79F50 /* GeminiCLIProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B63B85E0F2A8C591D7E26AE2 /* GeminiCLIProviderTests.swift */; };
 		27A0B56ADAC5B75A3270F90D /* CopilotProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4AE672516E564CC52739BD9 /* CopilotProvider.swift */; };
+		283348F92F313096004DADE1 /* ProviderResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = PR2222222222222222222222 /* ProviderResult.swift */; };
+		283348FA2F313096004DADE1 /* UsageHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E44444444444444444444444 /* UsageHistory.swift */; };
+		283348FB2F313096004DADE1 /* GeminiCLIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06EC3B683EB6892E4F9C8316 /* GeminiCLIProvider.swift */; };
+		283348FC2F313096004DADE1 /* ProviderProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE39D5663A7ABADC7E54B91D /* ProviderProtocol.swift */; };
+		283348FD2F313096004DADE1 /* ProviderUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4158558E58B121A9D13C48C3 /* ProviderUsage.swift */; };
+		283348FE2F313096004DADE1 /* TokenManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF0C48368166F3AD0C79F92 /* TokenManager.swift */; };
+		283348FF2F313096004DADE1 /* BrowserCookieService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2707EF99248FCDEFDEE3DA9C /* BrowserCookieService.swift */; };
+		283349012F313176004DADE1 /* ChutesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 283349002F313176004DADE1 /* ChutesProvider.swift */; };
+		283349022F313176004DADE1 /* ChutesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 283349002F313176004DADE1 /* ChutesProvider.swift */; };
 		390C3E920A03C8890AAA1CEE /* AntigravityProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1DA8E47F4CFEFC3571708AD /* AntigravityProvider.swift */; };
 		632E52F6050FAD5CAF928E36 /* CopilotProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED35D8BD06A436306085737D /* CopilotProviderTests.swift */; };
 		668B6906C95903D51823808A /* DependencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D2B4000E33060BA5E00351B /* DependencyTests.swift */; };
@@ -34,10 +41,21 @@
 		BCDE4599B74AF7A799CE1D /* StatusBarIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0CA52627AF05BD67B56E /* StatusBarIconView.swift */; };
 		CB3FA9AE43F3466269FA56F4 /* ProviderProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE39D5663A7ABADC7E54B91D /* ProviderProtocol.swift */; };
 		CB4724DEB2377B892281E8CD /* ModernStatusBarIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD8824FD8DE388CEE314F92 /* ModernStatusBarIconView.swift */; };
+		CLI1111111111111111111111 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLI2222222222222222222222 /* main.swift */; };
+		CLI3333333333333333333333 /* ArgumentParser in Frameworks */ = {isa = PBXBuildFile; productRef = CLI4444444444444444444444 /* ArgumentParser */; };
+		CLIANTIGRAVITY11111111 /* AntigravityProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1DA8E47F4CFEFC3571708AD /* AntigravityProvider.swift */; };
+		CLICLAUDE11111111111111 /* ClaudeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DDC1B4DE6B5118CE4AE8F82 /* ClaudeProvider.swift */; };
+		CLICODEX111111111111111 /* CodexProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76783C44AA2329AE3FA7E981 /* CodexProvider.swift */; };
+		CLICOPILOT11111111111111 /* CopilotCLIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLICOPILOT22222222222222 /* CopilotCLIProvider.swift */; };
+		CLICOPY111111111111111111 /* opencodebar-cli in Embed CLI */ = {isa = PBXBuildFile; fileRef = CLI5555555555555555555555 /* opencodebar-cli */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		CLIHISTORY11111111111111 /* CopilotHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B1085A77EF4A58E5B5EC71B /* CopilotHistoryService.swift */; };
+		CLIKIMI1111111111111111 /* KimiProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = KI2222222222222222222222 /* KimiProvider.swift */; };
+		CLIOPENCZEN1111111111111 /* OpenCodeZenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OZ2222222222222222222222 /* OpenCodeZenProvider.swift */; };
+		CLIOPENROUTER111111111 /* OpenRouterProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OR2222222222222222222222 /* OpenRouterProvider.swift */; };
+		CLIPROVMGR11111111111111 /* CLIProviderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLIPROVMGR22222222222222 /* CLIProviderManager.swift */; };
 		D11111111111111111111111 /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D22222222222222222222222 /* StatusBarController.swift */; };
 		E11111111111111111111111 /* CopilotUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22222222222222222222222 /* CopilotUsage.swift */; };
 		E33333333333333333333334 /* UsageHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E44444444444444444444444 /* UsageHistory.swift */; };
-		SS1111111111111111111111 /* SubscriptionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS2222222222222222222222 /* SubscriptionSettings.swift */; };
 		E92DAE297D071D146591E201 /* MultiProviderStatusBarIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24BD2AE5B12FABC3E915AE27 /* MultiProviderStatusBarIconView.swift */; };
 		F08C918116D7B3024B68C81A /* MenuDesignToken.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1C7C9FDB4600114F02B2915 /* MenuDesignToken.swift */; };
 		F11111111111111111111111 /* UsagePredictor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F22222222222222222222222 /* UsagePredictor.swift */; };
@@ -53,21 +71,12 @@
 		PMB111111111111111111111 /* ProviderMenuBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = PMB222222222222222222222 /* ProviderMenuBuilder.swift */; };
 		PR1111111111111111111111 /* ProviderResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = PR2222222222222222222222 /* ProviderResult.swift */; };
 		SP1111111111111111111111 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = SP2222222222222222222222 /* Sparkle */; };
+		SS1111111111111111111111 /* SubscriptionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS2222222222222222222222 /* SubscriptionSettings.swift */; };
 		T11111111111111111111111 /* ProviderUsageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T22222222222222222222222 /* ProviderUsageTests.swift */; };
 		T33333333333333333333333 /* claude_response.json in Resources */ = {isa = PBXBuildFile; fileRef = T44444444444444444444444 /* claude_response.json */; };
 		T55555555555555555555555 /* codex_response.json in Resources */ = {isa = PBXBuildFile; fileRef = T66666666666666666666666 /* codex_response.json */; };
 		T77777777777777777777777 /* copilot_response.json in Resources */ = {isa = PBXBuildFile; fileRef = T88888888888888888888888 /* copilot_response.json */; };
 		T99999999999999999999999 /* gemini_response.json in Resources */ = {isa = PBXBuildFile; fileRef = TAAAAAAAAAAAAAAAAAAAAAAA /* gemini_response.json */; };
-		CLICLAUDE11111111111111 /* ClaudeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DDC1B4DE6B5118CE4AE8F82 /* ClaudeProvider.swift */; };
-		CLICODEX111111111111111 /* CodexProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76783C44AA2329AE3FA7E981 /* CodexProvider.swift */; };
-		CLIOPENROUTER111111111 /* OpenRouterProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OR2222222222222222222222 /* OpenRouterProvider.swift */; };
-		CLIANTIGRAVITY11111111 /* AntigravityProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1DA8E47F4CFEFC3571708AD /* AntigravityProvider.swift */; };
-		CLIOPENCZEN1111111111111 /* OpenCodeZenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OZ2222222222222222222222 /* OpenCodeZenProvider.swift */; };
-		CLIKIMI1111111111111111 /* KimiProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = KI2222222222222222222222 /* KimiProvider.swift */; };
-		CLIPROVMGR11111111111111 /* CLIProviderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLIPROVMGR22222222222222 /* CLIProviderManager.swift */; };
-		CLICOPILOT11111111111111 /* CopilotCLIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLICOPILOT22222222222222 /* CopilotCLIProvider.swift */; };
-		CLIHISTORY11111111111111 /* CopilotHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B1085A77EF4A58E5B5EC71B /* CopilotHistoryService.swift */; };
-		CLICOPY111111111111111111 /* opencodebar-cli in Embed CLI */ = {isa = PBXBuildFile; fileRef = CLI5555555555555555555555 /* opencodebar-cli */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -102,15 +111,12 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		CLI2222222222222222222222 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
-		CLI5555555555555555555555 /* opencodebar-cli */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "opencodebar-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
-		CLIPROVMGR22222222222222 /* CLIProviderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIProviderManager.swift; sourceTree = "<group>"; };
-		CLICOPILOT22222222222222 /* CopilotCLIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotCLIProvider.swift; sourceTree = "<group>"; };
 		06EC3B683EB6892E4F9C8316 /* GeminiCLIProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GeminiCLIProvider.swift; sourceTree = "<group>"; };
 		0F6CE62C58ECA852F25FEF30 /* MenuResultBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuResultBuilder.swift; sourceTree = "<group>"; };
 		18F40F1AC76A49A9B9DF74B0 /* ProviderManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderManager.swift; sourceTree = "<group>"; };
 		24BD2AE5B12FABC3E915AE27 /* MultiProviderStatusBarIconView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MultiProviderStatusBarIconView.swift; sourceTree = "<group>"; };
 		2707EF99248FCDEFDEE3DA9C /* BrowserCookieService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrowserCookieService.swift; sourceTree = "<group>"; };
+		283349002F313176004DADE1 /* ChutesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChutesProvider.swift; sourceTree = "<group>"; };
 		2D2B4000E33060BA5E00351B /* DependencyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DependencyTests.swift; sourceTree = "<group>"; };
 		2DD8824FD8DE388CEE314F92 /* ModernStatusBarIconView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModernStatusBarIconView.swift; sourceTree = "<group>"; };
 		4158558E58B121A9D13C48C3 /* ProviderUsage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderUsage.swift; sourceTree = "<group>"; };
@@ -132,11 +138,14 @@
 		BE39D5663A7ABADC7E54B91D /* ProviderProtocol.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderProtocol.swift; sourceTree = "<group>"; };
 		C1C7C9FDB4600114F02B2915 /* MenuDesignToken.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuDesignToken.swift; sourceTree = "<group>"; };
 		C8493409A9188CFF5B73D5B3 /* MenuDesignTokenTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuDesignTokenTests.swift; sourceTree = "<group>"; };
+		CLI2222222222222222222222 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		CLI5555555555555555555555 /* opencodebar-cli */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "opencodebar-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
+		CLICOPILOT22222222222222 /* CopilotCLIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotCLIProvider.swift; sourceTree = "<group>"; };
+		CLIPROVMGR22222222222222 /* CLIProviderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIProviderManager.swift; sourceTree = "<group>"; };
 		D22222222222222222222222 /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
 		DBF0C48368166F3AD0C79F92 /* TokenManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TokenManager.swift; sourceTree = "<group>"; };
 		E22222222222222222222222 /* CopilotUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotUsage.swift; sourceTree = "<group>"; };
 		E44444444444444444444444 /* UsageHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistory.swift; sourceTree = "<group>"; };
-		SS2222222222222222222222 /* SubscriptionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionSettings.swift; sourceTree = "<group>"; };
 		ED35D8BD06A436306085737D /* CopilotProviderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CopilotProviderTests.swift; sourceTree = "<group>"; };
 		F1DA8E47F4CFEFC3571708AD /* AntigravityProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AntigravityProvider.swift; sourceTree = "<group>"; };
 		F22222222222222222222222 /* UsagePredictor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePredictor.swift; sourceTree = "<group>"; };
@@ -151,6 +160,7 @@
 		OZ2222222222222222222222 /* OpenCodeZenProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OpenCodeZenProvider.swift; sourceTree = "<group>"; };
 		PMB222222222222222222222 /* ProviderMenuBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderMenuBuilder.swift; sourceTree = "<group>"; };
 		PR2222222222222222222222 /* ProviderResult.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderResult.swift; sourceTree = "<group>"; };
+		SS2222222222222222222222 /* SubscriptionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionSettings.swift; sourceTree = "<group>"; };
 		T22222222222222222222222 /* ProviderUsageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderUsageTests.swift; sourceTree = "<group>"; };
 		T44444444444444444444444 /* claude_response.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = claude_response.json; sourceTree = "<group>"; };
 		T66666666666666666666666 /* codex_response.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = codex_response.json; sourceTree = "<group>"; };
@@ -187,24 +197,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		CLI7777777777777777777777 /* CLI */ = {
-			isa = PBXGroup;
-			children = (
-				CLI2222222222222222222222 /* main.swift */,
-				CLIPROVMGR22222222222222 /* CLIProviderManager.swift */,
-				CLIPROVIDERS333333333333 /* Providers */,
-			);
-			path = CLI;
-			sourceTree = "<group>";
-		};
-		CLIPROVIDERS333333333333 /* Providers */ = {
-			isa = PBXGroup;
-			children = (
-				CLICOPILOT22222222222222 /* CopilotCLIProvider.swift */,
-			);
-			path = Providers;
-			sourceTree = "<group>";
-		};
 		1D81BD5EF6E11EA1F43B6746 /* CopilotMonitor */ = {
 			isa = PBXGroup;
 			children = (
@@ -233,12 +225,13 @@
 				OR2222222222222222222222 /* OpenRouterProvider.swift */,
 				F1DA8E47F4CFEFC3571708AD /* AntigravityProvider.swift */,
 				OZ2222222222222222222222 /* OpenCodeZenProvider.swift */,
-				KI2222222222222222222222 /* KimiProvider.swift */,
-			);
-			path = Providers;
-			sourceTree = "<group>";
-		};
-		ABBBBBBBBBBBBBBBBBBBBBBB = {
+			KI2222222222222222222222 /* KimiProvider.swift */,
+			283349002F313176004DADE1 /* ChutesProvider.swift */,
+		);
+		path = Providers;
+		sourceTree = "<group>";
+	};
+	ABBBBBBBBBBBBBBBBBBBBBBB = {
 			isa = PBXGroup;
 			children = (
 				ACCCCCCCCCCCCCCCCCCCCCCC /* CopilotMonitor */,
@@ -307,6 +300,24 @@
 				24BD2AE5B12FABC3E915AE27 /* MultiProviderStatusBarIconView.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		CLI7777777777777777777777 /* CLI */ = {
+			isa = PBXGroup;
+			children = (
+				CLI2222222222222222222222 /* main.swift */,
+				CLIPROVMGR22222222222222 /* CLIProviderManager.swift */,
+				CLIPROVIDERS333333333333 /* Providers */,
+			);
+			path = CLI;
+			sourceTree = "<group>";
+		};
+		CLIPROVIDERS333333333333 /* Providers */ = {
+			isa = PBXGroup;
+			children = (
+				CLICOPILOT22222222222222 /* CopilotCLIProvider.swift */,
+			);
+			path = Providers;
 			sourceTree = "<group>";
 		};
 		E33333333333333333333333 /* Models */ = {
@@ -463,11 +474,11 @@
 				Base,
 			);
 			mainGroup = ABBBBBBBBBBBBBBBBBBBBBBB;
-		packageReferences = (
-			SP4444444444444444444444 /* XCRemoteSwiftPackageReference "Sparkle" */,
-			MBA1111111111111111111111 /* XCRemoteSwiftPackageReference "MenuBarExtraAccess" */,
-			CLIBBBBBBBBBBBBBBBBBBBBB /* XCRemoteSwiftPackageReference "swift-argument-parser" */,
-		);
+			packageReferences = (
+				SP4444444444444444444444 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				MBA1111111111111111111111 /* XCRemoteSwiftPackageReference "MenuBarExtraAccess" */,
+				CLIBBBBBBBBBBBBBBBBBBBBB /* XCRemoteSwiftPackageReference "swift-argument-parser" */,
+			);
 			productRefGroup = ADDDDDDDDDDDDDDDDDDDDDDD /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -504,35 +515,11 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-	CLIAAAAAAAAAAAAAAAAAAAAA /* Sources */ = {
-		isa = PBXSourcesBuildPhase;
-		buildActionMask = 2147483647;
-		files = (
-			CLI1111111111111111111111 /* main.swift in Sources */,
-			CB3FA9AE43F3466269FA56F4 /* ProviderProtocol.swift in Sources */,
-			B248782F500D3B09E0CE5AC8 /* ProviderUsage.swift in Sources */,
-			PR1111111111111111111111 /* ProviderResult.swift in Sources */,
-			E33333333333333333333334 /* UsageHistory.swift in Sources */,
-			0EA5E7A5BCD47582D6C2175B /* TokenManager.swift in Sources */,
-			68CE796F262067298FE88469 /* BrowserCookieService.swift in Sources */,
-			CLICLAUDE11111111111111 /* ClaudeProvider.swift in Sources */,
-			CLICODEX111111111111111 /* CodexProvider.swift in Sources */,
-			F35960B456C28D71BE7575A5 /* GeminiCLIProvider.swift in Sources */,
-			CLIOPENROUTER111111111 /* OpenRouterProvider.swift in Sources */,
-			CLIANTIGRAVITY11111111 /* AntigravityProvider.swift in Sources */,
-			CLIOPENCZEN1111111111111 /* OpenCodeZenProvider.swift in Sources */,
-			CLIKIMI1111111111111111 /* KimiProvider.swift in Sources */,
-			CLIPROVMGR11111111111111 /* CLIProviderManager.swift in Sources */,
-			CLICOPILOT11111111111111 /* CopilotCLIProvider.swift in Sources */,
-			CLIHISTORY11111111111111 /* CopilotHistoryService.swift in Sources */,
-		);
-		runOnlyForDeploymentPostprocessing = 0;
-	};
 		B22222222222222222222222 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				PR1111111111111111111111 /* ProviderResult.swift in Sources */,
+				283348F92F313096004DADE1 /* ProviderResult.swift in Sources */,
 				A33333333333333333333333 /* AppDelegate.swift in Sources */,
 				AM1111111111111111111111 /* AppMigrationHelper.swift in Sources */,
 				A454D8C42F30548900E355E3 /* ZaiCodingPlanProvider.swift in Sources */,
@@ -540,13 +527,13 @@
 				ME1111111111111111111111 /* MenuEnums.swift in Sources */,
 				D11111111111111111111111 /* StatusBarController.swift in Sources */,
 				E11111111111111111111111 /* CopilotUsage.swift in Sources */,
-				E33333333333333333333334 /* UsageHistory.swift in Sources */,
+				283348FA2F313096004DADE1 /* UsageHistory.swift in Sources */,
 				SS1111111111111111111111 /* SubscriptionSettings.swift in Sources */,
 				F11111111111111111111111 /* UsagePredictor.swift in Sources */,
-				F35960B456C28D71BE7575A5 /* GeminiCLIProvider.swift in Sources */,
-				CB3FA9AE43F3466269FA56F4 /* ProviderProtocol.swift in Sources */,
-				B248782F500D3B09E0CE5AC8 /* ProviderUsage.swift in Sources */,
-				0EA5E7A5BCD47582D6C2175B /* TokenManager.swift in Sources */,
+				283348FB2F313096004DADE1 /* GeminiCLIProvider.swift in Sources */,
+				283348FC2F313096004DADE1 /* ProviderProtocol.swift in Sources */,
+				283348FD2F313096004DADE1 /* ProviderUsage.swift in Sources */,
+				283348FE2F313096004DADE1 /* TokenManager.swift in Sources */,
 				87297CDD8B65F7EF0BC5D650 /* ProviderManager.swift in Sources */,
 				AD95EBD6AE3134DF4C797577 /* ClaudeProvider.swift in Sources */,
 				0B6CF8BEB936A2055F19AA8C /* CodexProvider.swift in Sources */,
@@ -556,7 +543,8 @@
 				390C3E920A03C8890AAA1CEE /* AntigravityProvider.swift in Sources */,
 				OZ1111111111111111111111 /* OpenCodeZenProvider.swift in Sources */,
 				KI1111111111111111111111 /* KimiProvider.swift in Sources */,
-				68CE796F262067298FE88469 /* BrowserCookieService.swift in Sources */,
+				283349012F313176004DADE1 /* ChutesProvider.swift in Sources */,
+				283348FF2F313096004DADE1 /* BrowserCookieService.swift in Sources */,
 				6C4146861DE2C13836DE1D35 /* CopilotHistoryService.swift in Sources */,
 				PMB111111111111111111111 /* ProviderMenuBuilder.swift in Sources */,
 				F08C918116D7B3024B68C81A /* MenuDesignToken.swift in Sources */,
@@ -565,6 +553,31 @@
 				6E20731420660405A73659A3 /* ModernApp.swift in Sources */,
 				CB4724DEB2377B892281E8CD /* ModernStatusBarIconView.swift in Sources */,
 				E92DAE297D071D146591E201 /* MultiProviderStatusBarIconView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CLIAAAAAAAAAAAAAAAAAAAAA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CLI1111111111111111111111 /* main.swift in Sources */,
+				CB3FA9AE43F3466269FA56F4 /* ProviderProtocol.swift in Sources */,
+				B248782F500D3B09E0CE5AC8 /* ProviderUsage.swift in Sources */,
+				PR1111111111111111111111 /* ProviderResult.swift in Sources */,
+				E33333333333333333333334 /* UsageHistory.swift in Sources */,
+				0EA5E7A5BCD47582D6C2175B /* TokenManager.swift in Sources */,
+				68CE796F262067298FE88469 /* BrowserCookieService.swift in Sources */,
+				CLICLAUDE11111111111111 /* ClaudeProvider.swift in Sources */,
+				CLICODEX111111111111111 /* CodexProvider.swift in Sources */,
+				F35960B456C28D71BE7575A5 /* GeminiCLIProvider.swift in Sources */,
+				283349012F313176004DADE1 /* ChutesProvider.swift in Sources */,
+				CLIOPENROUTER111111111 /* OpenRouterProvider.swift in Sources */,
+				CLIANTIGRAVITY11111111 /* AntigravityProvider.swift in Sources */,
+				CLIOPENCZEN1111111111111 /* OpenCodeZenProvider.swift in Sources */,
+				CLIKIMI1111111111111111 /* KimiProvider.swift in Sources */,
+				CLIPROVMGR11111111111111 /* CLIProviderManager.swift in Sources */,
+				CLICOPILOT11111111111111 /* CopilotCLIProvider.swift in Sources */,
+				CLIHISTORY11111111111111 /* CopilotHistoryService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -632,6 +645,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -655,6 +669,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -694,6 +709,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -710,6 +726,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -723,8 +740,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 3;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = CopilotMonitor/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -748,8 +768,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 3;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = CopilotMonitor/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -764,12 +787,42 @@
 			};
 			name = Release;
 		};
+		CLICCCCCCCCCCCCCCCCCCCCC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = "";
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_PARSE_AS_LIBRARY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		CLIDDDDDDDDDDDDDDDDDDDDD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = YES;
+				DEAD_CODE_STRIPPING = YES;
+				DEPLOYMENT_POSTPROCESSING = YES;
+				DEVELOPMENT_TEAM = "";
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_PARSE_AS_LIBRARY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		TLLLLLLLLLLLLLLLLLLLLLL /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
@@ -788,6 +841,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
@@ -797,34 +851,6 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OpenCode Bar.app/Contents/MacOS/OpenCode Bar";
-			};
-			name = Release;
-		};
-		CLICCCCCCCCCCCCCCCCCCCCC /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_PARSE_AS_LIBRARY = YES;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Debug;
-		};
-		CLIDDDDDDDDDDDDDDDDDDDDD /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				COPY_PHASE_STRIP = YES;
-				DEPLOYMENT_POSTPROCESSING = YES;
-				DEVELOPMENT_TEAM = "";
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRIP_INSTALLED_PRODUCT = YES;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_PARSE_AS_LIBRARY = YES;
-				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
@@ -849,20 +875,20 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		THHHHHHHHHHHHHHHHHHHHHHH /* Build configuration list for PBXNativeTarget "CopilotMonitorTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				TLLLLLLLLLLLLLLLLLLLLLL /* Debug */,
-				TMMMMMMMMMMMMMMMMMMMMMM /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		CLI9999999999999999999999 /* Build configuration list for PBXNativeTarget "opencodebar-cli" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CLICCCCCCCCCCCCCCCCCCCCC /* Debug */,
 				CLIDDDDDDDDDDDDDDDDDDDDD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		THHHHHHHHHHHHHHHHHHHHHHH /* Build configuration list for PBXNativeTarget "CopilotMonitorTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				TLLLLLLLLLLLLLLLLLLLLLL /* Debug */,
+				TMMMMMMMMMMMMMMMMMMMMMM /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

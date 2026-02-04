@@ -432,6 +432,34 @@ extension StatusBarController {
             // === Subscription ===
             addSubscriptionItems(to: submenu, provider: .zaiCodingPlan, accountId: accountId)
 
+        case .chutes:
+            if let daily = details.dailyUsage,
+               let limit = details.limit {
+                let used = Int(daily)
+                let total = Int(limit)
+                let percentage = total > 0 ? Int((Double(used) / Double(total)) * 100) : 0
+
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: String(format: "Daily: %d%% used (%d/%d)", percentage, used, total))
+                submenu.addItem(item)
+            }
+
+            submenu.addItem(NSMenuItem.separator())
+
+            if let plan = details.planType {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Plan: \(plan)")
+                submenu.addItem(item)
+            }
+
+            if let credits = details.creditsBalance {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: String(format: "Credits: $%.2f", credits))
+                submenu.addItem(item)
+            }
+
+            addSubscriptionItems(to: submenu, provider: .chutes)
+
         default:
             break
         }
@@ -947,7 +975,7 @@ extension StatusBarController {
             formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
             formatter.timeZone = TimeZone.current
             let resetItem = NSMenuItem()
-            resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: resetDate))", indent: 18)
+            resetItem.view = createDisabledLabelView(text: "Resets: \(formatter.string(from: resetDate))", indent: MenuDesignToken.Spacing.submenuIndent)
             items.append(resetItem)
 
             let paceInfo: PaceInfo

@@ -52,6 +52,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 | **Kimi for Coding (Kimi K2.5)** | Quota-based | Usage limits, membership level, reset time |
 | **Z.AI Coding Plan** | Quota-based | Token/MCP quotas, model usage, tool usage (24h) |
 | **Antigravity** | Quota-based | Local language server monitoring |
+| **Chutes AI** | Quota-based | Daily quota limits (300/2000/5000), credits balance |
 | **GitHub Copilot** | Quota-based | Daily history, overage tracking |
 
 ### Custom Providers
