@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import os.log
 
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "TokenManager")
@@ -109,6 +110,61 @@ struct CodexAuth: Codable {
     }
 }
 
+/// Auth source types for OpenAI (Codex) account discovery
+enum OpenAIAuthSource {
+    case opencodeAuth
+    case codexAuth
+}
+
+/// Unified OpenAI account model used by the provider layer
+struct OpenAIAuthAccount {
+    let accessToken: String
+    let accountId: String?
+    let authSource: String
+    let source: OpenAIAuthSource
+}
+
+/// Auth source types for Claude account discovery
+enum ClaudeAuthSource {
+    case opencodeAuth
+    case claudeCodeConfig
+    case claudeCodeKeychain
+    case claudeLegacyCredentials
+}
+
+/// Unified Claude account model used by the provider layer
+struct ClaudeAuthAccount {
+    let accessToken: String
+    let accountId: String?
+    let email: String?
+    let authSource: String
+    let source: ClaudeAuthSource
+}
+
+/// Auth source types for GitHub Copilot token discovery
+enum CopilotAuthSource {
+    case opencodeAuth
+    case vscodeHosts
+    case vscodeApps
+}
+
+/// Unified GitHub Copilot token model used by the provider layer
+struct CopilotAuthAccount {
+    let accessToken: String
+    let accountId: String?
+    let login: String?
+    let authSource: String
+    let source: CopilotAuthSource
+}
+
+struct CopilotPlanInfo {
+    let plan: String?
+    let quotaResetDateUTC: Date?
+    let quotaLimit: Int?
+    let quotaRemaining: Int?
+    let userId: String?
+}
+
 /// Antigravity Accounts structure for ~/.config/opencode/antigravity-accounts.json
 struct AntigravityAccounts: Codable {
     struct Account: Codable {
@@ -205,6 +261,14 @@ final class TokenManager: @unchecked Sendable {
     
     /// Path where Gemini OAuth auth was found (OpenCode auth.json)
     private(set) var lastFoundGeminiOAuthPath: URL?
+
+    /// Cached Claude accounts (OpenCode + Claude Code)
+    private var cachedClaudeAccounts: [ClaudeAuthAccount]?
+    private var claudeAccountsCacheTimestamp: Date?
+
+    /// Cached GitHub Copilot token accounts (OpenCode + VS Code)
+    private var cachedCopilotAccounts: [CopilotAuthAccount]?
+    private var copilotAccountsCacheTimestamp: Date?
 
     private init() {
         logger.info("TokenManager initialized")
@@ -328,6 +392,104 @@ final class TokenManager: @unchecked Sendable {
         }
     }
 
+    // MARK: - Shared JSON Helpers
+
+    private func normalizedKey(_ key: String) -> String {
+        return key.lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+    }
+
+    private func readJSONDictionary(at url: URL) -> [String: Any]? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        do {
+            let data = try Data(contentsOf: url)
+            let json = try JSONSerialization.jsonObject(with: data, options: [])
+            return json as? [String: Any]
+        } catch {
+            logger.warning("Failed to parse JSON at \(url.path): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func findStringValue(in object: Any?, matching keys: Set<String>) -> String? {
+        if let dict = object as? [String: Any] {
+            for (key, value) in dict {
+                let normalized = normalizedKey(key)
+                if keys.contains(normalized), let stringValue = value as? String, !stringValue.isEmpty {
+                    return stringValue
+                }
+                if let nested = findStringValue(in: value, matching: keys) {
+                    return nested
+                }
+            }
+        } else if let array = object as? [Any] {
+            for item in array {
+                if let nested = findStringValue(in: item, matching: keys) {
+                    return nested
+                }
+            }
+        }
+        return nil
+    }
+
+    private func findIntValue(in object: Any?, matching keys: Set<String>) -> Int? {
+        if let dict = object as? [String: Any] {
+            for (key, value) in dict {
+                let normalized = normalizedKey(key)
+                if keys.contains(normalized) {
+                    if let intValue = value as? Int {
+                        return intValue
+                    }
+                    if let numberValue = value as? NSNumber {
+                        return numberValue.intValue
+                    }
+                    if let stringValue = value as? String, let intValue = Int(stringValue) {
+                        return intValue
+                    }
+                }
+                if let nested = findIntValue(in: value, matching: keys) {
+                    return nested
+                }
+            }
+        } else if let array = object as? [Any] {
+            for item in array {
+                if let nested = findIntValue(in: item, matching: keys) {
+                    return nested
+                }
+            }
+        }
+        return nil
+    }
+
+    private func readKeychainJSON(service: String) -> [String: Any]? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess else {
+            if status != errSecItemNotFound {
+                logger.warning("Keychain lookup failed for service \(service), status: \(status)")
+            }
+            return nil
+        }
+
+        guard let data = result as? Data,
+              let json = try? JSONSerialization.jsonObject(with: data, options: []),
+              let dict = json as? [String: Any] else {
+            logger.warning("Keychain payload for service \(service) is not valid JSON")
+            return nil
+        }
+
+        return dict
+    }
+
     // MARK: - Antigravity Accounts File Reading
 
     private func antigravityAccountsPath() -> URL {
@@ -365,6 +527,332 @@ final class TokenManager: @unchecked Sendable {
                 return nil
             }
         }
+    }
+
+    // MARK: - Claude Code Auth Discovery
+
+    private func claudeCodeAuthPaths() -> [URL] {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        return [
+            homeDir
+                .appendingPathComponent(".config")
+                .appendingPathComponent("claude-code")
+                .appendingPathComponent("auth.json"),
+            homeDir
+                .appendingPathComponent(".claude")
+                .appendingPathComponent(".credentials.json")
+        ]
+    }
+
+    private func readClaudeCodeAuthFiles() -> [ClaudeAuthAccount] {
+        let accessKeys: Set<String> = ["accesstoken", "oauthtoken", "token"]
+        let accountKeys: Set<String> = ["accountid", "userid", "id"]
+        let emailKeys: Set<String> = ["email", "useremail", "login", "username"]
+
+        var accounts: [ClaudeAuthAccount] = []
+        for path in claudeCodeAuthPaths() {
+            guard let dict = readJSONDictionary(at: path) else { continue }
+            guard let accessToken = findStringValue(in: dict, matching: accessKeys) else { continue }
+
+            let accountIdString = findStringValue(in: dict, matching: accountKeys)
+            let accountIdInt = findIntValue(in: dict, matching: accountKeys)
+            let accountId = accountIdString ?? accountIdInt.map { String($0) }
+            let email = findStringValue(in: dict, matching: emailKeys)
+
+            let source: ClaudeAuthSource = path.path.contains(".credentials.json") ? .claudeLegacyCredentials : .claudeCodeConfig
+            accounts.append(
+                ClaudeAuthAccount(
+                    accessToken: accessToken,
+                    accountId: accountId,
+                    email: email,
+                    authSource: path.path,
+                    source: source
+                )
+            )
+        }
+        return accounts
+    }
+
+    private func readClaudeCodeKeychainAccounts() -> [ClaudeAuthAccount] {
+        let accessKeys: Set<String> = ["accesstoken", "oauthtoken", "token"]
+        let accountKeys: Set<String> = ["accountid", "userid", "id"]
+        let emailKeys: Set<String> = ["email", "useremail", "login", "username"]
+
+        let services = [
+            "Claude Code-credentials",
+            "Claude Code"
+        ]
+
+        var accounts: [ClaudeAuthAccount] = []
+        for service in services {
+            guard let dict = readKeychainJSON(service: service) else { continue }
+            guard let accessToken = findStringValue(in: dict, matching: accessKeys) else { continue }
+
+            let accountIdString = findStringValue(in: dict, matching: accountKeys)
+            let accountIdInt = findIntValue(in: dict, matching: accountKeys)
+            let accountId = accountIdString ?? accountIdInt.map { String($0) }
+            let email = findStringValue(in: dict, matching: emailKeys)
+
+            accounts.append(
+                ClaudeAuthAccount(
+                    accessToken: accessToken,
+                    accountId: accountId,
+                    email: email,
+                    authSource: "Keychain (\(service))",
+                    source: .claudeCodeKeychain
+                )
+            )
+        }
+        return accounts
+    }
+
+    /// Gets all Claude accounts (OpenCode auth + Claude Code local auth)
+    func getClaudeAccounts() -> [ClaudeAuthAccount] {
+        if let cached = queue.sync(execute: {
+            if let cached = cachedClaudeAccounts,
+               let timestamp = claudeAccountsCacheTimestamp,
+               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+                return cached
+            }
+            return nil
+        }) {
+            return cached
+        }
+
+        var accounts: [ClaudeAuthAccount] = []
+
+        if let auth = readOpenCodeAuth(),
+           let access = auth.anthropic?.access,
+           !access.isEmpty {
+            let authSource = lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            accounts.append(
+                ClaudeAuthAccount(
+                    accessToken: access,
+                    accountId: auth.anthropic?.accountId,
+                    email: nil,
+                    authSource: authSource,
+                    source: .opencodeAuth
+                )
+            )
+        }
+
+        accounts.append(contentsOf: readClaudeCodeKeychainAccounts())
+        accounts.append(contentsOf: readClaudeCodeAuthFiles())
+
+        let deduped = dedupeClaudeAccounts(accounts)
+        logger.info("Claude accounts discovered: \(deduped.count)")
+        queue.sync {
+            cachedClaudeAccounts = deduped
+            claudeAccountsCacheTimestamp = Date()
+        }
+        return deduped
+    }
+
+    private func dedupeClaudeAccounts(_ accounts: [ClaudeAuthAccount]) -> [ClaudeAuthAccount] {
+        func priority(for source: ClaudeAuthSource) -> Int {
+            switch source {
+            case .opencodeAuth: return 3
+            case .claudeCodeKeychain: return 2
+            case .claudeCodeConfig: return 1
+            case .claudeLegacyCredentials: return 0
+            }
+        }
+
+        var byToken: [String: ClaudeAuthAccount] = [:]
+        for account in accounts {
+            if let existing = byToken[account.accessToken] {
+                if priority(for: account.source) > priority(for: existing.source) {
+                    byToken[account.accessToken] = account
+                }
+            } else {
+                byToken[account.accessToken] = account
+            }
+        }
+        return Array(byToken.values)
+    }
+
+    // MARK: - GitHub Copilot Token Discovery
+
+    private func copilotTokenPaths() -> [URL] {
+        let fileManager = FileManager.default
+        let homeDir = fileManager.homeDirectoryForCurrentUser
+        var paths: [URL] = []
+
+        if let xdgConfigHome = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"], !xdgConfigHome.isEmpty {
+            let xdgBase = URL(fileURLWithPath: xdgConfigHome).appendingPathComponent("github-copilot")
+            paths.append(xdgBase.appendingPathComponent("hosts.json"))
+            paths.append(xdgBase.appendingPathComponent("apps.json"))
+        }
+
+        let linuxBase = homeDir
+            .appendingPathComponent(".config")
+            .appendingPathComponent("github-copilot")
+        paths.append(linuxBase.appendingPathComponent("hosts.json"))
+        paths.append(linuxBase.appendingPathComponent("apps.json"))
+
+        let macBase = homeDir
+            .appendingPathComponent("Library")
+            .appendingPathComponent("Application Support")
+            .appendingPathComponent("github-copilot")
+        paths.append(macBase.appendingPathComponent("hosts.json"))
+        paths.append(macBase.appendingPathComponent("apps.json"))
+
+        var uniquePaths: [URL] = []
+        var seen = Set<String>()
+        for path in paths {
+            if seen.insert(path.path).inserted {
+                uniquePaths.append(path)
+            }
+        }
+        return uniquePaths
+    }
+
+    private func copilotAccountFromEntry(_ entry: [String: Any], source: CopilotAuthSource, authSource: String) -> CopilotAuthAccount? {
+        let tokenKeys: Set<String> = ["oauthtoken", "accesstoken", "token"]
+        let accountKeys: Set<String> = ["accountid", "userid", "id"]
+        let loginKeys: Set<String> = ["login", "user", "username", "email"]
+
+        guard let accessToken = findStringValue(in: entry, matching: tokenKeys) else { return nil }
+
+        let accountIdString = findStringValue(in: entry, matching: accountKeys)
+        let accountIdInt = findIntValue(in: entry, matching: accountKeys)
+        let accountId = accountIdString ?? accountIdInt.map { String($0) }
+
+        let login = findStringValue(in: entry, matching: loginKeys)
+
+        return CopilotAuthAccount(
+            accessToken: accessToken,
+            accountId: accountId,
+            login: login,
+            authSource: authSource,
+            source: source
+        )
+    }
+
+    private func parseCopilotAccounts(from dict: [String: Any], source: CopilotAuthSource, authSource: String) -> [CopilotAuthAccount] {
+        var accounts: [CopilotAuthAccount] = []
+
+        if let account = copilotAccountFromEntry(dict, source: source, authSource: authSource) {
+            accounts.append(account)
+        }
+
+        for value in dict.values {
+            if let entry = value as? [String: Any],
+               let account = copilotAccountFromEntry(entry, source: source, authSource: authSource) {
+                accounts.append(account)
+            }
+        }
+
+        return accounts
+    }
+
+    /// Gets all GitHub Copilot token accounts (OpenCode auth + VS Code Copilot tokens)
+    func getGitHubCopilotAccounts() -> [CopilotAuthAccount] {
+        if let cached = queue.sync(execute: {
+            if let cached = cachedCopilotAccounts,
+               let timestamp = copilotAccountsCacheTimestamp,
+               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+                return cached
+            }
+            return nil
+        }) {
+            return cached
+        }
+
+        var accounts: [CopilotAuthAccount] = []
+
+        if let auth = readOpenCodeAuth(),
+           let access = auth.githubCopilot?.access,
+           !access.isEmpty {
+            let authSource = lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            accounts.append(
+                CopilotAuthAccount(
+                    accessToken: access,
+                    accountId: auth.githubCopilot?.accountId,
+                    login: nil,
+                    authSource: authSource,
+                    source: .opencodeAuth
+                )
+            )
+        }
+
+        for path in copilotTokenPaths() {
+            guard let dict = readJSONDictionary(at: path) else { continue }
+            let source: CopilotAuthSource = path.lastPathComponent == "apps.json" ? .vscodeApps : .vscodeHosts
+            accounts.append(contentsOf: parseCopilotAccounts(from: dict, source: source, authSource: path.path))
+        }
+
+        let deduped = dedupeCopilotAccounts(accounts)
+        logger.info("GitHub Copilot token accounts discovered: \(deduped.count)")
+        queue.sync {
+            cachedCopilotAccounts = deduped
+            copilotAccountsCacheTimestamp = Date()
+        }
+        return deduped
+    }
+
+    private func dedupeCopilotAccounts(_ accounts: [CopilotAuthAccount]) -> [CopilotAuthAccount] {
+        func priority(for source: CopilotAuthSource) -> Int {
+            switch source {
+            case .opencodeAuth: return 2
+            case .vscodeHosts: return 1
+            case .vscodeApps: return 0
+            }
+        }
+
+        var byToken: [String: CopilotAuthAccount] = [:]
+        for account in accounts {
+            if let existing = byToken[account.accessToken] {
+                if priority(for: account.source) > priority(for: existing.source) {
+                    byToken[account.accessToken] = account
+                }
+            } else {
+                byToken[account.accessToken] = account
+            }
+        }
+        return Array(byToken.values)
+    }
+
+    // MARK: - OpenAI Account Discovery
+
+    /// Gets all OpenAI accounts (OpenCode auth + Codex native auth)
+    func getOpenAIAccounts() -> [OpenAIAuthAccount] {
+        var accounts: [OpenAIAuthAccount] = []
+
+        if let auth = readOpenCodeAuth(),
+           let access = auth.openai?.access,
+           !access.isEmpty {
+            let authSource = lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            accounts.append(
+                OpenAIAuthAccount(
+                    accessToken: access,
+                    accountId: auth.openai?.accountId,
+                    authSource: authSource,
+                    source: .opencodeAuth
+                )
+            )
+        }
+
+        if let codexAuth = readCodexAuth(),
+           let access = codexAuth.tokens?.accessToken,
+           !access.isEmpty {
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser
+            let authSource = homeDir
+                .appendingPathComponent(".codex")
+                .appendingPathComponent("auth.json")
+                .path
+            accounts.append(
+                OpenAIAuthAccount(
+                    accessToken: access,
+                    accountId: codexAuth.tokens?.accountId,
+                    authSource: authSource,
+                    source: .codexAuth
+                )
+            )
+        }
+
+        logger.info("OpenAI accounts discovered: \(accounts.count)")
+        return accounts
     }
 
     // MARK: - Gemini OAuth Auth File Reading (OpenCode auth.json)
@@ -443,8 +931,10 @@ final class TokenManager: @unchecked Sendable {
     /// Gets Anthropic (Claude) access token from OpenCode auth
     /// - Returns: Access token string if available, nil otherwise
     func getAnthropicAccessToken() -> String? {
-        guard let auth = readOpenCodeAuth() else { return nil }
-        return auth.anthropic?.access
+        if let auth = readOpenCodeAuth(), let access = auth.anthropic?.access {
+            return access
+        }
+        return getClaudeAccounts().first?.accessToken
     }
 
     /// Gets OpenAI access token, first from OpenCode auth, then falling back to Codex CLI native auth (~/.codex/auth.json)
@@ -478,19 +968,15 @@ final class TokenManager: @unchecked Sendable {
     /// Gets GitHub Copilot access token from OpenCode auth
     /// - Returns: Access token string if available, nil otherwise
     func getGitHubCopilotAccessToken() -> String? {
-        guard let auth = readOpenCodeAuth() else { return nil }
-        return auth.githubCopilot?.access
+        if let auth = readOpenCodeAuth(), let access = auth.githubCopilot?.access {
+            return access
+        }
+        return getGitHubCopilotAccounts().first?.accessToken
     }
 
-    /// Fetches Copilot plan and quota reset info from GitHub internal API
-    /// Uses the OpenCode GitHub Copilot token
-    /// - Returns: Tuple of (plan, quotaResetDateUTC) if successful, nil otherwise
-    func fetchCopilotPlanInfo() async -> (plan: String, quotaResetDateUTC: Date?)? {
-        guard let accessToken = getGitHubCopilotAccessToken() else {
-            logger.warning("No GitHub Copilot token available for plan info fetch")
-            return nil
-        }
-
+    /// Fetches Copilot plan and quota info from GitHub internal API
+    /// - Returns: CopilotPlanInfo if successful, nil otherwise
+    func fetchCopilotPlanInfo(accessToken: String) async -> CopilotPlanInfo? {
         guard let url = URL(string: "https://api.github.com/copilot_internal/user") else {
             logger.error("Invalid Copilot API URL")
             return nil
@@ -521,7 +1007,11 @@ final class TokenManager: @unchecked Sendable {
                 return nil
             }
 
-            let plan = json["copilot_plan"] as? String ?? "unknown"
+            let plan = json["copilot_plan"] as? String ?? json["plan"] as? String
+            let userIdString = json["user_id"] as? String
+            let userIdInt = json["user_id"] as? Int ?? (json["id"] as? Int)
+            let userId = userIdString ?? userIdInt.map { String($0) }
+
             var resetDate: Date?
 
             // Parse quota_reset_date_utc (format: "2026-03-01T00:00:00.000Z")
@@ -530,7 +1020,6 @@ final class TokenManager: @unchecked Sendable {
                 formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
                 resetDate = formatter.date(from: resetDateStr)
 
-                // Fallback without fractional seconds
                 if resetDate == nil {
                     let fallbackFormatter = ISO8601DateFormatter()
                     fallbackFormatter.formatOptions = [.withInternetDateTime]
@@ -546,17 +1035,66 @@ final class TokenManager: @unchecked Sendable {
                 resetDate = dateFormatter.date(from: resetDateStr)
             }
 
-            if let resetDate = resetDate {
-                logger.info("Copilot plan info fetched: \(plan), reset: \(resetDate)")
-                return (plan: plan, quotaResetDateUTC: resetDate)
-            } else {
-                logger.warning("Copilot plan fetched but no reset date: \(plan)")
-                return (plan: plan, quotaResetDateUTC: nil)
+            // Additional fallback: limited_user_reset_date
+            if resetDate == nil, let limitedReset = json["limited_user_reset_date"] as? String {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                resetDate = formatter.date(from: limitedReset)
+                if resetDate == nil {
+                    let fallbackFormatter = ISO8601DateFormatter()
+                    fallbackFormatter.formatOptions = [.withInternetDateTime]
+                    resetDate = fallbackFormatter.date(from: limitedReset)
+                }
             }
+
+            let limitedUserQuotas = json["limited_user_quotas"] as? [String: Any]
+            let monthlyQuotas = json["monthly_quotas"] as? [String: Any]
+
+            func quotaValue(_ dict: [String: Any]?, key: String) -> Int? {
+                guard let dict = dict else { return nil }
+                if let value = dict[key] as? Int { return value }
+                if let value = dict[key] as? NSNumber { return value.intValue }
+                if let value = dict[key] as? Double { return Int(value) }
+                if let value = dict[key] as? String, let intValue = Int(value) { return intValue }
+                return nil
+            }
+
+            let monthlyCompletions = quotaValue(monthlyQuotas, key: "completions")
+            let monthlyChat = quotaValue(monthlyQuotas, key: "chat")
+            let limitedCompletions = quotaValue(limitedUserQuotas, key: "completions")
+            let limitedChat = quotaValue(limitedUserQuotas, key: "chat")
+
+            let quotaLimit = monthlyCompletions ?? monthlyChat
+                ?? ((monthlyCompletions != nil || monthlyChat != nil) ? (monthlyCompletions ?? 0) + (monthlyChat ?? 0) : nil)
+            let quotaRemaining = limitedCompletions ?? limitedChat
+                ?? ((limitedCompletions != nil || limitedChat != nil) ? (limitedCompletions ?? 0) + (limitedChat ?? 0) : nil)
+
+            if let resetDate = resetDate {
+                logger.info("Copilot plan info fetched: \(plan ?? "unknown"), reset: \(resetDate)")
+            } else {
+                logger.warning("Copilot plan fetched but no reset date: \(plan ?? "unknown")")
+            }
+
+            return CopilotPlanInfo(
+                plan: plan,
+                quotaResetDateUTC: resetDate,
+                quotaLimit: quotaLimit,
+                quotaRemaining: quotaRemaining,
+                userId: userId
+            )
         } catch {
             logger.error("Failed to fetch Copilot plan info: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    /// Fetches Copilot plan info using the primary token
+    func fetchCopilotPlanInfo() async -> CopilotPlanInfo? {
+        guard let accessToken = getGitHubCopilotAccessToken() else {
+            logger.warning("No GitHub Copilot token available for plan info fetch")
+            return nil
+        }
+        return await fetchCopilotPlanInfo(accessToken: accessToken)
     }
 
     /// Gets OpenRouter API key from OpenCode auth
@@ -595,9 +1133,37 @@ final class TokenManager: @unchecked Sendable {
 
     /// Gets all Gemini accounts (primary: Antigravity accounts, fallback: OpenCode auth.json)
     func getAllGeminiAccounts() -> [GeminiAuthAccount] {
-        if let accounts = readAntigravityAccounts(), !accounts.accounts.isEmpty {
+        var accounts: [GeminiAuthAccount] = []
+
+        if let geminiAuth = readGeminiOAuthAuth() {
+            let refresh = geminiAuth.refresh?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let parts = parseGeminiRefreshParts(refresh)
+            if !parts.refreshToken.isEmpty {
+                let projectId = parts.projectId ?? parts.managedProjectId ?? ""
+                if projectId.isEmpty {
+                    logger.warning("Gemini OAuth auth found but project ID is missing")
+                }
+                let authSource = lastFoundGeminiOAuthPath?.path ?? "auth.json"
+                accounts.append(
+                    GeminiAuthAccount(
+                        index: 0,
+                        email: nil,
+                        refreshToken: parts.refreshToken,
+                        projectId: projectId,
+                        authSource: authSource,
+                        clientId: TokenManager.geminiAuthPluginClientId,
+                        clientSecret: TokenManager.geminiAuthPluginClientSecret,
+                        source: .opencodeAuth
+                    )
+                )
+            } else {
+                logger.warning("Gemini OAuth refresh token missing or empty")
+            }
+        }
+
+        if let antigravity = readAntigravityAccounts(), !antigravity.accounts.isEmpty {
             let authSource = antigravityAccountsPath().path
-            return accounts.accounts.enumerated().map { index, account in
+            let antigravityAccounts = antigravity.accounts.enumerated().map { index, account in
                 GeminiAuthAccount(
                     index: index,
                     email: account.email,
@@ -609,33 +1175,25 @@ final class TokenManager: @unchecked Sendable {
                     source: .antigravity
                 )
             }
+            accounts.append(contentsOf: antigravityAccounts)
         }
 
-        guard let geminiAuth = readGeminiOAuthAuth() else { return [] }
-        let refresh = geminiAuth.refresh?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let parts = parseGeminiRefreshParts(refresh)
-        guard !parts.refreshToken.isEmpty else {
-            logger.warning("Gemini OAuth refresh token missing or empty")
+        if accounts.isEmpty {
             return []
         }
-        let projectId = parts.projectId ?? parts.managedProjectId ?? ""
-        if projectId.isEmpty {
-            logger.warning("Gemini OAuth auth found but project ID is missing")
-        }
 
-        let authSource = lastFoundGeminiOAuthPath?.path ?? "auth.json"
-        return [
+        return accounts.enumerated().map { index, account in
             GeminiAuthAccount(
-                index: 0,
-                email: nil,
-                refreshToken: parts.refreshToken,
-                projectId: projectId,
-                authSource: authSource,
-                clientId: TokenManager.geminiAuthPluginClientId,
-                clientSecret: TokenManager.geminiAuthPluginClientSecret,
-                source: .opencodeAuth
+                index: index,
+                email: account.email,
+                refreshToken: account.refreshToken,
+                projectId: account.projectId,
+                authSource: account.authSource,
+                clientId: account.clientId,
+                clientSecret: account.clientSecret,
+                source: account.source
             )
-        ]
+        }
     }
 
     /// Gets the count of registered Gemini accounts
@@ -730,6 +1288,142 @@ final class TokenManager: @unchecked Sendable {
     }
 
     // MARK: - Debug Environment Info
+
+    private func authDiscoverySummaryLines() -> [String] {
+        let fileManager = FileManager.default
+        let homeDir = fileManager.homeDirectoryForCurrentUser
+        let openCodeAuth = readOpenCodeAuth()
+        let openCodePath = lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+
+        var lines: [String] = []
+        lines.append("Auth Discovery Summary:")
+        lines.append(String(repeating: "─", count: 40))
+
+        func shortPath(_ path: String) -> String {
+            let homePath = homeDir.path
+            if path.hasPrefix(homePath) {
+                let suffix = path.dropFirst(homePath.count)
+                return "~\(suffix)"
+            }
+            return path
+        }
+
+        func tokenStatus(hasAuth: Bool, token: String?, accountId: String?) -> String {
+            guard hasAuth else { return "NOT FOUND" }
+            guard let token = token, !token.isEmpty else { return "MISSING TOKEN" }
+            let accountIdStatus = (accountId == nil || accountId?.isEmpty == true) ? "NO" : "YES"
+            return "FOUND (token, accountId: \(accountIdStatus))"
+        }
+
+        func fileStatus(path: URL, tokenKeys: Set<String>) -> String {
+            if !fileManager.fileExists(atPath: path.path) {
+                return "NOT FOUND"
+            }
+            guard let dict = readJSONDictionary(at: path) else {
+                return "UNREADABLE"
+            }
+            let hasToken = findStringValue(in: dict, matching: tokenKeys) != nil
+            return hasToken ? "FOUND" : "MISSING TOKEN"
+        }
+
+        func keychainStatus(service: String, tokenKeys: Set<String>) -> String {
+            guard let dict = readKeychainJSON(service: service) else { return "NOT FOUND" }
+            let hasToken = findStringValue(in: dict, matching: tokenKeys) != nil
+            return hasToken ? "FOUND" : "MISSING TOKEN"
+        }
+
+        func copilotFileStatus(path: URL) -> String {
+            if !fileManager.fileExists(atPath: path.path) {
+                return "NOT FOUND"
+            }
+            guard let dict = readJSONDictionary(at: path) else {
+                return "UNREADABLE"
+            }
+            let source: CopilotAuthSource = path.lastPathComponent == "apps.json" ? .vscodeApps : .vscodeHosts
+            let accounts = parseCopilotAccounts(from: dict, source: source, authSource: path.path)
+            if accounts.isEmpty {
+                return "FOUND (no token entries)"
+            }
+            return "FOUND (\(accounts.count) account(s))"
+        }
+
+        func browserCookieStatus() -> String {
+            do {
+                _ = try BrowserCookieService.shared.getGitHubCookies()
+                return "AVAILABLE"
+            } catch {
+                return "NOT AVAILABLE"
+            }
+        }
+
+        lines.append("[ChatGPT]")
+        lines.append("  OpenCode auth.json (\(shortPath(openCodePath))): \(tokenStatus(hasAuth: openCodeAuth != nil, token: openCodeAuth?.openai?.access, accountId: openCodeAuth?.openai?.accountId))")
+
+        let codexAuthPath = homeDir.appendingPathComponent(".codex").appendingPathComponent("auth.json")
+        if fileManager.fileExists(atPath: codexAuthPath.path) {
+            if let codexAuth = readCodexAuth() {
+                let status = tokenStatus(
+                    hasAuth: true,
+                    token: codexAuth.tokens?.accessToken,
+                    accountId: codexAuth.tokens?.accountId
+                )
+                lines.append("  Codex auth.json (\(shortPath(codexAuthPath.path))): \(status)")
+            } else {
+                lines.append("  Codex auth.json (\(shortPath(codexAuthPath.path))): PARSE FAILED")
+            }
+        } else {
+            lines.append("  Codex auth.json (\(shortPath(codexAuthPath.path))): NOT FOUND")
+        }
+
+        lines.append("")
+        lines.append("[Claude]")
+        lines.append("  OpenCode auth.json (\(shortPath(openCodePath))): \(tokenStatus(hasAuth: openCodeAuth != nil, token: openCodeAuth?.anthropic?.access, accountId: openCodeAuth?.anthropic?.accountId))")
+        let claudeTokenKeys: Set<String> = ["accesstoken", "oauthtoken", "token"]
+        let claudeKeychainPrimary = "Claude Code-credentials"
+        let claudeKeychainSecondary = "Claude Code"
+        lines.append("  Claude Code Keychain (\(claudeKeychainPrimary)): \(keychainStatus(service: claudeKeychainPrimary, tokenKeys: claudeTokenKeys))")
+        lines.append("  Claude Code Keychain (\(claudeKeychainSecondary)): \(keychainStatus(service: claudeKeychainSecondary, tokenKeys: claudeTokenKeys))")
+
+        let claudePaths = claudeCodeAuthPaths()
+        if let configPath = claudePaths.first {
+            lines.append("  Claude Code auth.json (\(shortPath(configPath.path))): \(fileStatus(path: configPath, tokenKeys: claudeTokenKeys))")
+        }
+        if claudePaths.count > 1 {
+            let legacyPath = claudePaths[1]
+            lines.append("  Claude Legacy credentials (\(shortPath(legacyPath.path))): \(fileStatus(path: legacyPath, tokenKeys: claudeTokenKeys))")
+        }
+
+        lines.append("")
+        lines.append("[GitHub Copilot]")
+        lines.append("  OpenCode auth.json (\(shortPath(openCodePath))): \(tokenStatus(hasAuth: openCodeAuth != nil, token: openCodeAuth?.githubCopilot?.access, accountId: openCodeAuth?.githubCopilot?.accountId))")
+        let copilotBase = homeDir
+            .appendingPathComponent("Library")
+            .appendingPathComponent("Application Support")
+            .appendingPathComponent("github-copilot")
+        let copilotHosts = copilotBase.appendingPathComponent("hosts.json")
+        let copilotApps = copilotBase.appendingPathComponent("apps.json")
+        lines.append("  VS Code hosts.json (\(shortPath(copilotHosts.path))): \(copilotFileStatus(path: copilotHosts))")
+        lines.append("  VS Code apps.json (\(shortPath(copilotApps.path))): \(copilotFileStatus(path: copilotApps))")
+        lines.append("  Browser Cookies: \(browserCookieStatus())")
+
+        lines.append("")
+        lines.append("[Gemini CLI]")
+        let geminiAuth = readGeminiOAuthAuth()
+        let geminiAuthPath = lastFoundGeminiOAuthPath?.path ?? "auth.json"
+        if let geminiAuth = geminiAuth, let refresh = geminiAuth.refresh, !refresh.isEmpty {
+            lines.append("  OpenCode auth.json (google.oauth, \(shortPath(geminiAuthPath))): FOUND")
+        } else {
+            lines.append("  OpenCode auth.json (google.oauth, \(shortPath(geminiAuthPath))): NOT FOUND")
+        }
+        if let accounts = readAntigravityAccounts() {
+            lines.append("  Antigravity accounts (\(shortPath(antigravityAccountsPath().path))): FOUND (\(accounts.accounts.count) account(s))")
+        } else {
+            lines.append("  Antigravity accounts (\(shortPath(antigravityAccountsPath().path))): NOT FOUND")
+        }
+
+        lines.append(String(repeating: "─", count: 40))
+        return lines
+    }
 
     /// Returns debug environment info as a string for error dialogs
     func getDebugEnvironmentInfo() -> String {
@@ -865,6 +1559,9 @@ final class TokenManager: @unchecked Sendable {
         } else {
             debugLines.append("  [NOT FOUND]")
         }
+
+        debugLines.append("")
+        debugLines.append(contentsOf: authDiscoverySummaryLines())
 
         debugLines.append(String(repeating: "─", count: 40))
 
@@ -1015,6 +1712,8 @@ final class TokenManager: @unchecked Sendable {
         } else {
             debugLines.append("[OpenCode CLI] NOT FOUND at \(opencodeCLI.path)")
         }
+
+        debugLines.append(contentsOf: authDiscoverySummaryLines())
 
         // 5. Token existence and lengths (masked for security)
         debugLines.append("---------- Token Status ----------")

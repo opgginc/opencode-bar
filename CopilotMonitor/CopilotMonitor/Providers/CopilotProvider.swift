@@ -34,86 +34,109 @@ final class CopilotProvider: ProviderProtocol {
     // MARK: - ProviderProtocol Implementation
 
     func fetch() async throws -> ProviderResult {
-        let cookies: GitHubCookies
+        let tokenAccounts = TokenManager.shared.getGitHubCopilotAccounts()
+        var tokenInfos = await fetchTokenInfos(tokenAccounts)
+
+        var candidates: [CopilotAccountCandidate] = []
+        var cookieCandidate: CopilotAccountCandidate?
+
+        let cookies: GitHubCookies?
         do {
             cookies = try BrowserCookieService.shared.getGitHubCookies()
         } catch {
             logger.warning("CopilotProvider: Failed to get cookies: \(error.localizedDescription)")
-            return try loadCachedUsageWithEmail()
+            cookies = nil
         }
 
-        guard cookies.isValid else {
-            logger.warning("CopilotProvider: Invalid cookies, trying cache")
-            return try loadCachedUsageWithEmail()
-        }
+        if let cookies = cookies, cookies.isValid {
+            let cookieLogin = cookies.dotcomUser?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let login = cookieLogin, !login.isEmpty {
+                cachedUserEmail = login
+            }
 
-        let planInfoTask = Task {
-            await TokenManager.shared.fetchCopilotPlanInfo()
-        }
+            let matchedToken = matchTokenInfo(login: cookieLogin, tokenInfos: &tokenInfos)
+            let planInfo = matchedToken?.planInfo
 
-        guard let customerId = await fetchCustomerId(cookies: cookies) else {
-            logger.warning("CopilotProvider: Failed to get customer ID, trying cache")
-            return try loadCachedUsageWithEmail()
-        }
+            if let customerId = await fetchCustomerId(cookies: cookies) {
+                logger.info("CopilotProvider: Customer ID obtained - \(customerId)")
 
-        logger.info("CopilotProvider: Customer ID obtained - \(customerId)")
+                if var usage = await fetchUsageData(customerId: customerId, cookies: cookies) {
+                    if let planInfo {
+                        usage = CopilotUsage(
+                            netBilledAmount: usage.netBilledAmount,
+                            netQuantity: usage.netQuantity,
+                            discountQuantity: usage.discountQuantity,
+                            userPremiumRequestEntitlement: usage.userPremiumRequestEntitlement,
+                            filteredUserPremiumRequestEntitlement: usage.filteredUserPremiumRequestEntitlement,
+                            copilotPlan: planInfo.plan,
+                            quotaResetDateUTC: planInfo.quotaResetDateUTC
+                        )
+                        if let resetDate = planInfo.quotaResetDateUTC {
+                            logger.info("CopilotProvider: Plan info merged - \(planInfo.plan ?? "unknown"), reset: \(resetDate)")
+                        } else {
+                            logger.info("CopilotProvider: Plan info merged - \(planInfo.plan ?? "unknown"), reset: unknown")
+                        }
+                    }
 
-        guard var usage = await fetchUsageData(customerId: customerId, cookies: cookies) else {
-            logger.warning("CopilotProvider: Failed to fetch usage data, trying cache")
-            return try loadCachedUsageWithEmail()
-        }
+                    saveCache(usage: usage)
 
-        if let planInfo = await planInfoTask.value {
-            usage = CopilotUsage(
-                netBilledAmount: usage.netBilledAmount,
-                netQuantity: usage.netQuantity,
-                discountQuantity: usage.discountQuantity,
-                userPremiumRequestEntitlement: usage.userPremiumRequestEntitlement,
-                filteredUserPremiumRequestEntitlement: usage.filteredUserPremiumRequestEntitlement,
-                copilotPlan: planInfo.plan,
-                quotaResetDateUTC: planInfo.quotaResetDateUTC
-            )
-            if let resetDate = planInfo.quotaResetDateUTC {
-                logger.info("CopilotProvider: Plan info merged - \(planInfo.plan), reset: \(resetDate)")
+                    let remaining = usage.limitRequests - usage.usedRequests
+                    logger.info("CopilotProvider: Fetch successful - used: \(usage.usedRequests), limit: \(usage.limitRequests), remaining: \(remaining)")
+
+                    var dailyHistory: [DailyUsage]?
+                    do {
+                        dailyHistory = try await CopilotHistoryService.shared.fetchHistory()
+                        logger.info("CopilotProvider: History fetched successfully - \(dailyHistory?.count ?? 0) days")
+                    } catch {
+                        logger.warning("CopilotProvider: Failed to fetch history: \(error.localizedDescription)")
+                    }
+
+                    let priority = sourcePriority(matchedToken?.source)
+                    cookieCandidate = buildCandidateFromUsage(
+                        usage: usage,
+                        login: cookieLogin,
+                        authSource: "Browser Cookies (Chrome/Brave/Arc/Edge)",
+                        sourcePriority: priority,
+                        dailyHistory: dailyHistory
+                    )
+
+                    if let cookieCandidate {
+                        candidates.append(cookieCandidate)
+                    }
+                } else {
+                    logger.warning("CopilotProvider: Failed to fetch usage data, trying cache")
+                    cookieCandidate = try? buildCandidateFromCache()
+                    if let cookieCandidate {
+                        candidates.append(cookieCandidate)
+                    }
+                }
             } else {
-                logger.info("CopilotProvider: Plan info merged - \(planInfo.plan), reset: unknown")
+                logger.warning("CopilotProvider: Failed to get customer ID, trying cache")
+                cookieCandidate = try? buildCandidateFromCache()
+                if let cookieCandidate {
+                    candidates.append(cookieCandidate)
+                }
+            }
+        } else {
+            logger.warning("CopilotProvider: Invalid or missing cookies, trying cache")
+            cookieCandidate = try? buildCandidateFromCache()
+            if let cookieCandidate {
+                candidates.append(cookieCandidate)
             }
         }
 
-        saveCache(usage: usage)
-
-        let remaining = usage.limitRequests - usage.usedRequests
-
-        logger.info("CopilotProvider: Fetch successful - used: \(usage.usedRequests), limit: \(usage.limitRequests), remaining: \(remaining)")
-
-        var dailyHistory: [DailyUsage]?
-        do {
-            dailyHistory = try await CopilotHistoryService.shared.fetchHistory()
-            logger.info("CopilotProvider: History fetched successfully - \(dailyHistory?.count ?? 0) days")
-        } catch {
-            logger.warning("CopilotProvider: Failed to fetch history: \(error.localizedDescription)")
+        for info in tokenInfos {
+            if let tokenCandidate = buildCandidateFromToken(info) {
+                candidates.append(tokenCandidate)
+            }
         }
 
-        let providerUsage = ProviderUsage.quotaBased(
-            remaining: remaining,
-            entitlement: usage.limitRequests,
-            overagePermitted: true
-        )
-        return ProviderResult(
-            usage: providerUsage,
-            details: DetailedUsage(
-                resetPeriod: formatResetDate(usage.quotaResetDateUTC),
-                planType: usage.planDisplayName,
-                email: cachedUserEmail,
-                dailyHistory: dailyHistory,
-                authSource: "Browser Cookies (Chrome/Brave/Arc/Edge)",
-                copilotOverageCost: usage.netBilledAmount,
-                copilotOverageRequests: usage.netQuantity,
-                copilotUsedRequests: usage.usedRequests,
-                copilotLimitRequests: usage.limitRequests,
-                copilotQuotaResetDateUTC: usage.quotaResetDateUTC
-            )
-        )
+        if candidates.isEmpty {
+            logger.error("CopilotProvider: No usable Copilot data found")
+            throw ProviderError.authenticationFailed("No Copilot data available")
+        }
+
+        return finalizeResult(candidates: candidates, cookieCandidate: cookieCandidate)
     }
 
     private func formatResetDate(_ date: Date?) -> String? {
@@ -122,6 +145,296 @@ final class CopilotProvider: ProviderProtocol {
         formatter.dateFormat = "MMM d, yyyy"
         formatter.timeZone = TimeZone(identifier: "UTC")
         return formatter.string(from: date)
+    }
+
+    // MARK: - Token & Account Helpers
+
+    private struct CopilotTokenInfo {
+        let accountId: String?
+        let login: String?
+        let planInfo: CopilotPlanInfo?
+        let authSource: String
+        let source: CopilotAuthSource
+
+        var quotaLimit: Int? { planInfo?.quotaLimit }
+        var quotaRemaining: Int? { planInfo?.quotaRemaining }
+        var plan: String? { planInfo?.plan }
+        var resetDate: Date? { planInfo?.quotaResetDateUTC }
+    }
+
+    private struct CopilotAccountCandidate {
+        let accountId: String?
+        let usage: ProviderUsage
+        let details: DetailedUsage
+        let sourcePriority: Int
+    }
+
+    private func sourcePriority(_ source: CopilotAuthSource?) -> Int {
+        switch source {
+        case .opencodeAuth:
+            return 3
+        case .vscodeHosts:
+            return 2
+        case .vscodeApps:
+            return 1
+        case .none:
+            return 0
+        }
+    }
+
+    private func fetchTokenInfos(_ accounts: [CopilotAuthAccount]) async -> [CopilotTokenInfo] {
+        var infos: [CopilotTokenInfo] = []
+
+        for account in accounts {
+            let planInfo = await TokenManager.shared.fetchCopilotPlanInfo(accessToken: account.accessToken)
+            var login = account.login
+
+            if login == nil {
+                login = await fetchCopilotUserLogin(accessToken: account.accessToken)
+            }
+
+            let accountId = account.accountId ?? planInfo?.userId ?? login
+            infos.append(
+                CopilotTokenInfo(
+                    accountId: accountId,
+                    login: login,
+                    planInfo: planInfo,
+                    authSource: account.authSource,
+                    source: account.source
+                )
+            )
+        }
+
+        return dedupeTokenInfos(infos)
+    }
+
+    private func dedupeTokenInfos(_ infos: [CopilotTokenInfo]) -> [CopilotTokenInfo] {
+        var results: [CopilotTokenInfo] = []
+
+        for info in infos {
+            if let accountId = info.accountId,
+               let index = results.firstIndex(where: { $0.accountId == accountId }) {
+                if sourcePriority(info.source) > sourcePriority(results[index].source) {
+                    results[index] = info
+                }
+                continue
+            }
+
+            if let login = info.login,
+               let index = results.firstIndex(where: { $0.login == login }) {
+                if sourcePriority(info.source) > sourcePriority(results[index].source) {
+                    results[index] = info
+                }
+                continue
+            }
+
+            results.append(info)
+        }
+
+        return results
+    }
+
+    private func matchTokenInfo(login: String?, tokenInfos: inout [CopilotTokenInfo]) -> CopilotTokenInfo? {
+        guard let login = login, !login.isEmpty else { return nil }
+        if let index = tokenInfos.firstIndex(where: { $0.login?.caseInsensitiveCompare(login) == .orderedSame }) {
+            return tokenInfos.remove(at: index)
+        }
+        return nil
+    }
+
+    private func fetchCopilotUserLogin(accessToken: String) async -> String? {
+        guard let url = URL(string: "https://api.github.com/user") else { return nil }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("token \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("2022-11-28", forHTTPHeaderField: "X-Github-Api-Version")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                return nil
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return nil
+            }
+            return json["login"] as? String
+        } catch {
+            logger.warning("CopilotProvider: Failed to fetch user login: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func buildCandidateFromUsage(
+        usage: CopilotUsage,
+        login: String?,
+        authSource: String,
+        sourcePriority: Int,
+        dailyHistory: [DailyUsage]?
+    ) -> CopilotAccountCandidate {
+        let remaining = usage.limitRequests - usage.usedRequests
+        let providerUsage = ProviderUsage.quotaBased(
+            remaining: remaining,
+            entitlement: usage.limitRequests,
+            overagePermitted: true
+        )
+
+        let details = DetailedUsage(
+            resetPeriod: formatResetDate(usage.quotaResetDateUTC),
+            planType: usage.copilotPlan,
+            email: login,
+            dailyHistory: dailyHistory,
+            authSource: authSource,
+            copilotOverageCost: usage.netBilledAmount,
+            copilotOverageRequests: usage.netQuantity,
+            copilotUsedRequests: usage.usedRequests,
+            copilotLimitRequests: usage.limitRequests,
+            copilotQuotaResetDateUTC: usage.quotaResetDateUTC
+        )
+
+        return CopilotAccountCandidate(
+            accountId: login,
+            usage: providerUsage,
+            details: details,
+            sourcePriority: sourcePriority
+        )
+    }
+
+    private func buildCandidateFromToken(_ info: CopilotTokenInfo) -> CopilotAccountCandidate? {
+        if info.planInfo == nil && info.login == nil && info.accountId == nil {
+            return nil
+        }
+        let limit = info.quotaLimit
+        let remaining = info.quotaRemaining
+        let used: Int? = {
+            guard let limit = limit, let remaining = remaining else { return nil }
+            return max(0, limit - remaining)
+        }()
+
+        let providerUsage: ProviderUsage
+        if let limit = limit, let remaining = remaining, limit > 0 {
+            providerUsage = ProviderUsage.quotaBased(
+                remaining: max(0, remaining),
+                entitlement: limit,
+                overagePermitted: true
+            )
+        } else {
+            providerUsage = ProviderUsage.quotaBased(
+                remaining: 0,
+                entitlement: 0,
+                overagePermitted: true
+            )
+        }
+
+        let details = DetailedUsage(
+            planType: info.plan,
+            email: info.login,
+            authSource: info.authSource,
+            copilotUsedRequests: used,
+            copilotLimitRequests: limit,
+            copilotQuotaResetDateUTC: info.resetDate
+        )
+
+        return CopilotAccountCandidate(
+            accountId: info.accountId ?? info.login,
+            usage: providerUsage,
+            details: details,
+            sourcePriority: sourcePriority(info.source)
+        )
+    }
+
+    private func buildCandidateFromCache() throws -> CopilotAccountCandidate? {
+        let cachedResult = try loadCachedUsageWithEmail()
+        guard let details = cachedResult.details else { return nil }
+        return CopilotAccountCandidate(
+            accountId: details.email,
+            usage: cachedResult.usage,
+            details: details,
+            sourcePriority: 0
+        )
+    }
+
+    private func finalizeResult(
+        candidates: [CopilotAccountCandidate],
+        cookieCandidate: CopilotAccountCandidate?
+    ) -> ProviderResult {
+        let merged = dedupeCandidates(candidates)
+        let sorted = merged.sorted { $0.sourcePriority > $1.sourcePriority }
+
+        let accountResults: [ProviderAccountResult] = sorted.enumerated().map { index, candidate in
+            ProviderAccountResult(
+                accountIndex: index,
+                accountId: candidate.accountId,
+                usage: candidate.usage,
+                details: candidate.details
+            )
+        }
+
+        let usageCandidates = accountResults.filter { ($0.usage.totalEntitlement ?? 0) > 0 }
+        let minRemaining = usageCandidates.compactMap { $0.usage.remainingQuota }.min() ?? 0
+        let entitlement = usageCandidates.first?.usage.totalEntitlement ?? 0
+        let aggregateUsage = ProviderUsage.quotaBased(
+            remaining: minRemaining,
+            entitlement: entitlement,
+            overagePermitted: true
+        )
+
+        let primaryDetails = cookieCandidate?.details ?? accountResults.first?.details
+
+        return ProviderResult(
+            usage: aggregateUsage,
+            details: primaryDetails,
+            accounts: accountResults
+        )
+    }
+
+    private func dedupeCandidates(_ candidates: [CopilotAccountCandidate]) -> [CopilotAccountCandidate] {
+        var results: [CopilotAccountCandidate] = []
+
+        for candidate in candidates {
+            if let accountId = candidate.accountId,
+               let index = results.firstIndex(where: { $0.accountId == accountId }) {
+                if candidate.sourcePriority > results[index].sourcePriority {
+                    results[index] = candidate
+                }
+                continue
+            }
+
+            if let index = results.firstIndex(where: { isSameUsage($0, candidate) }) {
+                if candidate.sourcePriority > results[index].sourcePriority {
+                    results[index] = candidate
+                }
+                continue
+            }
+
+            results.append(candidate)
+        }
+
+        return results
+    }
+
+    private func isSameUsage(_ lhs: CopilotAccountCandidate, _ rhs: CopilotAccountCandidate) -> Bool {
+        guard let leftUsed = lhs.details.copilotUsedRequests,
+              let rightUsed = rhs.details.copilotUsedRequests,
+              let leftLimit = lhs.details.copilotLimitRequests,
+              let rightLimit = rhs.details.copilotLimitRequests else {
+            return false
+        }
+
+        let resetMatch = sameDate(lhs.details.copilotQuotaResetDateUTC, rhs.details.copilotQuotaResetDateUTC)
+        return leftUsed == rightUsed && leftLimit == rightLimit && resetMatch
+    }
+
+    private func sameDate(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+        case let (left?, right?):
+            return Int(left.timeIntervalSince1970) == Int(right.timeIntervalSince1970)
+        default:
+            return false
+        }
     }
 
     // MARK: - Customer ID Fetching
@@ -340,8 +653,15 @@ final class CopilotProvider: ProviderProtocol {
         return ProviderResult(
             usage: providerUsage,
             details: DetailedUsage(
+                resetPeriod: formatResetDate(usage.quotaResetDateUTC),
+                planType: usage.copilotPlan,
                 email: cachedUserEmail,
-                authSource: "Browser Cookies (Chrome/Brave/Arc/Edge)"
+                authSource: "Browser Cookies (Chrome/Brave/Arc/Edge)",
+                copilotOverageCost: usage.netBilledAmount,
+                copilotOverageRequests: usage.netQuantity,
+                copilotUsedRequests: usage.usedRequests,
+                copilotLimitRequests: usage.limitRequests,
+                copilotQuotaResetDateUTC: usage.quotaResetDateUTC
             )
         )
     }

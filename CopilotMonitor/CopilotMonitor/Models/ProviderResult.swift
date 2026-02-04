@@ -3,6 +3,25 @@ import Foundation
 struct ProviderResult {
     let usage: ProviderUsage
     let details: DetailedUsage?
+    let accounts: [ProviderAccountResult]?
+
+    init(
+        usage: ProviderUsage,
+        details: DetailedUsage?,
+        accounts: [ProviderAccountResult]? = nil
+    ) {
+        self.usage = usage
+        self.details = details
+        self.accounts = accounts
+    }
+}
+
+/// Per-account usage for providers that support multiple accounts
+struct ProviderAccountResult {
+    let accountIndex: Int
+    let accountId: String?
+    let usage: ProviderUsage
+    let details: DetailedUsage?
 }
 
 struct GeminiAccountQuota: Codable {

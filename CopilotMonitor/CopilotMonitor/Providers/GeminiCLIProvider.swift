@@ -46,30 +46,42 @@ final class GeminiCLIProvider: ProviderProtocol {
             throw ProviderError.authenticationFailed("No Gemini accounts configured")
         }
 
-        if allAccounts.contains(where: { $0.source == .opencodeAuth }) {
-            logger.info("Gemini CLI: Using OpenCode auth.json fallback for Gemini OAuth")
-        }
-
-        var geminiAccountQuotas: [GeminiAccountQuota] = []
-        var overallMinPercentage = 100.0
+        var candidates: [GeminiAccountCandidate] = []
 
         for account in allAccounts {
             do {
-                let quotaResult = try await fetchQuotaForAccount(
-                    account: account
-                )
-                geminiAccountQuotas.append(quotaResult)
-                overallMinPercentage = min(overallMinPercentage, quotaResult.remainingPercentage)
+                let quotaResult = try await fetchQuotaForAccount(account: account)
+                candidates.append(GeminiAccountCandidate(quota: quotaResult, source: account.source))
             } catch {
                 let displayEmail = account.email?.isEmpty == false ? account.email ?? "" : "unknown"
                 logger.warning("Failed to fetch quota for account #\(account.index + 1) (\(displayEmail)): \(error.localizedDescription)")
             }
         }
 
-        guard !geminiAccountQuotas.isEmpty else {
+        guard !candidates.isEmpty else {
             logger.error("Failed to fetch quota for any Gemini account")
             throw ProviderError.providerError("All account quota fetches failed")
         }
+
+        let deduped = dedupeCandidates(candidates)
+        let sorted = deduped.sorted { lhs, rhs in
+            sourcePriority(lhs.source) > sourcePriority(rhs.source)
+        }
+
+        let geminiAccountQuotas: [GeminiAccountQuota] = sorted.enumerated().map { index, candidate in
+            let quota = candidate.quota
+            return GeminiAccountQuota(
+                accountIndex: index,
+                email: quota.email,
+                remainingPercentage: quota.remainingPercentage,
+                modelBreakdown: quota.modelBreakdown,
+                authSource: quota.authSource,
+                earliestReset: quota.earliestReset,
+                modelResetTimes: quota.modelResetTimes
+            )
+        }
+
+        let overallMinPercentage = geminiAccountQuotas.map { $0.remainingPercentage }.min() ?? 100.0
 
         logger.info("Gemini CLI: Fetched quota for \(geminiAccountQuotas.count)/\(allAccounts.count) accounts, overall min: \(overallMinPercentage)%")
 
@@ -95,6 +107,64 @@ final class GeminiCLIProvider: ProviderProtocol {
         )
 
         return ProviderResult(usage: usage, details: details)
+    }
+
+    private struct GeminiAccountCandidate {
+        let quota: GeminiAccountQuota
+        let source: GeminiAuthSource
+    }
+
+    private func sourcePriority(_ source: GeminiAuthSource) -> Int {
+        switch source {
+        case .opencodeAuth:
+            return 2
+        case .antigravity:
+            return 1
+        }
+    }
+
+    private func dedupeCandidates(_ candidates: [GeminiAccountCandidate]) -> [GeminiAccountCandidate] {
+        var results: [GeminiAccountCandidate] = []
+
+        for candidate in candidates {
+            let email = candidate.quota.email.trimmingCharacters(in: .whitespacesAndNewlines)
+            if email != "Unknown", !email.isEmpty,
+               let index = results.firstIndex(where: { $0.quota.email == email }) {
+                if sourcePriority(candidate.source) > sourcePriority(results[index].source) {
+                    results[index] = candidate
+                }
+                continue
+            }
+
+            if let index = results.firstIndex(where: { isSameUsage($0.quota, candidate.quota) }) {
+                if sourcePriority(candidate.source) > sourcePriority(results[index].source) {
+                    results[index] = candidate
+                }
+                continue
+            }
+
+            results.append(candidate)
+        }
+
+        return results
+    }
+
+    private func isSameUsage(_ lhs: GeminiAccountQuota, _ rhs: GeminiAccountQuota) -> Bool {
+        let remainingMatch = lhs.remainingPercentage == rhs.remainingPercentage
+        let resetMatch = sameDate(lhs.earliestReset, rhs.earliestReset)
+        let modelsMatch = lhs.modelBreakdown == rhs.modelBreakdown
+        return remainingMatch && resetMatch && modelsMatch
+    }
+
+    private func sameDate(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+        case let (left?, right?):
+            return Int(left.timeIntervalSince1970) == Int(right.timeIntervalSince1970)
+        default:
+            return false
+        }
     }
 
     // MARK: - Private Helpers

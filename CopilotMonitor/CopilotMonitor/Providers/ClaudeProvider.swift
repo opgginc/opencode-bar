@@ -62,13 +62,73 @@ final class ClaudeProvider: ProviderProtocol {
     /// - Returns: ProviderResult with remaining quota percentage
     /// - Throws: ProviderError if fetch fails
     func fetch() async throws -> ProviderResult {
-        // Get access token from TokenManager
-        guard let accessToken = tokenManager.getAnthropicAccessToken() else {
-            logger.error("Claude access token not found")
+        let accounts = tokenManager.getClaudeAccounts()
+
+        guard !accounts.isEmpty else {
+            logger.error("No Claude accounts found")
             throw ProviderError.authenticationFailed("Anthropic access token not available")
         }
 
-        // Build request
+        var candidates: [ClaudeAccountCandidate] = []
+        for account in accounts {
+            do {
+                let candidate = try await fetchUsageForAccount(account)
+                candidates.append(candidate)
+            } catch {
+                logger.warning("Claude account fetch failed (\(account.authSource)): \(error.localizedDescription)")
+            }
+        }
+
+        guard !candidates.isEmpty else {
+            logger.error("Failed to fetch Claude usage for any account")
+            throw ProviderError.providerError("All Claude account fetches failed")
+        }
+
+        let merged = dedupeCandidates(candidates)
+        let sorted = merged.sorted { lhs, rhs in
+            sourcePriority(lhs.source) > sourcePriority(rhs.source)
+        }
+
+        let accountResults: [ProviderAccountResult] = sorted.enumerated().map { index, candidate in
+            ProviderAccountResult(
+                accountIndex: index,
+                accountId: candidate.accountId,
+                usage: candidate.usage,
+                details: candidate.details
+            )
+        }
+
+        let minRemaining = accountResults.compactMap { $0.usage.remainingQuota }.min() ?? 0
+        let usage = ProviderUsage.quotaBased(remaining: minRemaining, entitlement: 100, overagePermitted: false)
+
+        return ProviderResult(
+            usage: usage,
+            details: accountResults.first?.details,
+            accounts: accountResults
+        )
+    }
+
+    private struct ClaudeAccountCandidate {
+        let accountId: String?
+        let usage: ProviderUsage
+        let details: DetailedUsage
+        let source: ClaudeAuthSource
+    }
+
+    private func sourcePriority(_ source: ClaudeAuthSource) -> Int {
+        switch source {
+        case .opencodeAuth:
+            return 3
+        case .claudeCodeKeychain:
+            return 2
+        case .claudeCodeConfig:
+            return 1
+        case .claudeLegacyCredentials:
+            return 0
+        }
+    }
+
+    private func fetchUsageForAccount(_ account: ClaudeAuthAccount) async throws -> ClaudeAccountCandidate {
         guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
             logger.error("Invalid Claude API URL")
             throw ProviderError.networkError("Invalid API endpoint")
@@ -76,31 +136,26 @@ final class ClaudeProvider: ProviderProtocol {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
 
-        // Execute request
         let (data, response) = try await session.data(for: request)
 
-        // Check HTTP status
         guard let httpResponse = response as? HTTPURLResponse else {
             logger.error("Invalid response type from Claude API")
             throw ProviderError.networkError("Invalid response type")
         }
 
-        // Handle authentication errors
         if httpResponse.statusCode == 401 {
             logger.warning("Claude API returned 401 - token expired")
             throw ProviderError.authenticationFailed("Token expired or invalid")
         }
 
-        // Handle other HTTP errors
         guard (200...299).contains(httpResponse.statusCode) else {
             logger.error("Claude API returned status \(httpResponse.statusCode)")
             throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
         }
 
-        // Parse response
         do {
             let decoder = JSONDecoder()
             let response = try decoder.decode(ClaudeUsageResponse.self, from: data)
@@ -110,13 +165,9 @@ final class ClaudeProvider: ProviderProtocol {
                 throw ProviderError.decodingError("Missing seven_day usage window")
             }
 
-            // Parse utilization (0-100)
             let utilization = sevenDay.utilization
-
-            // Calculate remaining percentage (100 - utilization)
             let remaining = 100 - utilization
 
-            // Parse reset times - try with fractional seconds first, then without
             func parseISO8601Date(_ string: String) -> Date? {
                 let formatterWithFrac = ISO8601DateFormatter()
                 formatterWithFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -132,8 +183,6 @@ final class ClaudeProvider: ProviderProtocol {
             let fiveHourReset = response.five_hour?.resets_at.flatMap { parseISO8601Date($0) }
             let sevenDayReset = sevenDay.resets_at.flatMap { parseISO8601Date($0) }
 
-            logger.info("Claude reset times - 5h: \(fiveHourReset?.description ?? "nil"), 7d: \(sevenDayReset?.description ?? "nil")")
-
             let fiveHourUsage = response.five_hour?.utilization
             let sonnetUsage = response.seven_day_sonnet?.utilization
             let sonnetReset = response.seven_day_sonnet?.resets_at.flatMap { parseISO8601Date($0) }
@@ -142,7 +191,7 @@ final class ClaudeProvider: ProviderProtocol {
 
             let extraUsageEnabled = response.extra_usage?.is_enabled
 
-            logger.info("Claude usage fetched: 7d=\(utilization)%, 5h=\(fiveHourUsage?.description ?? "N/A")%, sonnet=\(sonnetUsage?.description ?? "N/A")%, opus=\(opusUsage?.description ?? "N/A")%")
+            logger.info("Claude usage fetched (\(account.authSource)): 7d=\(utilization)%, 5h=\(fiveHourUsage?.description ?? "N/A")%")
 
             let usage = ProviderUsage.quotaBased(
                 remaining: Int(remaining),
@@ -160,16 +209,65 @@ final class ClaudeProvider: ProviderProtocol {
                 opusUsage: opusUsage,
                 opusReset: opusReset,
                 extraUsageEnabled: extraUsageEnabled,
-                authSource: "~/.local/share/opencode/auth.json"
+                authSource: account.authSource
             )
 
-            return ProviderResult(usage: usage, details: details)
+            return ClaudeAccountCandidate(
+                accountId: account.accountId ?? account.email,
+                usage: usage,
+                details: details,
+                source: account.source
+            )
         } catch let error as DecodingError {
             logger.error("Failed to decode Claude response: \(error.localizedDescription)")
             throw ProviderError.decodingError("Invalid response format: \(error.localizedDescription)")
         } catch {
             logger.error("Unexpected error parsing Claude response: \(error.localizedDescription)")
             throw ProviderError.providerError("Failed to parse response: \(error.localizedDescription)")
+        }
+    }
+
+    private func dedupeCandidates(_ candidates: [ClaudeAccountCandidate]) -> [ClaudeAccountCandidate] {
+        var results: [ClaudeAccountCandidate] = []
+
+        for candidate in candidates {
+            if let accountId = candidate.accountId,
+               let index = results.firstIndex(where: { $0.accountId == accountId }) {
+                if sourcePriority(candidate.source) > sourcePriority(results[index].source) {
+                    results[index] = candidate
+                }
+                continue
+            }
+
+            if let index = results.firstIndex(where: { isSameUsage($0, candidate) }) {
+                if sourcePriority(candidate.source) > sourcePriority(results[index].source) {
+                    results[index] = candidate
+                }
+                continue
+            }
+
+            results.append(candidate)
+        }
+
+        return results
+    }
+
+    private func isSameUsage(_ lhs: ClaudeAccountCandidate, _ rhs: ClaudeAccountCandidate) -> Bool {
+        let weeklyMatch = lhs.details.sevenDayUsage == rhs.details.sevenDayUsage
+        let fiveHourMatch = lhs.details.fiveHourUsage == rhs.details.fiveHourUsage
+        let sevenDayResetMatch = sameDate(lhs.details.sevenDayReset, rhs.details.sevenDayReset)
+        let fiveHourResetMatch = sameDate(lhs.details.fiveHourReset, rhs.details.fiveHourReset)
+        return weeklyMatch && fiveHourMatch && sevenDayResetMatch && fiveHourResetMatch
+    }
+
+    private func sameDate(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+        case let (left?, right?):
+            return Int(left.timeIntervalSince1970) == Int(right.timeIntervalSince1970)
+        default:
+            return false
         }
     }
 }

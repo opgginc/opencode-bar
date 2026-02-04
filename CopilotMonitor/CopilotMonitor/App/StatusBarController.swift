@@ -604,8 +604,8 @@ final class StatusBarController: NSObject {
                     if let email = details.email {
                         let emailItem = NSMenuItem()
                         emailItem.view = createDisabledLabelView(
-                            text: "Email: \(email)",
-                            icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Email"),
+                            text: "Account: \(email)",
+                            icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Account"),
                             multiline: false
                         )
                         submenu.addItem(emailItem)
@@ -664,29 +664,75 @@ final class StatusBarController: NSObject {
 
          var hasQuota = false
 
-            if let copilotUsage = currentUsage {
+            if let copilotResult = providerResults[.copilot],
+               let accounts = copilotResult.accounts,
+               !accounts.isEmpty {
+                let baseName = multiAccountBaseName(for: .copilot)
+                for account in accounts {
+                    hasQuota = true
+                    var displayName = accounts.count > 1 ? "\(baseName) #\(account.accountIndex + 1)" : baseName
+                    if accounts.count > 1, let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: .copilot) {
+                        displayName += " (\(sourceLabel))"
+                    }
+                    if (account.usage.totalEntitlement ?? 0) == 0 {
+                        displayName += " (No usage data)"
+                    }
+                    let usedPercent = account.usage.usagePercentage
+                    let quotaItem = createNativeQuotaMenuItem(name: displayName, usedPercent: usedPercent, icon: iconForProvider(.copilot))
+                    quotaItem.tag = 999
+
+                    if let details = account.details, details.hasAnyValue {
+                        quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot, accountId: account.accountId)
+                    }
+
+                    menu.insertItem(quotaItem, at: insertIndex)
+                    insertIndex += 1
+                }
+            } else if let copilotUsage = currentUsage {
                 hasQuota = true
                 let limit = copilotUsage.userPremiumRequestEntitlement
                 let used = copilotUsage.usedRequests
                 let usedPercent = limit > 0 ? (Double(used) / Double(limit)) * 100 : 0
 
-                 let quotaItem = createNativeQuotaMenuItem(name: ProviderIdentifier.copilot.displayName, usedPercent: usedPercent, icon: iconForProvider(.copilot))
-                 quotaItem.tag = 999
+                let quotaItem = createNativeQuotaMenuItem(name: ProviderIdentifier.copilot.displayName, usedPercent: usedPercent, icon: iconForProvider(.copilot))
+                quotaItem.tag = 999
 
-               if let details = providerResults[.copilot]?.details, details.hasAnyValue {
-                   quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot)
-               }
+                if let details = providerResults[.copilot]?.details, details.hasAnyValue {
+                    quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot)
+                }
 
-               menu.insertItem(quotaItem, at: insertIndex)
-               insertIndex += 1
-           }
+                menu.insertItem(quotaItem, at: insertIndex)
+                insertIndex += 1
+            }
 
             let quotaOrder: [ProviderIdentifier] = [.claude, .kimi, .codex, .zaiCodingPlan, .antigravity]
             for identifier in quotaOrder {
                 guard isProviderEnabled(identifier) else { continue }
 
                  if let result = providerResults[identifier] {
-                     if case .quotaBased(let remaining, let entitlement, _) = result.usage {
+                     if let accounts = result.accounts, !accounts.isEmpty {
+                          let baseName = multiAccountBaseName(for: identifier)
+                          for account in accounts {
+                              hasQuota = true
+                              var displayName = accounts.count > 1 ? "\(baseName) #\(account.accountIndex + 1)" : baseName
+                              if accounts.count > 1, let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: identifier) {
+                                  displayName += " (\(sourceLabel))"
+                              }
+                              if (account.usage.totalEntitlement ?? 0) == 0 {
+                                  displayName += " (No usage data)"
+                              }
+                              let usedPercent = account.usage.usagePercentage
+                              let item = createNativeQuotaMenuItem(name: displayName, usedPercent: usedPercent, icon: iconForProvider(identifier))
+                              item.tag = 999
+
+                              if let details = account.details, details.hasAnyValue {
+                                  item.submenu = createDetailSubmenu(details, identifier: identifier, accountId: account.accountId)
+                              }
+
+                              menu.insertItem(item, at: insertIndex)
+                              insertIndex += 1
+                          }
+                     } else if case .quotaBased(let remaining, let entitlement, _) = result.usage {
                           hasQuota = true
                           let usedPercent = entitlement > 0 ? (Double(entitlement - remaining) / Double(entitlement)) * 100 : 0
                           let item = createNativeQuotaMenuItem(name: identifier.displayName, usedPercent: usedPercent, icon: iconForProvider(identifier))
@@ -725,9 +771,12 @@ final class StatusBarController: NSObject {
                          hasQuota = true
                          let accountNumber = account.accountIndex + 1
                          let usedPercent = 100 - account.remainingPercentage
-                         let displayName = geminiAccounts.count > 1
+                         var displayName = geminiAccounts.count > 1
                               ? "Gemini CLI #\(accountNumber)"
                               : "Gemini CLI"
+                         if geminiAccounts.count > 1, let sourceLabel = authSourceLabel(for: account.authSource, provider: .geminiCLI) {
+                             displayName += " (\(sourceLabel))"
+                         }
                           let item = createNativeQuotaMenuItem(name: displayName, usedPercent: usedPercent, icon: iconForProvider(.geminiCLI))
                           item.tag = 999
 
@@ -817,6 +866,66 @@ final class StatusBarController: NSObject {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.image = iconForProvider(identifier)
         return item
+    }
+
+    private func multiAccountBaseName(for identifier: ProviderIdentifier) -> String {
+        switch identifier {
+        case .codex:
+            return "ChatGPT"
+        default:
+            return identifier.displayName
+        }
+    }
+
+    private func authSourceLabel(for authSource: String?, provider: ProviderIdentifier) -> String? {
+        guard let authSource = authSource, !authSource.isEmpty else { return nil }
+        let lowercased = authSource.lowercased()
+
+        if lowercased.contains("opencode") {
+            return "OpenCode"
+        }
+
+        switch provider {
+        case .codex:
+            if lowercased.contains(".codex") || lowercased.contains("/codex/") {
+                return "Codex"
+            }
+        case .claude:
+            if lowercased.contains("keychain") {
+                return "Claude Code (Keychain)"
+            }
+            if lowercased.contains("claude-code") {
+                return "Claude Code"
+            }
+            if lowercased.contains(".credentials.json") || lowercased.contains(".claude") {
+                return "Claude Code (Legacy)"
+            }
+        case .copilot:
+            if lowercased.contains("browser cookies") {
+                return "Browser Cookies"
+            }
+            if lowercased.contains("github-copilot") {
+                if lowercased.contains("hosts.json") {
+                    return "VS Code (hosts.json)"
+                }
+                if lowercased.contains("apps.json") {
+                    return "VS Code (apps.json)"
+                }
+                return "VS Code"
+            }
+        case .geminiCLI:
+            if lowercased.contains("antigravity") {
+                return "Antigravity"
+            }
+        default:
+            break
+        }
+
+        if lowercased.contains("keychain") {
+            return "Keychain"
+        }
+
+        return nil
     }
 
     /// Creates a native NSMenuItem for quota providers with colored usage percentage in parentheses.

@@ -28,7 +28,7 @@ enum ProviderIdentifier: String, CaseIterable {
         case .claude:
             return "Claude"
         case .codex:
-            return "ChatGPT Codex"
+            return "ChatGPT"
         case .geminiCLI:
             return "Gemini CLI"
         case .openRouter:

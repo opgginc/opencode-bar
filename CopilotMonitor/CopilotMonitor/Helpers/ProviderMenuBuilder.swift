@@ -3,7 +3,7 @@ import Foundation
 
 extension StatusBarController {
 
-    func createDetailSubmenu(_ details: DetailedUsage, identifier: ProviderIdentifier) -> NSMenu {
+    func createDetailSubmenu(_ details: DetailedUsage, identifier: ProviderIdentifier, accountId: String? = nil) -> NSMenu {
         let submenu = NSMenu()
 
         switch identifier {
@@ -118,6 +118,10 @@ extension StatusBarController {
                 let usagePercent = (Double(used) / Double(limit)) * 100
                 let items = createUsageWindowRow(label: "Monthly", usagePercent: usagePercent, resetDate: details.copilotQuotaResetDateUTC, isMonthly: true)
                 items.forEach { submenu.addItem($0) }
+            } else {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Usage data unavailable")
+                submenu.addItem(item)
             }
 
             // === Plan & Quota ===
@@ -153,23 +157,24 @@ extension StatusBarController {
             if let email = details.email {
                 let emailItem = NSMenuItem()
                 emailItem.view = createDisabledLabelView(
-                    text: "Email: \(email)",
-                    icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Email"),
+                    text: "Account: \(email)",
+                    icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Account"),
                     multiline: false
                 )
                 submenu.addItem(emailItem)
             }
 
+            let authSource = details.authSource ?? "Browser Cookies (Chrome/Brave/Arc/Edge)"
             let authItem = NSMenuItem()
             authItem.view = createDisabledLabelView(
-                text: "Token From: Browser Cookies (Chrome/Brave/Arc/Edge)",
+                text: "Token From: \(authSource)",
                 icon: NSImage(systemSymbolName: "key", accessibilityDescription: "Auth Source"),
                 multiline: true
             )
             submenu.addItem(authItem)
 
             // === Subscription ===
-            addSubscriptionItems(to: submenu, provider: .copilot)
+            addSubscriptionItems(to: submenu, provider: .copilot, accountId: accountId)
 
         case .claude:
             // === Usage Windows ===
@@ -221,7 +226,7 @@ extension StatusBarController {
             }
 
             // === Subscription (includes separator internally) ===
-            addSubscriptionItems(to: submenu, provider: .claude)
+            addSubscriptionItems(to: submenu, provider: .claude, accountId: accountId)
 
         case .codex:
             // === Usage Windows ===
@@ -259,7 +264,7 @@ extension StatusBarController {
             }
 
             // === Subscription ===
-            addSubscriptionItems(to: submenu, provider: .codex)
+            addSubscriptionItems(to: submenu, provider: .codex, accountId: accountId)
 
         case .geminiCLI:
             // modelBreakdown stores remaining% — convert to used% at display layer
@@ -281,7 +286,7 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
-            addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: details.email)
+            addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: accountId ?? details.email)
 
         case .antigravity:
             // modelBreakdown stores remaining% — convert to used% at display layer
@@ -305,7 +310,7 @@ extension StatusBarController {
                 createAccountInfoSection(items: accountItems).forEach { submenu.addItem($0) }
             }
 
-            addSubscriptionItems(to: submenu, provider: .antigravity)
+            addSubscriptionItems(to: submenu, provider: .antigravity, accountId: accountId)
 
         case .kimi:
             // === Usage Windows ===
@@ -337,7 +342,7 @@ extension StatusBarController {
             }
 
             // === Subscription ===
-            addSubscriptionItems(to: submenu, provider: .kimi)
+            addSubscriptionItems(to: submenu, provider: .kimi, accountId: accountId)
 
         case .zaiCodingPlan:
             // === Token Usage ===
@@ -425,7 +430,7 @@ extension StatusBarController {
             }
 
             // === Subscription ===
-            addSubscriptionItems(to: submenu, provider: .zaiCodingPlan)
+            addSubscriptionItems(to: submenu, provider: .zaiCodingPlan, accountId: accountId)
 
         default:
             break

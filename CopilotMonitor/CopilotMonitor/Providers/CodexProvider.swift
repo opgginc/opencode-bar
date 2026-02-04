@@ -41,36 +41,93 @@ final class CodexProvider: ProviderProtocol {
     }
 
     func fetch() async throws -> ProviderResult {
-        guard let accessToken = TokenManager.shared.getOpenAIAccessToken() else {
-            logger.error("Failed to retrieve OpenAI access token")
-            throw ProviderError.authenticationFailed("OpenAI access token not found")
+        let accounts = TokenManager.shared.getOpenAIAccounts()
+
+        guard !accounts.isEmpty else {
+            logger.error("No OpenAI accounts found for Codex")
+            throw ProviderError.authenticationFailed("No OpenAI accounts configured")
         }
 
-        guard let accountId = TokenManager.shared.getOpenAIAccountId() else {
-            logger.error("Failed to retrieve ChatGPT account ID")
-            throw ProviderError.authenticationFailed("ChatGPT account ID not found")
+        var candidates: [CodexAccountCandidate] = []
+        for account in accounts {
+            do {
+                let candidate = try await fetchUsageForAccount(account)
+                candidates.append(candidate)
+            } catch {
+                logger.warning("Codex account fetch failed (\(account.authSource)): \(error.localizedDescription)")
+            }
         }
 
+        guard !candidates.isEmpty else {
+            logger.error("Failed to fetch Codex usage for any account")
+            throw ProviderError.providerError("All Codex account fetches failed")
+        }
+
+        let merged = dedupeCandidates(candidates)
+        let sorted = merged.sorted { lhs, rhs in
+            sourcePriority(lhs.source) > sourcePriority(rhs.source)
+        }
+
+        let accountResults: [ProviderAccountResult] = sorted.enumerated().map { index, candidate in
+            ProviderAccountResult(
+                accountIndex: index,
+                accountId: candidate.accountId,
+                usage: candidate.usage,
+                details: candidate.details
+            )
+        }
+
+        let minRemaining = accountResults.compactMap { $0.usage.remainingQuota }.min() ?? 0
+        let usage = ProviderUsage.quotaBased(remaining: minRemaining, entitlement: 100, overagePermitted: false)
+
+        return ProviderResult(
+            usage: usage,
+            details: accountResults.first?.details,
+            accounts: accountResults
+        )
+    }
+
+    private struct CodexAccountCandidate {
+        let accountId: String?
+        let usage: ProviderUsage
+        let details: DetailedUsage
+        let source: OpenAIAuthSource
+    }
+
+    private func sourcePriority(_ source: OpenAIAuthSource) -> Int {
+        switch source {
+        case .opencodeAuth:
+            return 2
+        case .codexAuth:
+            return 1
+        }
+    }
+
+    private func fetchUsageForAccount(_ account: OpenAIAuthAccount) async throws -> CodexAccountCandidate {
         let endpoint = "https://chatgpt.com/backend-api/wham/usage"
         guard let url = URL(string: endpoint) else {
-            logger.error("Invalid API endpoint URL")
+            logger.error("Invalid Codex API endpoint URL")
             throw ProviderError.networkError("Invalid endpoint URL")
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
+        request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
+        if let accountId = account.accountId, !accountId.isEmpty {
+            request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
+        } else {
+            logger.warning("Codex account ID missing for \(account.authSource), sending request without account header")
+        }
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            logger.error("Invalid response type from API")
+            logger.error("Invalid response type from Codex API")
             throw ProviderError.networkError("Invalid response type")
         }
 
         guard httpResponse.statusCode == 200 else {
-            logger.error("API request failed with status code: \(httpResponse.statusCode)")
+            logger.error("Codex API request failed with status code: \(httpResponse.statusCode)")
             throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
         }
 
@@ -79,9 +136,9 @@ final class CodexProvider: ProviderProtocol {
         do {
             codexResponse = try decoder.decode(CodexResponse.self, from: data)
         } catch {
-            logger.error("Failed to decode API response: \(error.localizedDescription)")
+            logger.error("Failed to decode Codex API response: \(error.localizedDescription)")
             if let jsonString = String(data: data, encoding: .utf8) {
-                logger.error("Raw response: \(jsonString.prefix(1000))")
+                logger.error("Codex raw response: \(jsonString.prefix(1000))")
                 let debugMsg = "[Codex] Raw response: \(jsonString)\n"
                 if let debugData = debugMsg.data(using: .utf8) {
                     let path = "/tmp/provider_debug.log"
@@ -102,23 +159,11 @@ final class CodexProvider: ProviderProtocol {
         let secondaryUsedPercent = secondaryWindow?.used_percent ?? 0.0
         let secondaryResetSeconds = secondaryWindow?.reset_after_seconds ?? 0
 
-        // Calculate reset dates from seconds
         let now = Date()
         let primaryResetDate = now.addingTimeInterval(TimeInterval(primaryResetSeconds))
         let secondaryResetDate = secondaryWindow != nil ? now.addingTimeInterval(TimeInterval(secondaryResetSeconds)) : nil
 
         let remaining = Int(100 - primaryUsedPercent)
-        let entitlement = 100
-
-        logger.info("Successfully fetched Codex usage: primary=\(primaryUsedPercent)%, secondary=\(secondaryUsedPercent)%, plan=\(codexResponse.plan_type ?? "unknown"), credits=\(codexResponse.credits?.balance ?? "0")")
-
-        let authSource: String
-        if TokenManager.shared.readOpenCodeAuth()?.openai != nil {
-            authSource = "~/.local/share/opencode/auth.json"
-        } else {
-            authSource = "~/.codex/auth.json"
-        }
-
         let details = DetailedUsage(
             dailyUsage: primaryUsedPercent,
             secondaryUsage: secondaryUsedPercent,
@@ -126,11 +171,62 @@ final class CodexProvider: ProviderProtocol {
             primaryReset: primaryResetDate,
             creditsBalance: codexResponse.credits?.balanceAsDouble,
             planType: codexResponse.plan_type,
-            authSource: authSource
+            authSource: account.authSource
         )
 
-        let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: entitlement, overagePermitted: false)
-        return ProviderResult(usage: usage, details: details)
+        logger.info("Codex usage fetched (\(account.authSource)): primary=\(primaryUsedPercent)%, secondary=\(secondaryUsedPercent)%, plan=\(codexResponse.plan_type ?? "unknown")")
+
+        let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: 100, overagePermitted: false)
+        return CodexAccountCandidate(
+            accountId: account.accountId,
+            usage: usage,
+            details: details,
+            source: account.source
+        )
+    }
+
+    private func dedupeCandidates(_ candidates: [CodexAccountCandidate]) -> [CodexAccountCandidate] {
+        var results: [CodexAccountCandidate] = []
+
+        for candidate in candidates {
+            if let accountId = candidate.accountId,
+               let index = results.firstIndex(where: { $0.accountId == accountId }) {
+                if sourcePriority(candidate.source) > sourcePriority(results[index].source) {
+                    results[index] = candidate
+                }
+                continue
+            }
+
+            if let index = results.firstIndex(where: { isSameUsage($0, candidate) }) {
+                if sourcePriority(candidate.source) > sourcePriority(results[index].source) {
+                    results[index] = candidate
+                }
+                continue
+            }
+
+            results.append(candidate)
+        }
+
+        return results
+    }
+
+    private func isSameUsage(_ lhs: CodexAccountCandidate, _ rhs: CodexAccountCandidate) -> Bool {
+        let primaryMatch = lhs.details.dailyUsage == rhs.details.dailyUsage
+        let secondaryMatch = lhs.details.secondaryUsage == rhs.details.secondaryUsage
+        let primaryResetMatch = sameDate(lhs.details.primaryReset, rhs.details.primaryReset)
+        let secondaryResetMatch = sameDate(lhs.details.secondaryReset, rhs.details.secondaryReset)
+        return primaryMatch && secondaryMatch && primaryResetMatch && secondaryResetMatch
+    }
+
+    private func sameDate(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+        case let (left?, right?):
+            return Int(left.timeIntervalSince1970) == Int(right.timeIntervalSince1970)
+        default:
+            return false
+        }
     }
 }
 
