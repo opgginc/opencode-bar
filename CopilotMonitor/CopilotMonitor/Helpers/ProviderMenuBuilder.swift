@@ -440,7 +440,7 @@ extension StatusBarController {
                 let percentage = total > 0 ? Int((Double(used) / Double(total)) * 100) : 0
 
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Primary: %d%%", percentage))
+                item.view = createDisabledLabelView(text: String(format: "Daily: %d%% (%d/%d)", percentage, used, total))
                 submenu.addItem(item)
 
                 if let resetPeriod = details.resetPeriod {

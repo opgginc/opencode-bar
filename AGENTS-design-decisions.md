@@ -62,6 +62,7 @@ Quit (⌘Q)
   - **Gemini CLI** - Per-model quota limits
   - **Antigravity** - Local server monitoring by Antigravity IDE
   - **Z.AI Coding Plan** - Time-window based & tool usage based quotas
+  - **Chutes AI** - Time-window based quotas, credits balance
 - **Features**
   - ✅ Subscription settings available. You can set custom costs for each provider and account.
   - All of the providers here should have Subscription settings.
@@ -90,5 +91,26 @@ Quit (⌘Q)
 - **NEVER** change the menu group title formats without explicit approval
 - Pay-as-you-go header displays the sum of all pay-as-you-go costs (excluding subscription costs)
 - Quota Status header displays the monthly subscription total with `/m` suffix
+
+### Quota Display Rules (from PR #54, #55)
+- **Prefer to use 'used' instead of 'left'**: Prefer to use percentage is "used" instead of "left/remaining"
+  - ✅ `3h: 75% used`
+  - ❌ `23%` (ambiguous - is it used or remaining?)
+  - ❌ `23% remaining`
+- **Specify time**: Always include time component when displaying quota with time limits
+  - ✅ `5h: 60% used`
+  - ❌ `Primary: 75%` (ambiguous - what's Primary?)
+- **Wait Time Formatting**: When quota is exhausted, show wait time with consistent granularity
+  - `>=1d`: Show `Xd Yh` format (e.g., `1d 5h`)
+  - `>=1h`: Show `Xh` format (e.g., `3h`)
+  - `<1h`: Show `Xm` format (e.g., `45m`)
+- **Auth Source Labels**: Every provider MUST display where the auth token was detected
+  - Format: `Token From: <path>` in submenu
+  - Examples: `~/.local/share/opencode/auth.json`, `VS Code`, `Keychain`
+
+### Multi-Account Provider Rules (from PR #55)
+- **CandidateDedupe**: Use shared `CandidateDedupe.merge()` for deduplicating multi-account providers
+- **isReadableFile Check**: Always verify file readability before accessing auth files
+  - Pattern: `FileManager.fileExists(atPath:)` AND `FileManager.isReadableFile(atPath:)`
 
 </design_decisions>
