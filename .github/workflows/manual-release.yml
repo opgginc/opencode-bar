@@ -441,6 +441,15 @@ jobs:
         run: |
           security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" 2>/dev/null || true
       
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-${{ steps.new_version.outputs.new_version }}
+          path: |
+            OpenCodeUsageMonitor-${{ steps.new_version.outputs.new_version }}.dmg
+            appcast.xml
+          retention-days: 30
+      
       - name: Create Tag
         run: |
           git config user.name "github-actions[bot]"
