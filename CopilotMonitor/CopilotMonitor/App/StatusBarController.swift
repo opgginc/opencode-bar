@@ -928,9 +928,7 @@ final class StatusBarController: NSObject {
                     let baseName = multiAccountBaseName(for: identifier)
                     for account in accounts {
                         hasQuota = true
-                        var displayName = accounts.count > 1
-                            ? "\(baseName) #\(account.accountIndex + 1)"
-                            : baseName
+                        var displayName = accounts.count > 1 ? "\(baseName) #\(account.accountIndex + 1)" : baseName
                         if accounts.count > 1, showAuthLabel {
                             let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: identifier) ?? "Unknown"
                             displayName += " (\(sourceLabel))"
@@ -938,12 +936,23 @@ final class StatusBarController: NSObject {
                         if (account.usage.totalEntitlement ?? 0) == 0 {
                             displayName += " (No usage data)"
                         }
-                        let usedPercent = account.usage.usagePercentage
-                        let item = createNativeQuotaMenuItem(
-                            name: displayName,
-                            usedPercent: usedPercent,
-                            icon: iconForProvider(identifier)
-                        )
+
+                        // Build percentage array for display
+                        // Claude/Kimi: show both 5h and 7d usage windows
+                        // Codex: show both primary (5h) and secondary (weekly) windows
+                        // Other providers: show single usage percentage
+                        let usedPercents: [Double]
+                        if identifier == .claude || identifier == .kimi,
+                           let fiveHour = account.details?.fiveHourUsage,
+                           let sevenDay = account.details?.sevenDayUsage {
+                            usedPercents = [fiveHour, sevenDay]
+                        } else if identifier == .codex,
+                                  let secondary = account.details?.secondaryUsage {
+                            usedPercents = [account.usage.usagePercentage, secondary]
+                        } else {
+                            usedPercents = [account.usage.usagePercentage]
+                        }
+                        let item = createNativeQuotaMenuItem(name: displayName, usedPercents: usedPercents, icon: iconForProvider(identifier))
                         item.tag = 999
 
                         if let details = account.details, details.hasAnyValue {
@@ -955,14 +964,20 @@ final class StatusBarController: NSObject {
                     }
                 } else if case .quotaBased(let remaining, let entitlement, _) = result.usage {
                     hasQuota = true
-                    let usedPercent = entitlement > 0
-                        ? (Double(entitlement - remaining) / Double(entitlement)) * 100
-                        : 0
-                    let item = createNativeQuotaMenuItem(
-                        name: identifier.displayName,
-                        usedPercent: usedPercent,
-                        icon: iconForProvider(identifier)
-                    )
+                    let singlePercent = entitlement > 0 ? (Double(entitlement - remaining) / Double(entitlement)) * 100 : 0
+
+                    let usedPercents: [Double]
+                    if identifier == .claude || identifier == .kimi,
+                       let fiveHour = result.details?.fiveHourUsage,
+                       let sevenDay = result.details?.sevenDayUsage {
+                        usedPercents = [fiveHour, sevenDay]
+                    } else if identifier == .codex,
+                              let secondary = result.details?.secondaryUsage {
+                        usedPercents = [singlePercent, secondary]
+                    } else {
+                        usedPercents = [singlePercent]
+                    }
+                    let item = createNativeQuotaMenuItem(name: identifier.displayName, usedPercents: usedPercents, icon: iconForProvider(identifier))
                     item.tag = 999
 
                     if let details = result.details, details.hasAnyValue {
@@ -1184,35 +1199,80 @@ final class StatusBarController: NSObject {
         return nil
     }
 
-    /// Creates a native NSMenuItem for quota providers with colored usage percentage in parentheses.
-    /// Red color on name and percentage when usedPercent > 80% to warn about approaching limits.
-    private func createNativeQuotaMenuItem(name: String, usedPercent: Double, icon: NSImage?) -> NSMenuItem {
-        let percentText = String(format: "(%.0f%%)", usedPercent)
-        let percentColor: NSColor = usedPercent > 80 ? .systemRed : .secondaryLabelColor
-        
+    /// Color for usage percentage: 70%+ → orange, 90%+ → red
+    private func colorForUsagePercent(_ percent: Double) -> NSColor {
+        if percent >= 90 {
+            return .systemRed
+        } else if percent >= 70 {
+            return .systemOrange
+        } else {
+            return .secondaryLabelColor
+        }
+    }
+    
+    /// Creates NSMenuItem for quota providers with colored percentages.
+    /// Color: 70%+ orange, 90%+ red, 100%+ red+bold
+    private func createNativeQuotaMenuItem(name: String, usedPercents: [Double], icon: NSImage?) -> NSMenuItem {
         let attributed = NSMutableAttributedString()
-        // Provider name in default font
+        
         attributed.append(NSAttributedString(
-            string: "\(name) ",
+            string: "\(name)",
             attributes: [.font: MenuDesignToken.Typography.defaultFont]
         ))
-        // Percentage in parentheses, colored when usage is critically high
+
+        let defaultFontUsagePercent: NSFont = MenuDesignToken.Typography.monospacedFont
+
         attributed.append(NSAttributedString(
-            string: percentText,
+            string: ": ",
             attributes: [
-                .font: MenuDesignToken.Typography.defaultFont,
-                .foregroundColor: percentColor
+                .font: defaultFontUsagePercent,
+                .foregroundColor: NSColor.secondaryLabelColor
             ]
         ))
+        
+        for (index, percent) in usedPercents.enumerated() {
+            let percentText = String(format: "%.0f%%", percent)
+            let percentColor = colorForUsagePercent(percent)
+            let font: NSFont = percent >= 100 ? MenuDesignToken.Typography.monospacedBoldFont : defaultFontUsagePercent
+            
+            attributed.append(NSAttributedString(
+                string: percentText,
+                attributes: [
+                    .font: font,
+                    .foregroundColor: percentColor
+                ]
+            ))
+            
+            if index < usedPercents.count - 1 {
+                attributed.append(NSAttributedString(
+                    string: ", ",
+                    attributes: [
+                        .font: defaultFontUsagePercent,
+                        .foregroundColor: NSColor.secondaryLabelColor
+                    ]
+                ))
+            }
+        }
+        
+        // attributed.append(NSAttributedString(
+        //     string: ")",
+        //     attributes: [.font: MenuDesignToken.Typography.defaultFont]
+        // ))
         
         let item = NSMenuItem()
         item.attributedTitle = attributed
         item.image = icon
-        // Tint icon red when usage is critically high
-        if usedPercent > 80, let icon = icon {
-            item.image = tintedImage(icon, color: .systemRed)
+        
+        if let maxPercent = usedPercents.max(), maxPercent >= 70, let icon = icon {
+            let iconColor: NSColor = maxPercent >= 90 ? .systemRed : .systemOrange
+            item.image = tintedImage(icon, color: iconColor)
         }
+        
         return item
+    }
+    
+    private func createNativeQuotaMenuItem(name: String, usedPercent: Double, icon: NSImage?) -> NSMenuItem {
+        return createNativeQuotaMenuItem(name: name, usedPercents: [usedPercent], icon: icon)
     }
 
     // MARK: - Error State Helpers

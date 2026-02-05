@@ -252,7 +252,7 @@ Pay-as-you-go: $37.61
 ─────────────────────────────
 Quota Status: $219/m
   Copilot          0%        ▸
-  Claude           60%       ▸
+  Claude: 60%, 100%          ▸
   Codex            100%      ▸
   Z.AI Coding Plan 99%       ▸
   Gemini CLI (#1)  100%      ▸

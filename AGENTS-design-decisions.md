@@ -16,10 +16,11 @@ Pay-as-you-go: $37.61
   OpenCode Zen     $0.19     ▸
 ─────────────────────────────
 Quota Status: $219/m
-  Copilot (0%)           ▸
-  Claude (60%)           ▸
-  Codex (100%)           ▸
-  Gemini CLI #1 (100%)   ▸
+  Copilot (0%)               ▸
+  Claude: 0%, 100%           ▸
+  Kimi for Coding: 0%, 51%   ▸
+  Codex (100%)               ▸
+  Gemini CLI #1 (100%)       ▸
 ─────────────────────────────
 Predicted EOM: $451
 ─────────────────────────────
@@ -107,10 +108,36 @@ Quit (⌘Q)
 - **Auth Source Labels**: Every provider MUST display where the auth token was detected
   - Format: `Token From: <path>` in submenu
   - Examples: `~/.local/share/opencode/auth.json`, `VS Code`, `Keychain`
+- **Dual-Percentage Display**: Providers with multiple usage windows show both
+  - Claude/Kimi: `Claude: 5h%, 7d%` format showing 5-hour and 7-day windows
+  - Example: `Claude: 0%, 100%` where 0% is 5h usage, 100% is 7d usage
+  - Each percentage is individually colored based on thresholds  
 
 ### Multi-Account Provider Rules (from PR #55)
 - **CandidateDedupe**: Use shared `CandidateDedupe.merge()` for deduplicating multi-account providers
 - **isReadableFile Check**: Always verify file readability before accessing auth files
   - Pattern: `FileManager.fileExists(atPath:)` AND `FileManager.isReadableFile(atPath:)`
+
+### Colored Usage Percentages in Menu
+- **Implementation Pattern**:
+  ```swift
+  let attributed = NSMutableAttributedString()
+
+  attributed.append(NSAttributedString(
+      string: ": ",
+      attributes: [
+          .font: MenuDesignToken.Typography.defaultFont,
+          .foregroundColor: NSColor.secondaryLabelColor
+      ]
+  ))
+
+  let item = NSMenuItem()
+  item.attributedTitle = attributed
+  item.image = icon
+  ```
+- **Warnings**:
+  - **NEVER** use colors for text emphasis except for usage percentages (per UI Styling Rules)
+  - Provider name stays normal text (no bold, no color)
+  - Only right-aligned percentage text gets coloring
 
 </design_decisions>

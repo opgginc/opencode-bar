@@ -55,6 +55,11 @@ enum MenuDesignToken {
         }
         
         /// Bold system font for emphasis
+        static var monospacedBoldFont: NSFont {
+            NSFont.monospacedSystemFont(ofSize: Dimension.fontSize, weight: .bold)
+        }
+        
+        /// Bold system font for emphasis
         static var boldFont: NSFont {
             NSFont.boldSystemFont(ofSize: Dimension.fontSize)
         }
