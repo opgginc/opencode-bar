@@ -103,6 +103,9 @@ log stream --predicate 'subsystem == "com.opencodeproviders"' --level debug
 - **Signing**: All DMGs distributed via GitHub Releases **MUST** be signed with Developer ID and **NOTARIZED** to pass macOS Gatekeeper.
 - **Documentation**: Update `README.md` and screenshots if UI changes significantly before release.
 
+### CI Universal Binary
+- Release workflows must build universal macOS binaries (`arm64` + `x86_64`) and verify with `lipo -archs` for both the main app and the embedded CLI before notarization.
+
 ## Tips
 ### How to get quota usage?
 - in `@/scripts/` directory, you can see all of the scripts for every providers to get quota usage.

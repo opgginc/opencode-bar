@@ -116,7 +116,10 @@ jobs:
               -project CopilotMonitor.xcodeproj \
               -scheme CopilotMonitor \
               -configuration Release \
+              -destination "generic/platform=macOS" \
               -archivePath "$RUNNER_TEMP/CopilotMonitor.xcarchive" \
+              ARCHS="arm64 x86_64" \
+              ONLY_ACTIVE_ARCH=NO \
               CODE_SIGN_IDENTITY="Developer ID Application" \
               DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
               CODE_SIGN_STYLE=Manual; then
@@ -140,6 +143,36 @@ jobs:
           cp -R "$RUNNER_TEMP/CopilotMonitor.xcarchive/Products/Applications/OpenCode Bar.app" "$RUNNER_TEMP/export/"
           echo "Copied app bundle from archive"
           ls -la "$RUNNER_TEMP/export/"
+
+      - name: Verify Universal Binary
+        run: |
+          APP_PATH="$RUNNER_TEMP/export/OpenCode Bar.app"
+          MAIN_BIN="$APP_PATH/Contents/MacOS/OpenCode Bar"
+          MAIN_ARCHS=$(lipo -archs "$MAIN_BIN")
+          echo "Main binary architectures: $MAIN_ARCHS"
+          if ! lipo -archs "$MAIN_BIN" | grep -q "x86_64"; then
+            echo "Missing x86_64 slice in main binary"
+            exit 1
+          fi
+          if ! lipo -archs "$MAIN_BIN" | grep -q "arm64"; then
+            echo "Missing arm64 slice in main binary"
+            exit 1
+          fi
+          CLI_BIN="$APP_PATH/Contents/MacOS/opencodebar-cli"
+          if [ -f "$CLI_BIN" ]; then
+            CLI_ARCHS=$(lipo -archs "$CLI_BIN")
+            echo "CLI binary architectures: $CLI_ARCHS"
+            if ! lipo -archs "$CLI_BIN" | grep -q "x86_64"; then
+              echo "Missing x86_64 slice in CLI binary"
+              exit 1
+            fi
+            if ! lipo -archs "$CLI_BIN" | grep -q "arm64"; then
+              echo "Missing arm64 slice in CLI binary"
+              exit 1
+            fi
+          else
+            echo "CLI binary not found at $CLI_BIN"
+          fi
       
       - name: Re-sign App Bundle for Notarization
         run: |
