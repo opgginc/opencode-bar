@@ -5,6 +5,8 @@ final class StatusBarIconView: NSView {
     private var addOnCost: Double = 0
     private var isLoading = false
     private var hasError = false
+    private var overrideText: String?
+    private var iconOnlyMode = false
 
     /// Text to display when cost is zero (avoids duplication between sizing and drawing)
     private var zeroCostStatusText: String {
@@ -12,6 +14,8 @@ final class StatusBarIconView: NSView {
             return "..."
         } else if hasError {
             return "Err"
+        } else if let text = overrideText {
+            return text
         } else {
             return "OC Bar"
         }
@@ -28,8 +32,13 @@ final class StatusBarIconView: NSView {
     /// - Copilot icon (16px) + padding (6px) = 22px base
     /// - With add-on cost: icon + cost text width
     /// - Without add-on cost: icon + "OC Bar" text width
+    /// - Icon only mode: just icon width
     override var intrinsicContentSize: NSSize {
         let baseIconWidth = MenuDesignToken.Dimension.itemHeight // icon (16) + right padding (6)
+
+        if iconOnlyMode && !isLoading && !hasError {
+            return NSSize(width: baseIconWidth - 2, height: 23)
+        }
 
         if addOnCost > 0 {
             // Calculate cost text width dynamically
@@ -38,7 +47,7 @@ final class StatusBarIconView: NSView {
             let textWidth = (costText as NSString).size(withAttributes: [.font: font]).width
             return NSSize(width: baseIconWidth + textWidth + 4, height: 23)
         } else {
-            // "OC Bar" text width
+            // "OC Bar" or custom text width
             let font = NSFont.systemFont(ofSize: 11, weight: .medium)
             let textWidth = (zeroCostStatusText as NSString).size(withAttributes: [.font: font]).width
             return NSSize(width: baseIconWidth + textWidth + 4, height: 23)
@@ -49,6 +58,28 @@ final class StatusBarIconView: NSView {
         addOnCost = cost
         isLoading = false
         hasError = false
+        overrideText = nil
+        iconOnlyMode = false
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    func update(displayText: String) {
+        overrideText = displayText
+        addOnCost = 0
+        isLoading = false
+        hasError = false
+        iconOnlyMode = false
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    func updateIconOnly() {
+        iconOnlyMode = true
+        addOnCost = 0
+        isLoading = false
+        hasError = false
+        overrideText = nil
         invalidateIntrinsicContentSize()
         needsDisplay = true
     }
@@ -74,6 +105,10 @@ final class StatusBarIconView: NSView {
         let yOffset: CGFloat = 4
 
         drawCopilotIcon(at: NSPoint(x: 2, y: yOffset), size: 16, color: color)
+
+        if iconOnlyMode && !isLoading && !hasError {
+            return
+        }
 
         if addOnCost > 0 {
             drawCostText(at: NSPoint(x: 22, y: yOffset), color: color)

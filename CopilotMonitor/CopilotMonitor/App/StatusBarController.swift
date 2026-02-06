@@ -110,6 +110,31 @@ final class StatusBarController: NSObject {
         }
     }
 
+    private var menuBarDisplayMode: MenuBarDisplayMode {
+        get {
+            let rawValue = UserDefaults.standard.integer(forKey: MenuBarDisplayMode.userDefaultsKey)
+            return MenuBarDisplayMode(rawValue: rawValue) ?? .defaultMode
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: MenuBarDisplayMode.userDefaultsKey)
+            updateMenuBarDisplayModeMenu()
+            updateStatusBarText()
+        }
+    }
+
+    private var menuBarDisplayProvider: ProviderIdentifier? {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: MenuBarDisplayMode.providerKey) else { return nil }
+            return ProviderIdentifier(rawValue: raw)
+        }
+        set {
+            UserDefaults.standard.set(newValue?.rawValue, forKey: MenuBarDisplayMode.providerKey)
+            updateStatusBarText()
+        }
+    }
+
+    private var menuBarDisplayModeMenu: NSMenu!
+
     override init() {
         super.init()
         debugLog("StatusBarController init started")
@@ -193,6 +218,32 @@ final class StatusBarController: NSObject {
         refreshIntervalItem.submenu = refreshIntervalMenu
         menu.addItem(refreshIntervalItem)
         updateRefreshIntervalMenu()
+
+        let displayModeItem = NSMenuItem(title: "Menu Bar Display", action: nil, keyEquivalent: "")
+        displayModeItem.image = NSImage(systemSymbolName: "textformat.size", accessibilityDescription: "Menu Bar Display")
+        menuBarDisplayModeMenu = NSMenu()
+        for mode in MenuBarDisplayMode.allCases {
+            if mode == .singleProvider {
+                let providerItem = NSMenuItem(title: mode.title, action: nil, keyEquivalent: "")
+                let providerSubmenu = NSMenu()
+                for identifier in ProviderIdentifier.allCases {
+                    let pItem = NSMenuItem(title: identifier.displayName, action: #selector(menuBarDisplayProviderSelected(_:)), keyEquivalent: "")
+                    pItem.target = self
+                    pItem.representedObject = identifier.rawValue
+                    providerSubmenu.addItem(pItem)
+                }
+                providerItem.submenu = providerSubmenu
+                menuBarDisplayModeMenu.addItem(providerItem)
+            } else {
+                let item = NSMenuItem(title: mode.title, action: #selector(menuBarDisplayModeSelected(_:)), keyEquivalent: "")
+                item.target = self
+                item.tag = mode.rawValue
+                menuBarDisplayModeMenu.addItem(item)
+            }
+        }
+        displayModeItem.submenu = menuBarDisplayModeMenu
+        menu.addItem(displayModeItem)
+        updateMenuBarDisplayModeMenu()
 
         predictionPeriodMenu = NSMenu()
         for period in PredictionPeriod.allCases {
@@ -281,6 +332,82 @@ final class StatusBarController: NSObject {
     @objc func predictionPeriodSelected(_ sender: NSMenuItem) {
         if let period = PredictionPeriod(rawValue: sender.tag) {
             predictionPeriod = period
+        }
+    }
+
+    @objc private func menuBarDisplayModeSelected(_ sender: NSMenuItem) {
+        if let mode = MenuBarDisplayMode(rawValue: sender.tag) {
+            menuBarDisplayMode = mode
+        }
+    }
+
+    @objc private func menuBarDisplayProviderSelected(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let identifier = ProviderIdentifier(rawValue: rawValue) else { return }
+        menuBarDisplayMode = .singleProvider
+        menuBarDisplayProvider = identifier
+    }
+
+    private func updateMenuBarDisplayModeMenu() {
+        let currentMode = menuBarDisplayMode
+        let currentProvider = menuBarDisplayProvider
+        for item in menuBarDisplayModeMenu.items {
+            if let submenu = item.submenu {
+                // This is the Single Provider item
+                item.state = (currentMode == .singleProvider) ? .on : .off
+                for providerItem in submenu.items {
+                    guard let rawValue = providerItem.representedObject as? String,
+                          let identifier = ProviderIdentifier(rawValue: rawValue) else { continue }
+                    providerItem.state = (currentMode == .singleProvider && currentProvider == identifier) ? .on : .off
+                }
+            } else {
+                if let mode = MenuBarDisplayMode(rawValue: item.tag) {
+                    item.state = (mode == currentMode) ? .on : .off
+                }
+            }
+        }
+    }
+
+    private func updateStatusBarText() {
+        let mode = menuBarDisplayMode
+        switch mode {
+        case .iconOnly:
+            statusBarIconView?.updateIconOnly()
+        case .totalCost:
+            let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
+            statusBarIconView?.update(displayText: formatCostForStatusBar(totalCost))
+        case .singleProvider:
+            if let provider = menuBarDisplayProvider, let result = providerResults[provider] {
+                let text = formatProviderForStatusBar(provider, result: result)
+                statusBarIconView?.update(displayText: text)
+            } else if let provider = menuBarDisplayProvider {
+                statusBarIconView?.update(displayText: provider.displayName)
+            } else {
+                statusBarIconView?.update(cost: 0)
+            }
+        case .defaultMode:
+            let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
+            statusBarIconView?.update(cost: totalCost)
+        }
+    }
+
+    private func formatCostForStatusBar(_ cost: Double) -> String {
+        if cost >= 10 {
+            return String(format: "$%.1f", cost)
+        } else {
+            return String(format: "$%.2f", cost)
+        }
+    }
+
+    private func formatProviderForStatusBar(_ identifier: ProviderIdentifier, result: ProviderResult) -> String {
+        switch result.usage {
+        case .payAsYouGo(_, let cost, _):
+            let costValue = cost ?? 0.0
+            return String(format: "%@ $%.2f", identifier.displayName, costValue)
+        case .quotaBased(let remaining, let entitlement, _):
+            guard entitlement > 0 else { return identifier.displayName }
+            let usedPercent = Int(round(Double(entitlement - remaining) / Double(entitlement) * 100))
+            return "\(identifier.displayName) \(usedPercent)%"
         }
     }
 
@@ -1100,7 +1227,7 @@ final class StatusBarController: NSObject {
         menu.insertItem(separator3, at: insertIndex)
 
         let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
-        statusBarIconView?.update(cost: totalCost)
+        updateStatusBarText()
         debugLog("updateMultiProviderMenu: completed successfully, totalCost=$\(totalCost)")
         logMenuStructure()
     }
@@ -1537,8 +1664,7 @@ final class StatusBarController: NSObject {
     }
 
       private func updateUIForSuccess(usage: CopilotUsage) {
-          let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: usage)
-          statusBarIconView?.update(cost: totalCost)
+          updateStatusBarText()
           signInItem.isHidden = true
           updateHistorySubmenu()
           updateMultiProviderMenu()
@@ -1547,7 +1673,7 @@ final class StatusBarController: NSObject {
     private func updateUIForLoggedOut() {
         logger.info("updateUIForLoggedOut: showing default status")
         debugLog("updateUIForLoggedOut: reset status bar icon to default")
-        statusBarIconView?.update(cost: 0)
+        updateStatusBarText()
         signInItem.isHidden = false
     }
 

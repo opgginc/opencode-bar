@@ -50,3 +50,28 @@ enum PredictionPeriod: Int, CaseIterable {
 
     static var defaultPeriod: PredictionPeriod { .oneWeek }
 }
+
+// MARK: - Menu Bar Display Mode
+enum MenuBarDisplayMode: Int, CaseIterable {
+    case defaultMode = 0
+    case iconOnly = 1
+    case totalCost = 2
+    case singleProvider = 3
+
+    var title: String {
+        switch self {
+        case .defaultMode: return "Default"
+        case .iconOnly: return "Icon Only"
+        case .totalCost: return "Total Cost"
+        case .singleProvider: return "Single Provider"
+        }
+    }
+
+    static var defaultMode_: MenuBarDisplayMode { .defaultMode }
+
+    /// UserDefaults key for the display mode
+    static let userDefaultsKey = "menuBarDisplayMode"
+
+    /// UserDefaults key for the selected provider (used with .singleProvider mode)
+    static let providerKey = "menuBarDisplayProvider"
+}
