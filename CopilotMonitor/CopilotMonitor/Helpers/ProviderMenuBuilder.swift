@@ -668,7 +668,7 @@ extension StatusBarController {
                 submenu.addItem(paceItem)
             }
 
-            if didGroup, groupIndex < groupedUsageWindows.count - 1 {
+            if groupIndex < groupedUsageWindows.count - 1 {
                 addHorizontalDivider(to: submenu)
             }
         }
