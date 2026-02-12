@@ -238,7 +238,7 @@ final class CodexProvider: ProviderProtocol {
             authUsageSummary: authUsageSummary
         )
 
-        logger.info("Codex usage fetched (\(authUsageSummary)): email=\(account.email ?? "unknown"), primary=\(primaryUsedPercent)%, secondary=\(secondaryUsedPercent)%, plan=\(codexResponse.plan_type ?? "unknown")")
+        logger.debug("Codex usage fetched (\(authUsageSummary)): email=\(account.email ?? "unknown"), primary=\(primaryUsedPercent)%, secondary=\(secondaryUsedPercent)%, plan=\(codexResponse.plan_type ?? "unknown")")
 
         let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: 100, overagePermitted: false)
         return CodexAccountCandidate(
