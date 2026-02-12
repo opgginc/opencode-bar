@@ -48,7 +48,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 | **GitHub Copilot Add-on** | Pay-as-you-go | Usage-based billing after exceeding quota |
 | **Claude** | Quota-based | 5h/7d usage windows, Sonnet/Opus breakdown |
 | **Codex** | Quota-based | Primary/Secondary quotas, plan type |
-| **Gemini CLI** | Quota-based | Per-model quotas, multi-account support |
+| **Gemini CLI** | Quota-based | Per-model quotas, multi-account support with email labels and account ID details |
 | **Kimi for Coding (Kimi K2.5)** | Quota-based | Usage limits, membership level, reset time |
 | **Z.AI Coding Plan** | Quota-based | Token/MCP quotas, model usage, tool usage (24h) |
 | **Synthetic** | Quota-based | 5h usage limit, request limits, reset time |
@@ -60,7 +60,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 - **Antigravity/Gemini**
   - `NoeFabris/opencode-antigravity-auth` (writes `~/.config/opencode/antigravity-accounts.json`)
   - `jenslys/opencode-gemini-auth` (writes `google.oauth` in OpenCode `auth.json`)
-  - Gemini CLI OAuth creds (writes `~/.gemini/oauth_creds.json` for account identity metadata)
+  - Gemini CLI OAuth creds (writes `~/.gemini/oauth_creds.json` for email/account ID metadata; overlaps are merged with Antigravity accounts)
 - **Claude**: `anomalyco/opencode-anthropic-auth`
 
 ### Standalone tools
@@ -85,6 +85,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 - **Visual Indicators**: Color-coded progress (green → yellow → orange → red)
 - **Detailed Submenus**: Click any provider for in-depth metrics
 - **Auth Source Labels**: See where each account token was detected (OpenCode, VS Code, Keychain, etc.)
+- **Gemini Account Labels**: Shows `Gemini CLI (email)` when email is available, with fallback to `Gemini CLI #N`
 
 ### Usage History & Predictions
 - **Daily Tracking**: View request counts and overage costs
@@ -176,8 +177,8 @@ Provider              Type             Usage       Key Metrics
 ─────────────────────────────────────────────────────────────────────────────────
 Claude                Quota-based      77%         23/100 remaining
 Codex                 Quota-based      0%          100/100 remaining
-Gemini (#1)           Quota-based      0%          100% remaining (user1@gmail.com)
-Gemini (#2)           Quota-based      15%         85% remaining (user2@company.com)
+Gemini CLI (user1@gmail.com) Quota-based      0%          100% remaining
+Gemini CLI (user2@company.com) Quota-based    15%         85% remaining
 Kimi for Coding       Quota-based      26%         74/100 remaining
 OpenCode Zen          Pay-as-you-go    -           $12.50 spent
 OpenRouter            Pay-as-you-go    -           $37.42 spent
@@ -205,6 +206,7 @@ $ opencodebar status --json
       {
         "index": 0,
         "email": "user1@gmail.com",
+        "accountId": "100663739661147150906",
         "remainingPercentage": 100,
         "modelBreakdown": {
           "gemini-2.5-pro": 100,
@@ -214,6 +216,7 @@ $ opencodebar status --json
       {
         "index": 1,
         "email": "user2@company.com",
+        "accountId": "109876543210987654321",
         "remainingPercentage": 85,
         "modelBreakdown": {
           "gemini-2.5-pro": 85,
@@ -259,7 +262,7 @@ Quota Status: $219/m
   Claude: 60%, 100%          ▸
   Codex            100%      ▸
   Z.AI Coding Plan 99%       ▸
-  Gemini CLI (#1)  100%      ▸
+  Gemini CLI (user1@gmail.com) 100% ▸
 ─────────────────────────────
 Predicted EOM: $451
 ─────────────────────────────
