@@ -774,12 +774,16 @@ extension StatusBarController {
             (sfSymbol: "person.circle", text: "Email: \(account.email)"),
             (sfSymbol: "key", text: "Token From: \(account.authSource)")
         ]
+        if let accountId = account.accountId, !accountId.isEmpty {
+            accountItems.insert((sfSymbol: "number.circle", text: "Account ID: \(accountId)"), at: 1)
+        }
         if let authUsageSummary = account.authUsageSummary, !authUsageSummary.isEmpty {
             accountItems.append((sfSymbol: "arrow.triangle.branch", text: "Using in: \(authUsageSummary)"))
         }
         createAccountInfoSection(items: accountItems).forEach { submenu.addItem($0) }
 
-        addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: account.email)
+        let subscriptionAccountId = (account.accountId?.isEmpty == false) ? account.accountId : account.email
+        addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: subscriptionAccountId)
 
         return submenu
     }

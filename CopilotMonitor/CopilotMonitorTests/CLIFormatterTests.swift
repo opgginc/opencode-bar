@@ -81,6 +81,7 @@ final class CLIFormatterTests: XCTestCase {
         let account = GeminiAccountQuota(
             accountIndex: 0,
             email: "test@example.com",
+            accountId: "gemini-sub-123",
             remainingPercentage: 85.0,
             modelBreakdown: ["gemini-2.5-pro": 80.0, "gemini-2.5-flash": 90.0],
             authSource: "~/.config/opencode/antigravity-accounts.json",
@@ -90,6 +91,7 @@ final class CLIFormatterTests: XCTestCase {
         
         XCTAssertEqual(account.accountIndex, 0)
         XCTAssertEqual(account.email, "test@example.com")
+        XCTAssertEqual(account.accountId, "gemini-sub-123")
         XCTAssertEqual(account.remainingPercentage, 85.0)
         XCTAssertEqual(account.modelBreakdown["gemini-2.5-pro"], 80.0)
         XCTAssertEqual(account.modelBreakdown["gemini-2.5-flash"], 90.0)
@@ -104,6 +106,7 @@ final class CLIFormatterTests: XCTestCase {
         let original = GeminiAccountQuota(
             accountIndex: 1,
             email: "user@company.com",
+            accountId: "gemini-sub-456",
             remainingPercentage: 100.0,
             modelBreakdown: ["gemini-2.5-pro": 100.0],
             authSource: "test",
@@ -119,6 +122,7 @@ final class CLIFormatterTests: XCTestCase {
         
         XCTAssertEqual(decoded.accountIndex, original.accountIndex)
         XCTAssertEqual(decoded.email, original.email)
+        XCTAssertEqual(decoded.accountId, original.accountId)
         XCTAssertEqual(decoded.remainingPercentage, original.remainingPercentage)
         XCTAssertEqual(decoded.modelBreakdown, original.modelBreakdown)
         XCTAssertEqual(decoded.earliestReset, original.earliestReset)

@@ -383,11 +383,14 @@ enum GeminiAuthSource {
     case antigravity
     /// jenslys/opencode-gemini-auth (OpenCode auth.json google.oauth)
     case opencodeAuth
+    /// Gemini CLI OAuth credentials (~/.gemini/oauth_creds.json)
+    case oauthCreds
 }
 
 /// Unified Gemini account model used by the provider layer
 struct GeminiAuthAccount {
     let index: Int
+    let accountId: String?
     let email: String?
     let refreshToken: String
     let projectId: String
@@ -433,6 +436,77 @@ struct GeminiOAuthAuth: Decodable {
     }
 }
 
+/// Gemini CLI OAuth credentials from ~/.gemini/oauth_creds.json
+struct GeminiOAuthCreds: Decodable {
+    let expiryDate: Int64?
+    let tokenType: String?
+    let accessToken: String?
+    let refreshToken: String?
+    let scope: String?
+    let idToken: String?
+    let projectId: String?
+    let quotaProjectId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case expiryDate = "expiry_date"
+        case tokenType = "token_type"
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+        case scope
+        case idToken = "id_token"
+        case projectId = "project_id"
+        case quotaProjectId = "quota_project_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let value = try? container.decode(Int64.self, forKey: .expiryDate) {
+            expiryDate = value
+        } else if let value = try? container.decode(Double.self, forKey: .expiryDate) {
+            expiryDate = Int64(value)
+        } else if let value = try? container.decode(String.self, forKey: .expiryDate),
+                  let numeric = Int64(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            expiryDate = numeric
+        } else {
+            expiryDate = nil
+        }
+
+        tokenType = try? container.decode(String.self, forKey: .tokenType)
+        accessToken = try? container.decode(String.self, forKey: .accessToken)
+        refreshToken = try? container.decode(String.self, forKey: .refreshToken)
+        scope = try? container.decode(String.self, forKey: .scope)
+        idToken = try? container.decode(String.self, forKey: .idToken)
+        projectId = try? container.decode(String.self, forKey: .projectId)
+        quotaProjectId = try? container.decode(String.self, forKey: .quotaProjectId)
+    }
+}
+
+private struct GeminiIDTokenPayload: Decodable {
+    let sub: String?
+    let email: String?
+    let audience: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sub
+        case email
+        case aud
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sub = try? container.decode(String.self, forKey: .sub)
+        email = try? container.decode(String.self, forKey: .email)
+
+        if let aud = try? container.decode(String.self, forKey: .aud) {
+            audience = aud
+        } else if let audArray = try? container.decode([String].self, forKey: .aud) {
+            audience = audArray.first
+        } else {
+            audience = nil
+        }
+    }
+}
+
 /// Gemini OAuth token response structure
 struct GeminiTokenResponse: Codable {
     let access_token: String
@@ -460,9 +534,16 @@ final class TokenManager: @unchecked Sendable {
     /// Cached Gemini OAuth auth payload (OpenCode auth.json)
     private var cachedGeminiOAuthAuth: GeminiOAuthAuth?
     private var geminiOAuthCacheTimestamp: Date?
-    
+
     /// Path where Gemini OAuth auth was found (OpenCode auth.json)
     private(set) var lastFoundGeminiOAuthPath: URL?
+
+    /// Cached Gemini OAuth creds payload (~/.gemini/oauth_creds.json)
+    private var cachedGeminiOAuthCreds: GeminiOAuthCreds?
+    private var geminiOAuthCredsCacheTimestamp: Date?
+
+    /// Path where Gemini oauth_creds.json was found
+    private(set) var lastFoundGeminiOAuthCredsPath: URL?
 
     /// Cached Claude accounts (OpenCode + Claude Code)
     private var cachedClaudeAccounts: [ClaudeAuthAccount]?
@@ -1074,6 +1155,8 @@ final class TokenManager: @unchecked Sendable {
             return "OpenCode"
         case .antigravity:
             return "Antigravity"
+        case .oauthCreds:
+            return "Gemini CLI"
         }
     }
 
@@ -1085,6 +1168,12 @@ final class TokenManager: @unchecked Sendable {
             merged.append(trimmed)
         }
         return merged
+    }
+
+    private func normalizedNonEmpty(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func dedupeOpenAIAccounts(_ accounts: [OpenAIAuthAccount]) -> [OpenAIAuthAccount] {
@@ -1686,6 +1775,17 @@ final class TokenManager: @unchecked Sendable {
         )
     }
 
+    private func geminiOAuthClientCredentials(for audience: String?) -> (clientId: String, clientSecret: String) {
+        let normalizedAudience = normalizedNonEmpty(audience)
+        if normalizedAudience == TokenManager.geminiAuthPluginClientId {
+            return (TokenManager.geminiAuthPluginClientId, TokenManager.geminiAuthPluginClientSecret)
+        }
+        if normalizedAudience == TokenManager.geminiClientId {
+            return (TokenManager.geminiClientId, TokenManager.geminiClientSecret)
+        }
+        return (TokenManager.geminiClientId, TokenManager.geminiClientSecret)
+    }
+
     /// Thread-safe read of Gemini OAuth auth stored under "google" in OpenCode auth.json (jenslys/opencode-gemini-auth)
     func readGeminiOAuthAuth() -> GeminiOAuthAuth? {
         return queue.sync {
@@ -1732,6 +1832,75 @@ final class TokenManager: @unchecked Sendable {
             lastFoundGeminiOAuthPath = nil
             cachedGeminiOAuthAuth = nil
             geminiOAuthCacheTimestamp = nil
+            return nil
+        }
+    }
+
+    private func geminiOAuthCredsPath() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".gemini")
+            .appendingPathComponent("oauth_creds.json")
+    }
+
+    /// Thread-safe read of Gemini CLI OAuth creds (~/.gemini/oauth_creds.json)
+    func readGeminiOAuthCreds() -> GeminiOAuthCreds? {
+        return queue.sync {
+            if let cached = cachedGeminiOAuthCreds,
+               let timestamp = geminiOAuthCredsCacheTimestamp,
+               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+                return cached
+            }
+
+            let credsPath = geminiOAuthCredsPath()
+            let fileManager = FileManager.default
+            guard fileManager.fileExists(atPath: credsPath.path) else {
+                lastFoundGeminiOAuthCredsPath = nil
+                cachedGeminiOAuthCreds = nil
+                geminiOAuthCredsCacheTimestamp = nil
+                return nil
+            }
+            guard fileManager.isReadableFile(atPath: credsPath.path) else {
+                logger.warning("Gemini oauth_creds.json is not readable at \(credsPath.path)")
+                lastFoundGeminiOAuthCredsPath = nil
+                cachedGeminiOAuthCreds = nil
+                geminiOAuthCredsCacheTimestamp = nil
+                return nil
+            }
+
+            do {
+                let data = try Data(contentsOf: credsPath)
+                let creds = try JSONDecoder().decode(GeminiOAuthCreds.self, from: data)
+                lastFoundGeminiOAuthCredsPath = credsPath
+                cachedGeminiOAuthCreds = creds
+                geminiOAuthCredsCacheTimestamp = Date()
+                logger.info("Successfully loaded Gemini OAuth creds from: \(credsPath.path)")
+                return creds
+            } catch {
+                logger.warning("Failed to parse Gemini OAuth creds at \(credsPath.path): \(error.localizedDescription)")
+                lastFoundGeminiOAuthCredsPath = nil
+                cachedGeminiOAuthCreds = nil
+                geminiOAuthCredsCacheTimestamp = nil
+                return nil
+            }
+        }
+    }
+
+    private func decodeGeminiIDTokenPayload(_ idToken: String?) -> GeminiIDTokenPayload? {
+        guard let token = normalizedNonEmpty(idToken) else {
+            return nil
+        }
+
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else {
+            return nil
+        }
+
+        let payload = String(parts[1])
+        do {
+            let data = try decodeBase64URL(payload)
+            return try JSONDecoder().decode(GeminiIDTokenPayload.self, from: data)
+        } catch {
+            logger.warning("Failed to decode Gemini id_token payload: \(error.localizedDescription)")
             return nil
         }
     }
@@ -1939,21 +2108,41 @@ final class TokenManager: @unchecked Sendable {
         return auth.chutes?.key
     }
 
-    /// Gets Gemini refresh token from storage (NoeFabris/opencode-antigravity-auth first, then jenslys/opencode-gemini-auth)
+    /// Gets Gemini refresh token from discovered Gemini account sources
     /// - Returns: Refresh token string if available, nil otherwise
     func getGeminiRefreshToken() -> String? {
         return getAllGeminiAccounts().first?.refreshToken
     }
 
-    /// Gets Gemini account email from storage (NoeFabris/opencode-antigravity-auth first, then jenslys/opencode-gemini-auth)
+    /// Gets Gemini account email from discovered Gemini account sources
     /// - Returns: Email string if available, nil otherwise
     func getGeminiAccountEmail() -> String? {
         return getAllGeminiAccounts().first?.email
     }
 
     /// Gets all Gemini accounts (NoeFabris/opencode-antigravity-auth + jenslys/opencode-gemini-auth)
+    /// and enriches account identity metadata from ~/.gemini/oauth_creds.json when available.
     func getAllGeminiAccounts() -> [GeminiAuthAccount] {
         var accounts: [GeminiAuthAccount] = []
+        let oauthCreds = readGeminiOAuthCreds()
+        let oauthCredsPayload = decodeGeminiIDTokenPayload(oauthCreds?.idToken)
+        let oauthCredsAccountId = normalizedNonEmpty(oauthCredsPayload?.sub)
+        let oauthCredsEmail = normalizedNonEmpty(oauthCredsPayload?.email)
+        let oauthCredsRefreshToken = normalizedNonEmpty(oauthCreds?.refreshToken)
+        let oauthCredsAudience = normalizedNonEmpty(oauthCredsPayload?.audience)
+        let oauthCredsClient = geminiOAuthClientCredentials(for: oauthCredsAudience)
+        let geminiOAuthCredsSource = lastFoundGeminiOAuthCredsPath?.path ?? geminiOAuthCredsPath().path
+
+        if oauthCreds != nil {
+            logger.info(
+                """
+                Gemini oauth_creds.json discovered: refresh=\(oauthCredsRefreshToken != nil ? "YES" : "NO"), \
+                accountId=\(oauthCredsAccountId != nil ? "YES" : "NO"), \
+                email=\(oauthCredsEmail != nil ? "YES" : "NO"), \
+                audience=\(oauthCredsAudience ?? "unknown")
+                """
+            )
+        }
 
         if let geminiAuth = readGeminiOAuthAuth() {
             let refresh = geminiAuth.refresh?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -1967,6 +2156,7 @@ final class TokenManager: @unchecked Sendable {
                 accounts.append(
                     GeminiAuthAccount(
                         index: 0,
+                        accountId: nil,
                         email: nil,
                         refreshToken: parts.refreshToken,
                         projectId: projectId,
@@ -2005,24 +2195,70 @@ final class TokenManager: @unchecked Sendable {
                     return nil
                 }
 
-                let normalizedEmail: String? = {
-                    let value = account.email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    return value.isEmpty ? nil : value
+                let normalizedEmail = normalizedNonEmpty(account.email)
+                let isRefreshTokenMatch = oauthCredsRefreshToken == refreshToken
+                let isEmailMatch: Bool = {
+                    guard let lhs = normalizedEmail?.lowercased(),
+                          let rhs = oauthCredsEmail?.lowercased() else {
+                        return false
+                    }
+                    return lhs == rhs
                 }()
+                let matchedOAuthCreds = isRefreshTokenMatch || isEmailMatch
+
+                var sourceLabels = [geminiSourceLabel(for: .antigravity)]
+                let mergedAccountId: String?
+                let mergedEmail: String?
+                if matchedOAuthCreds {
+                    sourceLabels = mergeSourceLabels(sourceLabels, [geminiSourceLabel(for: .oauthCreds)])
+                    mergedAccountId = oauthCredsAccountId
+                    mergedEmail = normalizedEmail ?? oauthCredsEmail
+                } else {
+                    mergedAccountId = nil
+                    mergedEmail = normalizedEmail
+                }
 
                 return GeminiAuthAccount(
                     index: index,
-                    email: normalizedEmail,
+                    accountId: mergedAccountId,
+                    email: mergedEmail,
                     refreshToken: refreshToken,
                     projectId: projectId,
                     authSource: authSource,
-                    sourceLabels: [geminiSourceLabel(for: .antigravity)],
+                    sourceLabels: sourceLabels,
                     clientId: TokenManager.geminiClientId,
                     clientSecret: TokenManager.geminiClientSecret,
                     source: .antigravity
                 )
             }
             accounts.append(contentsOf: antigravityAccounts)
+        }
+
+        if accounts.isEmpty,
+           let refreshToken = oauthCredsRefreshToken {
+            let standaloneProjectId = normalizedNonEmpty(oauthCreds?.projectId)
+                ?? normalizedNonEmpty(oauthCreds?.quotaProjectId)
+                ?? normalizedNonEmpty(ProcessInfo.processInfo.environment["GEMINI_PROJECT_ID"])
+
+            if let projectId = standaloneProjectId {
+                accounts.append(
+                    GeminiAuthAccount(
+                        index: 0,
+                        accountId: oauthCredsAccountId,
+                        email: oauthCredsEmail,
+                        refreshToken: refreshToken,
+                        projectId: projectId,
+                        authSource: geminiOAuthCredsSource,
+                        sourceLabels: [geminiSourceLabel(for: .oauthCreds)],
+                        clientId: oauthCredsClient.clientId,
+                        clientSecret: oauthCredsClient.clientSecret,
+                        source: .oauthCreds
+                    )
+                )
+                logger.info("Gemini oauth_creds.json used as standalone account source")
+            } else {
+                logger.info("Gemini oauth_creds.json found but project ID is missing; skipping standalone account source")
+            }
         }
 
         if accounts.isEmpty {
@@ -2032,6 +2268,7 @@ final class TokenManager: @unchecked Sendable {
         return accounts.enumerated().map { index, account in
             GeminiAuthAccount(
                 index: index,
+                accountId: account.accountId,
                 email: account.email,
                 refreshToken: account.refreshToken,
                 projectId: account.projectId,
@@ -2305,6 +2542,17 @@ final class TokenManager: @unchecked Sendable {
         } else {
             lines.append("  OpenCode auth.json (google.oauth, jenslys/opencode-gemini-auth, \(shortPath(geminiAuthPath))): NOT FOUND")
         }
+        let geminiOAuthCreds = readGeminiOAuthCreds()
+        let geminiOAuthCredsPath = lastFoundGeminiOAuthCredsPath?.path ?? geminiOAuthCredsPath().path
+        if let geminiOAuthCreds {
+            let refreshStatus = normalizedNonEmpty(geminiOAuthCreds.refreshToken) == nil ? "MISSING REFRESH TOKEN" : "FOUND"
+            let payload = decodeGeminiIDTokenPayload(geminiOAuthCreds.idToken)
+            let accountIdStatus = normalizedNonEmpty(payload?.sub) == nil ? "NO" : "YES"
+            let emailStatus = normalizedNonEmpty(payload?.email) == nil ? "NO" : "YES"
+            lines.append("  Gemini oauth_creds.json (\(shortPath(geminiOAuthCredsPath))): \(refreshStatus) (accountId: \(accountIdStatus), email: \(emailStatus))")
+        } else {
+            lines.append("  Gemini oauth_creds.json (\(shortPath(geminiOAuthCredsPath))): NOT FOUND")
+        }
         if let accounts = readAntigravityAccounts() {
             lines.append("  Antigravity accounts (NoeFabris/opencode-antigravity-auth, \(shortPath(antigravityAccountsPath().path))): FOUND (\(accounts.accounts.count) account(s))")
         } else {
@@ -2437,6 +2685,14 @@ final class TokenManager: @unchecked Sendable {
             debugLines.append("  [Antigravity] \(accounts.accounts.count) account(s), active index: \(activeIndexText)")
         } else {
             debugLines.append("  [Antigravity] NOT CONFIGURED")
+        }
+        if let geminiOAuthCreds = readGeminiOAuthCreds() {
+            let refreshStatus = normalizedNonEmpty(geminiOAuthCreds.refreshToken) == nil ? "NO" : "YES"
+            let payload = decodeGeminiIDTokenPayload(geminiOAuthCreds.idToken)
+            let accountIdStatus = normalizedNonEmpty(payload?.sub) == nil ? "NO" : "YES"
+            debugLines.append("  [Gemini oauth_creds] refreshToken: \(refreshStatus), accountId: \(accountIdStatus)")
+        } else {
+            debugLines.append("  [Gemini oauth_creds] NOT CONFIGURED")
         }
 
         // 5. Codex native auth (~/.codex/auth.json) - fallback for OpenAI token
@@ -2730,6 +2986,16 @@ final class TokenManager: @unchecked Sendable {
             }
         } else {
             debugLines.append("[Antigravity Accounts] NOT FOUND or PARSE FAILED")
+        }
+
+        if let geminiOAuthCreds = readGeminiOAuthCreds() {
+            debugLines.append("[Gemini oauth_creds] FOUND at \(lastFoundGeminiOAuthCredsPath?.path ?? geminiOAuthCredsPath().path)")
+            debugLines.append("  - Refresh Token: \(normalizedNonEmpty(geminiOAuthCreds.refreshToken) != nil ? "YES" : "NO")")
+            let payload = decodeGeminiIDTokenPayload(geminiOAuthCreds.idToken)
+            debugLines.append("  - Account ID: \(normalizedNonEmpty(payload?.sub) ?? "nil")")
+            debugLines.append("  - Email: \(normalizedNonEmpty(payload?.email) ?? "nil")")
+        } else {
+            debugLines.append("[Gemini oauth_creds] NOT FOUND or PARSE FAILED")
         }
 
         // 7. Codex native auth (~/.codex/auth.json)

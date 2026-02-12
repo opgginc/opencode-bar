@@ -27,6 +27,7 @@ struct ProviderAccountResult {
 struct GeminiAccountQuota: Codable {
     let accountIndex: Int
     let email: String
+    let accountId: String?
     let remainingPercentage: Double
     let modelBreakdown: [String: Double]
     let authSource: String
@@ -39,6 +40,7 @@ struct GeminiAccountQuota: Codable {
     init(
         accountIndex: Int,
         email: String,
+        accountId: String? = nil,
         remainingPercentage: Double,
         modelBreakdown: [String: Double],
         authSource: String,
@@ -48,6 +50,7 @@ struct GeminiAccountQuota: Codable {
     ) {
         self.accountIndex = accountIndex
         self.email = email
+        self.accountId = accountId
         self.remainingPercentage = remainingPercentage
         self.modelBreakdown = modelBreakdown
         self.authSource = authSource

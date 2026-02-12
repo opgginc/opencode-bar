@@ -307,6 +307,7 @@ Test scripts are located in the `scripts/` folder:
 | `query-codex.sh` | Codex (OpenAI) |
 | `query-copilot.sh` | GitHub Copilot |
 | `query-gemini-cli.sh` | Antigravity - Gemini CLI quota |
+| `query-gemini-oauth-creds.sh` | Gemini CLI oauth_creds identity/token inspection |
 | `query-antigravity-local.sh` | Antigravity - Local quota |
 | `query-all.sh` | All providers |
 

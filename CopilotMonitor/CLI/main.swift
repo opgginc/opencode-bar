@@ -59,6 +59,9 @@ struct JSONFormatter {
                     var accountDict: [String: Any] = [:]
                     accountDict["index"] = account.accountIndex
                     accountDict["email"] = account.email
+                    if let accountId = account.accountId, !accountId.isEmpty {
+                        accountDict["accountId"] = accountId
+                    }
                     accountDict["remainingPercentage"] = account.remainingPercentage
                     accountDict["modelBreakdown"] = account.modelBreakdown
                     accountsArray.append(accountDict)
@@ -175,8 +178,13 @@ struct TableFormatter {
         let usageStr = String(format: "%.0f%%", 100 - account.remainingPercentage)
         let usagePadded = usageStr.padding(toLength: columnWidths.usage, withPad: " ", startingAt: 0)
         
-        let metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email))"
-        
+        let metricsStr: String
+        if let accountId = account.accountId, !accountId.isEmpty {
+            metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email), id: \(accountId))"
+        } else {
+            metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email))"
+        }
+
         return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)"
     }
     

@@ -78,8 +78,16 @@ final class GeminiCLIProvider: ProviderProtocol {
         let deduped = CandidateDedupe.merge(
             candidates,
             accountId: { candidate in
+                if let accountId = candidate.quota.accountId?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !accountId.isEmpty {
+                    return "id:\(accountId)"
+                }
+
                 let email = candidate.quota.email.trimmingCharacters(in: .whitespacesAndNewlines)
-                return email == "Unknown" || email.isEmpty ? nil : email
+                guard email != "Unknown", !email.isEmpty else {
+                    return nil
+                }
+                return "email:\(email.lowercased())"
             },
             isSameUsage: { isSameUsage($0.quota, $1.quota) },
             priority: { sourcePriority($0.source) },
@@ -94,6 +102,7 @@ final class GeminiCLIProvider: ProviderProtocol {
             return GeminiAccountQuota(
                 accountIndex: index,
                 email: quota.email,
+                accountId: quota.accountId,
                 remainingPercentage: quota.remainingPercentage,
                 modelBreakdown: quota.modelBreakdown,
                 authSource: quota.authSource,
@@ -140,8 +149,10 @@ final class GeminiCLIProvider: ProviderProtocol {
     private func sourcePriority(_ source: GeminiAuthSource) -> Int {
         switch source {
         case .opencodeAuth:
-            return 2
+            return 3
         case .antigravity:
+            return 2
+        case .oauthCreds:
             return 1
         }
     }
@@ -152,6 +163,8 @@ final class GeminiCLIProvider: ProviderProtocol {
             return "OpenCode"
         case .antigravity:
             return "Antigravity"
+        case .oauthCreds:
+            return "Gemini CLI"
         }
     }
 
@@ -184,10 +197,21 @@ final class GeminiCLIProvider: ProviderProtocol {
         let mergedEmail = (primary.quota.email.isEmpty || primary.quota.email == "Unknown")
             ? secondary.quota.email
             : primary.quota.email
+        let primaryAccountId = primary.quota.accountId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let secondaryAccountId = secondary.quota.accountId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mergedAccountId: String?
+        if let primaryAccountId, !primaryAccountId.isEmpty {
+            mergedAccountId = primaryAccountId
+        } else if let secondaryAccountId, !secondaryAccountId.isEmpty {
+            mergedAccountId = secondaryAccountId
+        } else {
+            mergedAccountId = nil
+        }
 
         let mergedQuota = GeminiAccountQuota(
             accountIndex: primary.quota.accountIndex,
             email: mergedEmail,
+            accountId: mergedAccountId,
             remainingPercentage: primary.quota.remainingPercentage,
             modelBreakdown: primary.quota.modelBreakdown,
             authSource: primary.quota.authSource,
@@ -309,6 +333,7 @@ final class GeminiCLIProvider: ProviderProtocol {
         return GeminiAccountQuota(
             accountIndex: accountIndex,
             email: resolvedEmail,
+            accountId: account.accountId,
             remainingPercentage: remainingPercentage,
             modelBreakdown: modelBreakdown,
             authSource: account.authSource,

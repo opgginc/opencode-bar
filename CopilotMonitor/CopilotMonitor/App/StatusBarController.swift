@@ -526,7 +526,16 @@ final class StatusBarController: NSObject {
                let geminiAccounts = details.geminiAccounts,
                !geminiAccounts.isEmpty {
                 for account in geminiAccounts {
-                    let key = SubscriptionSettingsManager.shared.subscriptionKey(for: .geminiCLI, accountId: account.email)
+                    let subscriptionAccountId: String?
+                    if let accountId = account.accountId, !accountId.isEmpty {
+                        subscriptionAccountId = accountId
+                    } else {
+                        subscriptionAccountId = account.email
+                    }
+                    let key = SubscriptionSettingsManager.shared.subscriptionKey(
+                        for: .geminiCLI,
+                        accountId: subscriptionAccountId
+                    )
                     keys.insert(key)
                 }
                 continue
@@ -1108,12 +1117,17 @@ final class StatusBarController: NSObject {
                     hasQuota = true
                     let accountNumber = account.accountIndex + 1
                     let usedPercent = 100 - account.remainingPercentage
-                    var displayName = geminiAccounts.count > 1
-                        ? "Gemini CLI #\(accountNumber)"
-                        : "Gemini CLI"
-                    if geminiAccounts.count > 1, showGeminiAuthLabel {
+                    let normalizedEmail = account.email.trimmingCharacters(in: .whitespacesAndNewlines)
+                    var displayName = "Gemini CLI"
+
+                    if !normalizedEmail.isEmpty, normalizedEmail.lowercased() != "unknown" {
+                        displayName = "Gemini CLI (\(normalizedEmail))"
+                    } else if geminiAccounts.count > 1, showGeminiAuthLabel {
+                        displayName = "Gemini CLI #\(accountNumber)"
                         let sourceLabel = authSourceLabel(for: account.authSource, provider: .geminiCLI) ?? "Unknown"
                         displayName += " (\(sourceLabel))"
+                    } else if geminiAccounts.count > 1 {
+                        displayName = "Gemini CLI #\(accountNumber)"
                     }
                     let item = createNativeQuotaMenuItem(
                         name: displayName,
@@ -1281,6 +1295,11 @@ final class StatusBarController: NSObject {
             case .geminiCLI:
                 if lowercased.contains("antigravity") {
                     return "Antigravity"
+                }
+                if lowercased.contains(".gemini/oauth_creds.json")
+                    || lowercased.contains("/.gemini/oauth_creds.json")
+                    || lowercased.contains("oauth_creds.json") {
+                    return "Gemini CLI"
                 }
             default:
                 break
