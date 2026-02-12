@@ -63,7 +63,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 - **Claude**: `anomalyco/opencode-anthropic-auth`
 
 ### Standalone tools
-- **Codex**: `Soju06/codex-lb`
+- **Codex**: `Soju06/codex-lb` (writes `~/.codex-lb/`)
 
 ### Other AI agents beyond OpenCode that supports auto-detection
 - **Codex**
