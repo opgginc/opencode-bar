@@ -106,8 +106,8 @@ struct DetailedUsage {
     let messages: Int?
     let avgCostPerDay: Double?
 
-    // Antigravity user email
-    let email: String?
+    // var: mutated during candidate merging for email fallback
+    var email: String?
 
     // History and cost tracking
     let dailyHistory: [DailyUsage]?
