@@ -22,6 +22,12 @@
 
 ---
 
+### Update
+
+- 🎉 Supports Codex 5.3 Spark Usage! (Feb 13, 2026)
+
+---
+
 ## Installation
 
 ### Homebrew (Easy)
