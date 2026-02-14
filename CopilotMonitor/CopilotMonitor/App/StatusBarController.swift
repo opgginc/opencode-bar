@@ -799,6 +799,8 @@ final class StatusBarController: NSObject {
          insertIndex += 1
 
          var hasQuota = false
+         var deferredUnavailableItems: [NSMenuItem] = []
+         var deferredUnavailableProviders: [ProviderIdentifier] = []
 
             if let copilotResult = providerResults[.copilot],
                let accounts = copilotResult.accounts,
@@ -1113,8 +1115,15 @@ final class StatusBarController: NSObject {
             } else if let errorMessage = lastProviderErrors[identifier] {
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                menu.insertItem(item, at: insertIndex)
-                insertIndex += 1
+                let status = errorMenuStatus(for: errorMessage)
+                if status.shouldDeferToBottom {
+                    deferredUnavailableItems.append(item)
+                    deferredUnavailableProviders.append(identifier)
+                    debugLog("updateMultiProviderMenu: deferred \(status.title) item for \(identifier.displayName)")
+                } else {
+                    menu.insertItem(item, at: insertIndex)
+                    insertIndex += 1
+                }
             } else if loadingProviders.contains(identifier) {
                 hasQuota = true
                 let item = NSMenuItem(title: "\(identifier.displayName) (Loading...)", action: nil, keyEquivalent: "")
@@ -1169,14 +1178,32 @@ final class StatusBarController: NSObject {
             } else if let errorMessage = lastProviderErrors[.geminiCLI] {
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: errorMessage)
-                menu.insertItem(item, at: insertIndex)
-                insertIndex += 1
+                let status = errorMenuStatus(for: errorMessage)
+                if status.shouldDeferToBottom {
+                    deferredUnavailableItems.append(item)
+                    deferredUnavailableProviders.append(.geminiCLI)
+                    debugLog("updateMultiProviderMenu: deferred \(status.title) item for Gemini CLI")
+                } else {
+                    menu.insertItem(item, at: insertIndex)
+                    insertIndex += 1
+                }
             } else if loadingProviders.contains(.geminiCLI) {
                 hasQuota = true
                 let item = NSMenuItem(title: "Gemini CLI (Loading...)", action: nil, keyEquivalent: "")
                 item.image = iconForProvider(.geminiCLI)
                 item.isEnabled = false
                 item.tag = 999
+                menu.insertItem(item, at: insertIndex)
+                insertIndex += 1
+            }
+        }
+
+        if !deferredUnavailableItems.isEmpty {
+            let deferredNames = deferredUnavailableProviders.map { $0.displayName }.joined(separator: ", ")
+            debugLog(
+                "updateMultiProviderMenu: inserting \(deferredUnavailableItems.count) deferred unavailable item(s) after Gemini: [\(deferredNames)]"
+            )
+            for item in deferredUnavailableItems {
                 menu.insertItem(item, at: insertIndex)
                 insertIndex += 1
             }
@@ -1454,10 +1481,45 @@ final class StatusBarController: NSObject {
         return authPatterns.contains { lowercased.contains($0.lowercased()) }
     }
 
+    private enum ErrorMenuStatus {
+        case noCredentials
+        case noSubscription
+        case error
+
+        var title: String {
+            switch self {
+            case .noCredentials:
+                return "No Credentials"
+            case .noSubscription:
+                return "No Subscription"
+            case .error:
+                return "Error"
+            }
+        }
+
+        var shouldDeferToBottom: Bool {
+            switch self {
+            case .noCredentials, .noSubscription:
+                return true
+            case .error:
+                return false
+            }
+        }
+    }
+
+    private func errorMenuStatus(for errorMessage: String) -> ErrorMenuStatus {
+        let lowercased = errorMessage.lowercased()
+        if lowercased.contains("subscription") {
+            return .noSubscription
+        }
+        if isAuthenticationError(errorMessage) {
+            return .noCredentials
+        }
+        return .error
+    }
+
     private func createErrorMenuItem(identifier: ProviderIdentifier, errorMessage: String) -> NSMenuItem {
-        let isAuthError = isAuthenticationError(errorMessage)
-        let isSubscriptionError = errorMessage.lowercased().contains("subscription")
-        let statusText = isSubscriptionError ? "No Subscription" : (isAuthError ? "No Credentials" : "Error")
+        let statusText = errorMenuStatus(for: errorMessage).title
         let title = "\(identifier.displayName) (\(statusText))"
 
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
