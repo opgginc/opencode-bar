@@ -8,7 +8,6 @@ private let logger = Logger(subsystem: "com.opencodeproviders", category: "AppDe
 class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var statusBarController: StatusBarController!
     private(set) var updaterController: SPUStandardUpdaterController!
-    private var updateCheckTimer: Timer?
 
     @objc func checkForUpdates() {
         logger.info("⌨️ [Keyboard] ⌘U Check for Updates triggered")
@@ -32,38 +31,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         configureAutomaticUpdates()
         statusBarController = StatusBarController()
         closeAllWindows()
-        startUpdateCheckTimer()
     }
     
     private func configureAutomaticUpdates() {
         let updater = updaterController.updater
-        updater.automaticallyChecksForUpdates = true
-        updater.automaticallyDownloadsUpdates = true
-        updater.updateCheckInterval = 43200
-        
-        logger.info("🔄 [Sparkle] Auto-update configured: checks=\(updater.automaticallyChecksForUpdates), downloads=\(updater.automaticallyDownloadsUpdates), interval=\(updater.updateCheckInterval)s")
-    }
-    
-    private func startUpdateCheckTimer() {
-        updateCheckTimer?.invalidate()
-        
-        let checkInterval: TimeInterval = 21600
-        let initialDelay: TimeInterval = 30
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + initialDelay) { [weak self] in
-            self?.performBackgroundUpdateCheck()
+        let desiredCheckInterval: TimeInterval = 21600
+
+        // Sparkle persists user preferences for update behavior.
+        // Do not override these values on launch.
+        if updater.updateCheckInterval != desiredCheckInterval {
+            updater.updateCheckInterval = desiredCheckInterval
+            logger.info("🔄 [Sparkle] Update check interval updated to 6h (\(desiredCheckInterval)s)")
         }
+
+        let checksEnabled = updater.automaticallyChecksForUpdates
+        let downloadsEnabled = updater.automaticallyDownloadsUpdates
+        let checkInterval = updater.updateCheckInterval
         
-        updateCheckTimer = Timer.scheduledTimer(withTimeInterval: checkInterval, repeats: true) { [weak self] _ in
-            self?.performBackgroundUpdateCheck()
-        }
-        
-        logger.info("🔄 [Sparkle] Update check timer started: interval=\(checkInterval)s")
-    }
-    
-    private func performBackgroundUpdateCheck() {
-        logger.info("🔄 [Sparkle] Performing background update check...")
-        updaterController.updater.checkForUpdatesInBackground()
+        logger.info("🔄 [Sparkle] Auto-update state loaded: checks=\(checksEnabled), downloads=\(downloadsEnabled), interval=\(checkInterval)s")
     }
 
     private func closeAllWindows() {
@@ -72,10 +57,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         }
     }
 
-    deinit {
-        updateCheckTimer?.invalidate()
-    }
-    
     // MARK: - SPUUpdaterDelegate
     
     nonisolated func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
