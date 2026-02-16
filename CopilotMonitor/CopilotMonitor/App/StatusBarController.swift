@@ -935,38 +935,59 @@ final class StatusBarController: NSObject {
             .max()
     }
 
-    private func usedPercentsForStatusBar(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
-        var usedPercents: [Double] = []
+    /// Collects all UsagePercentCandidates from all accounts for a provider,
+    /// then applies the global priority rule: pick the highest-priority window
+    /// across ALL accounts, then return the max percent within that window.
+    /// This prevents a high hourly value from one account beating a lower weekly
+    /// value from another account.
+    private func preferredUsedPercentForStatusBar(identifier: ProviderIdentifier, result: ProviderResult) -> Double? {
+        var allCandidates: [UsagePercentCandidate] = []
 
-        if case .quotaBased = result.usage,
-           let percent = preferredUsedPercent(identifier: identifier, usage: result.usage, details: result.details) {
-            usedPercents.append(percent)
+        // Main result candidates
+        if case .quotaBased = result.usage {
+            allCandidates.append(contentsOf:
+                usagePercentCandidates(identifier: identifier, usage: result.usage, details: result.details)
+            )
         }
 
+        // Sub-account candidates
         if let accounts = result.accounts {
             for account in accounts {
                 guard case .quotaBased = account.usage else { continue }
-                if let percent = preferredUsedPercent(identifier: identifier, usage: account.usage, details: account.details) {
-                    usedPercents.append(percent)
-                }
+                allCandidates.append(contentsOf:
+                    usagePercentCandidates(identifier: identifier, usage: account.usage, details: account.details)
+                )
             }
         }
 
+        // Gemini CLI special case: add as fallback priority since these don't have window metadata
         if identifier == .geminiCLI, let geminiAccounts = result.details?.geminiAccounts {
             for account in geminiAccounts {
-                if let percent = normalizedUsagePercent(100.0 - account.remainingPercentage) {
-                    usedPercents.append(percent)
+                if let normalized = normalizedUsagePercent(100.0 - account.remainingPercentage) {
+                    allCandidates.append(UsagePercentCandidate(percent: normalized, priority: .fallback))
                 }
             }
         }
 
-        return usedPercents
+        // Apply global priority rule: pick highest priority (lowest rawValue),
+        // then max percent within that priority
+        guard let selectedPriority = allCandidates.map(\.priority.rawValue).min() else {
+            return nil
+        }
+
+        return allCandidates
+            .filter { $0.priority.rawValue == selectedPriority }
+            .map(\.percent)
+            .max()
     }
 
     private func usagePercentsForMostUsed(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
-        // Clamp to 100% instead of filtering: over-quota values (e.g. 120%) must still
-        // participate in critical badge detection via mostCriticalProvider()
-        usedPercentsForStatusBar(identifier: identifier, result: result).map { min($0, 100.0) }
+        // Use the global priority-aware selection, then clamp to 100% for critical badge detection.
+        // Over-quota values (e.g. 120%) must still participate in mostCriticalProvider().
+        if let percent = preferredUsedPercentForStatusBar(identifier: identifier, result: result) {
+            return [min(percent, 100.0)]
+        }
+        return []
     }
 
     private func usedPercentsForChangeDetection(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
@@ -1152,7 +1173,7 @@ final class StatusBarController: NSObject {
             let costText = formatCostForStatusBar(cost ?? 0)
             return showProviderName ? "\(identifier.shortDisplayName) \(costText)" : costText
         case .quotaBased:
-            let maxPercent = usedPercentsForStatusBar(identifier: identifier, result: result).max() ?? result.usage.usagePercentage
+            let maxPercent = preferredUsedPercentForStatusBar(identifier: identifier, result: result) ?? result.usage.usagePercentage
             let usageText = String(format: "%.0f%% used", maxPercent)
             return showProviderName ? "\(identifier.shortDisplayName) \(usageText)" : usageText
         }
