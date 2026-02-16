@@ -286,7 +286,24 @@ Quit (⌘Q)
 | **Pay-as-you-go** | `Pay-as-you-go: $XX.XX` | Sum of all pay-as-you-go provider costs (OpenRouter + OpenCode Zen) |
 | **Quota Status** | `Quota Status: $XXX/m` | Shows total monthly subscription cost if any quota-based providers have subscription settings configured. If no subscriptions are set, shows just "Quota Status". |
 
+##### Status Bar Options
+
+- **Menu Bar Display**: Choose one of `Total Cost`, `Icon Only`, or `Only Show`.
+- **Critical Badge**: Toggle on/off to show or hide the critical-usage badge.
+- **Show Provider Name**: Toggle on/off to include provider names in status bar text.
+
 > **Note**: Subscription settings are only available for quota-based providers. Pay-as-you-go providers do not have subscription options since they charge based on actual usage.
+>
+> **Terminology**:
+> `Status Bar Percent` means the single representative percentage shown in the macOS top status bar text.
+> `Dropdown Detail Percents` means the multi-window percentages shown in provider rows inside the opened dropdown menu.
+>
+> **Status Bar Percent Rule**: `Status Bar Percent` uses one fixed priority:
+> `Weekly` → `Monthly` → `Daily` → `Hourly` → fallback aggregate.
+> If multiple values exist in the same priority window, the highest value is shown (for example, Claude weekly picks max of 7d/Sonnet/Opus).
+> In `Recent Quota Change Only`, provider selection is based on change, but the shown percentage is the provider's current priority-based usage.
+>
+> **Dropdown Detail Percents Rule**: top-level menu rows keep multi-window percentages when available.
 
 ## How It Works
 
