@@ -847,8 +847,10 @@ final class StatusBarController: NSObject {
     }
 
     private func selectedPinnedProvider() -> ProviderIdentifier? {
-        if let selected = menuBarDisplayProvider, isProviderEnabled(selected) {
-            return selected
+        if let selected = menuBarDisplayProvider {
+            // If user explicitly pinned a provider but it's disabled, return nil
+            // so the UI falls back to Total Cost instead of silently switching providers
+            return isProviderEnabled(selected) ? selected : nil
         }
         return ProviderIdentifier.allCases.first(where: { isProviderEnabled($0) })
     }
@@ -962,7 +964,9 @@ final class StatusBarController: NSObject {
     }
 
     private func usagePercentsForMostUsed(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
-        usedPercentsForStatusBar(identifier: identifier, result: result).filter { $0 <= 100.0 }
+        // Clamp to 100% instead of filtering: over-quota values (e.g. 120%) must still
+        // participate in critical badge detection via mostCriticalProvider()
+        usedPercentsForStatusBar(identifier: identifier, result: result).map { min($0, 100.0) }
     }
 
     private func usedPercentsForChangeDetection(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
