@@ -94,6 +94,9 @@ Quit (⌘Q)
 - Quota Status header displays the monthly subscription total with `/m` suffix
 
 ### Quota Display Rules (from PR #54, #55)
+- **Terminology (MUST use these names)**:
+  - **Status Bar Percent**: Single representative percentage shown in macOS top status bar text
+  - **Dropdown Detail Percents**: Multi-window percentages shown inside provider rows in the opened dropdown menu
 - **Prefer to use 'used' instead of 'left'**: Prefer to use percentage is "used" instead of "left/remaining"
   - ✅ `3h: 75% used`
   - ❌ `23%` (ambiguous - is it used or remaining?)
@@ -108,15 +111,15 @@ Quit (⌘Q)
 - **Auth Source Labels**: Every provider MUST display where the auth token was detected
   - Format: `Token From: <path>` in submenu
   - Examples: `~/.local/share/opencode/auth.json`, `VS Code`, `Keychain`
-- **Status Bar Percentage Priority (IMMUTABLE) FOR macOS TOP STATUS BAR**: macOS top status bar percentage displays use a **SINGLE** fixed window priority
+- **Status Bar Percent Priority (IMMUTABLE) FOR macOS TOP STATUS BAR**: `Status Bar Percent` uses a **SINGLE** fixed window priority
   - Priority order: `Weekly` → `Monthly` → `Daily` → `Hourly` → fallback
     - Fallback means using provider aggregate usage only when no explicit window metric exists
   - If multiple values exist in the same priority window, display the highest one
     - Example: Claude weekly uses max of `7d`, `7d Sonnet`, `7d Opus`
-  - Applies only to the top bar text (for example, `Only Show`, `Alert First`, `Pinned Provider`)
-    - Dropdown Detail Percents still show all windows for providers that have them
+  - Applies only to `Status Bar Percent` text (for example, `Only Show`, `Alert First`, `Pinned Provider`)
+    - `Dropdown Detail Percents` still show all windows for providers that have them
   - `Recent Quota Change Only` chooses the provider by recent change, but displays that provider's current priority-based usage (not delta amount)
-- **Multiple-Percentage Display FOR Dropdown Detail Percents**: Providers with multiple usage windows show everything
+- **Dropdown Detail Percents Display Rule**: Providers with multiple usage windows show everything
   - Claude: `Claude: 5h%, 7d%` format showing 5-hour and 7-day windows
     - Exception: Don't show extra usage
   - Kimi: `Kimi: 5h%, 7d%` format showing 5-hour and 7-day windows

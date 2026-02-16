@@ -294,11 +294,16 @@ Quit (⌘Q)
 
 > **Note**: Subscription settings are only available for quota-based providers. Pay-as-you-go providers do not have subscription options since they charge based on actual usage.
 >
-> **Status Bar Percentage Rule**: macOS top status bar percentage displays use one fixed priority:
+> **Terminology**:
+> `Status Bar Percent` means the single representative percentage shown in the macOS top status bar text.
+> `Dropdown Detail Percents` means the multi-window percentages shown in provider rows inside the opened dropdown menu.
+>
+> **Status Bar Percent Rule**: `Status Bar Percent` uses one fixed priority:
 > `Weekly` → `Monthly` → `Daily` → `Hourly` → fallback aggregate.
 > If multiple values exist in the same priority window, the highest value is shown (for example, Claude weekly picks max of 7d/Sonnet/Opus).
 > In `Recent Quota Change Only`, provider selection is based on change, but the shown percentage is the provider's current priority-based usage.
-> Top-level menu rows keep multi-window percentages when available.
+>
+> **Dropdown Detail Percents Rule**: top-level menu rows keep multi-window percentages when available.
 
 ## How It Works
 
