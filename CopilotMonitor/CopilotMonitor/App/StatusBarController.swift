@@ -149,10 +149,43 @@ final class StatusBarController: NSObject {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusBarIconView = StatusBarIconView(frame: NSRect(x: 0, y: 0, width: 70, height: 23))
+        statusBarIconView = StatusBarIconView(frame: .zero)
+        statusBarIconView?.onIntrinsicContentSizeDidChange = { [weak self] in
+            self?.updateStatusItemLayout(reason: "intrinsic-size-changed")
+        }
         statusBarIconView?.showLoading()
-        statusItem?.button?.addSubview(statusBarIconView!)
-        statusItem?.button?.frame = statusBarIconView!.frame
+        attachStatusIconViewToButton()
+        updateStatusItemLayout(reason: "setup")
+    }
+
+    private func attachStatusIconViewToButton() {
+        guard let button = statusItem?.button, let iconView = statusBarIconView else {
+            return
+        }
+
+        iconView.removeFromSuperview()
+        button.title = ""
+        button.image = nil
+        button.addSubview(iconView)
+    }
+
+    private func updateStatusItemLayout(reason: String) {
+        guard let statusItem, let button = statusItem.button, let iconView = statusBarIconView else {
+            return
+        }
+
+        let intrinsicSize = iconView.intrinsicContentSize
+        let minWidth = MenuDesignToken.Dimension.iconSize + 4
+        let width = max(minWidth, ceil(intrinsicSize.width))
+
+        iconView.frame = NSRect(x: 0, y: 0, width: width, height: intrinsicSize.height)
+        statusItem.length = width
+        button.needsDisplay = true
+
+        let widthText = String(format: "%.1f", width)
+        let intrinsicWidthText = String(format: "%.1f", intrinsicSize.width)
+        debugLog("statusIconLayout[\(reason)]: width=\(widthText), intrinsicWidth=\(intrinsicWidthText)")
+        logger.debug("statusIconLayout[\(reason)]: width=\(widthText, privacy: .public)")
     }
 
     private func setupMenu() {
@@ -249,12 +282,10 @@ final class StatusBarController: NSObject {
         statusItem.menu = self.menu
         statusItem.length = NSStatusItem.variableLength
         
-        if let iconView = statusBarIconView {
+        if statusBarIconView != nil {
             debugLog("attachTo: setting up iconView")
-            statusItem.button?.subviews.forEach { $0.removeFromSuperview() }
-            statusItem.button?.addSubview(iconView)
-            statusItem.button?.frame = iconView.frame
-            debugLog("attachTo: iconView frame = \(iconView.frame)")
+            attachStatusIconViewToButton()
+            updateStatusItemLayout(reason: "attach")
         } else {
             debugLog("attachTo: iconView is nil!")
         }

@@ -1,20 +1,53 @@
 import AppKit
+import os.log
+
+private let statusBarIconLogger = Logger(subsystem: "com.opencodeproviders", category: "StatusBarIconView")
 
 // MARK: - Status Bar Icon View
 final class StatusBarIconView: NSView {
     private var addOnCost: Double = 0
     private var isLoading = false
     private var hasError = false
+    private var loadingAnimationTimer: Timer?
+    private var loadingRotationDegrees: CGFloat = 0
 
-    /// Text to display when cost is zero (avoids duplication between sizing and drawing)
-    private var zeroCostStatusText: String {
+    /// Called whenever the intrinsic width may have changed.
+    var onIntrinsicContentSizeDidChange: (() -> Void)?
+
+    private let leftPadding: CGFloat = 2
+    private let iconSize: CGFloat = 16
+    private let textSpacing: CGFloat = 4
+    private let trailingPadding: CGFloat = 2
+    private let statusBarHeight: CGFloat = 23
+    private let loadingAnimationInterval: TimeInterval = 0.07
+    private let loadingRotationStepDegrees: CGFloat = 30
+
+    /// Nil means icon-only rendering (no text reservation).
+    private var statusText: String? {
         if isLoading {
-            return "..."
+            return nil
         } else if hasError {
             return "Err"
+        } else if addOnCost > 0 {
+            return formatCost(addOnCost)
         } else {
-            return "OC Bar"
+            return nil
         }
+    }
+
+    private var statusTextFont: NSFont {
+        if hasError {
+            return NSFont.systemFont(ofSize: 11, weight: .medium)
+        }
+        return NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+    }
+
+    private var currentIconSymbolName: String {
+        isLoading ? "dollarsign.circle.fill" : "gauge.medium"
+    }
+
+    deinit {
+        stopLoadingAnimation()
     }
 
     private var textColor: NSColor {
@@ -24,47 +57,39 @@ final class StatusBarIconView: NSView {
         return button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .white : .black
     }
 
-    /// Dynamic width calculation based on content
-    /// - Copilot icon (16px) + padding (6px) = 22px base
-    /// - With add-on cost: icon + cost text width
-    /// - Without add-on cost: icon + "OC Bar" text width
     override var intrinsicContentSize: NSSize {
-        let baseIconWidth = MenuDesignToken.Dimension.itemHeight // icon (16) + right padding (6)
+        let iconWidth = leftPadding + iconSize + trailingPadding
 
-        if addOnCost > 0 {
-            // Calculate cost text width dynamically
-            let costText = formatCost(addOnCost)
-            let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
-            let textWidth = (costText as NSString).size(withAttributes: [.font: font]).width
-            return NSSize(width: baseIconWidth + textWidth + 4, height: 23)
-        } else {
-            // "OC Bar" text width
-            let font = NSFont.systemFont(ofSize: 11, weight: .medium)
-            let textWidth = (zeroCostStatusText as NSString).size(withAttributes: [.font: font]).width
-            return NSSize(width: baseIconWidth + textWidth + 4, height: 23)
+        guard let statusText else {
+            return NSSize(width: iconWidth, height: statusBarHeight)
         }
+
+        let textWidth = (statusText as NSString).size(withAttributes: [.font: statusTextFont]).width
+        let totalWidth = iconWidth + textSpacing + textWidth + trailingPadding
+        return NSSize(width: totalWidth, height: statusBarHeight)
     }
 
     func update(cost: Double = 0) {
+        stopLoadingAnimation()
         addOnCost = cost
         isLoading = false
         hasError = false
-        invalidateIntrinsicContentSize()
-        needsDisplay = true
+        redrawWithSizeUpdate()
     }
 
     func showLoading() {
         isLoading = true
-        invalidateIntrinsicContentSize()
-        needsDisplay = true
+        hasError = false
+        startLoadingAnimation()
+        redrawWithSizeUpdate()
     }
 
     func showError() {
+        stopLoadingAnimation()
         hasError = true
         isLoading = false
-        addOnCost = 0  // Reset add-on cost to hide dollar sign
-        invalidateIntrinsicContentSize()
-        needsDisplay = true
+        addOnCost = 0
+        redrawWithSizeUpdate()
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -73,17 +98,16 @@ final class StatusBarIconView: NSView {
         let color = textColor
         let yOffset: CGFloat = 4
 
-        drawCopilotIcon(at: NSPoint(x: 2, y: yOffset), size: 16, color: color)
+        drawCopilotIcon(at: NSPoint(x: leftPadding, y: yOffset), size: iconSize, color: color)
 
-        if addOnCost > 0 {
-            drawCostText(at: NSPoint(x: 22, y: yOffset), color: color)
-        } else {
-            drawOCBarText(at: NSPoint(x: 22, y: yOffset), color: color)
+        if let statusText {
+            let textOrigin = NSPoint(x: leftPadding + iconSize + textSpacing, y: yOffset)
+            drawStatusText(statusText, at: textOrigin, color: color)
         }
     }
 
     private func drawCopilotIcon(at origin: NSPoint, size: CGFloat, color: NSColor) {
-        guard let icon = NSImage(systemSymbolName: "gauge.medium", accessibilityDescription: "Usage") else { return }
+        guard let icon = NSImage(systemSymbolName: currentIconSymbolName, accessibilityDescription: "Usage") else { return }
         icon.isTemplate = true
 
         let tintedImage = NSImage(size: icon.size)
@@ -96,29 +120,69 @@ final class StatusBarIconView: NSView {
         tintedImage.isTemplate = false
 
         let iconRect = NSRect(x: origin.x, y: origin.y, width: size, height: size)
-        tintedImage.draw(in: iconRect)
+        drawIcon(tintedImage, in: iconRect)
     }
 
-    private func drawOCBarText(at origin: NSPoint, color: NSColor) {
-        let font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color
-        ]
-
-        let attrString = NSAttributedString(string: zeroCostStatusText, attributes: attributes)
-        attrString.draw(at: origin)
-    }
-
-    private func drawCostText(at origin: NSPoint, color: NSColor) {
-        let text = formatCost(addOnCost)
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+    private func drawStatusText(_ text: String, at origin: NSPoint, color: NSColor) {
+        let font = statusTextFont
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color
         ]
         let attrString = NSAttributedString(string: text, attributes: attributes)
         attrString.draw(at: origin)
+    }
+
+    private func redrawWithSizeUpdate() {
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+        onIntrinsicContentSizeDidChange?()
+    }
+
+    private func drawIcon(_ image: NSImage, in rect: NSRect) {
+        guard isLoading else {
+            image.draw(in: rect)
+            return
+        }
+
+        let center = NSPoint(x: rect.midX, y: rect.midY)
+        NSGraphicsContext.saveGraphicsState()
+        let transform = NSAffineTransform()
+        transform.translateX(by: center.x, yBy: center.y)
+        transform.rotate(byDegrees: loadingRotationDegrees)
+        transform.translateX(by: -center.x, yBy: -center.y)
+        transform.concat()
+        image.draw(in: rect)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func startLoadingAnimation() {
+        guard loadingAnimationTimer == nil else { return }
+
+        loadingRotationDegrees = 0
+        let timer = Timer(timeInterval: loadingAnimationInterval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            guard self.isLoading else {
+                self.stopLoadingAnimation()
+                return
+            }
+
+            self.loadingRotationDegrees = (self.loadingRotationDegrees + self.loadingRotationStepDegrees)
+                .truncatingRemainder(dividingBy: 360)
+            self.needsDisplay = true
+        }
+
+        loadingAnimationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        statusBarIconLogger.info("Loading icon animation started")
+    }
+
+    private func stopLoadingAnimation() {
+        guard let timer = loadingAnimationTimer else { return }
+        timer.invalidate()
+        loadingAnimationTimer = nil
+        loadingRotationDegrees = 0
+        statusBarIconLogger.info("Loading icon animation stopped")
     }
 
     private func formatCost(_ cost: Double) -> String {
