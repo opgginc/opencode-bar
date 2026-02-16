@@ -287,6 +287,12 @@ Quit (⌘Q)
 | **Quota Status** | `Quota Status: $XXX/m` | Shows total monthly subscription cost if any quota-based providers have subscription settings configured. If no subscriptions are set, shows just "Quota Status". |
 
 > **Note**: Subscription settings are only available for quota-based providers. Pay-as-you-go providers do not have subscription options since they charge based on actual usage.
+>
+> **Status Bar Percentage Rule**: macOS top status bar percentage displays use one fixed priority:
+> `Weekly` → `Monthly` → `Daily` → `Hourly` → fallback aggregate.
+> If multiple values exist in the same priority window, the highest value is shown (for example, Claude weekly picks max of 7d/Sonnet/Opus).
+> In `Recent Quota Change Only`, provider selection is based on change, but the shown percentage is the provider's current priority-based usage.
+> Top-level menu rows keep multi-window percentages when available.
 
 ## How It Works
 

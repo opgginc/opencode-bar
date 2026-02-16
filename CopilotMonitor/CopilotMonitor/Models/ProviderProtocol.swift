@@ -55,6 +55,37 @@ enum ProviderIdentifier: String, CaseIterable {
         }
     }
 
+    var shortDisplayName: String {
+        switch self {
+        case .copilot:
+            return "Copilot"
+        case .claude:
+            return "Claude"
+        case .codex:
+            return "Codex"
+        case .geminiCLI:
+            return "Gemini"
+        case .openRouter:
+            return "Router"
+        case .openCode:
+            return "OpenCode"
+        case .antigravity:
+            return "Google"
+        case .openCodeZen:
+            return "Zen"
+        case .kimi:
+            return "Kimi"
+        case .zaiCodingPlan:
+            return "Z.AI"
+        case .nanoGpt:
+            return "Nano"
+        case .synthetic:
+            return "Synth"
+        case .chutes:
+            return "Chutes"
+        }
+    }
+
     var iconName: String {
         switch self {
         case .copilot:

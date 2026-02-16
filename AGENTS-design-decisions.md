@@ -108,9 +108,20 @@ Quit (⌘Q)
 - **Auth Source Labels**: Every provider MUST display where the auth token was detected
   - Format: `Token From: <path>` in submenu
   - Examples: `~/.local/share/opencode/auth.json`, `VS Code`, `Keychain`
-- **Dual-Percentage Display**: Providers with multiple usage windows show both
-  - Claude/Kimi: `Claude: 5h%, 7d%` format showing 5-hour and 7-day windows
+- **Status Bar Percentage Priority (IMMUTABLE) FOR macOS TOP STATUS BAR**: macOS top status bar percentage displays use a **SINGLE** fixed window priority
+  - Priority order: `Weekly` → `Monthly` → `Daily` → `Hourly` → fallback
+    - Fallback means using provider aggregate usage only when no explicit window metric exists
+  - If multiple values exist in the same priority window, display the highest one
+    - Example: Claude weekly uses max of `7d`, `7d Sonnet`, `7d Opus`
+  - Applies only to the top bar text (for example, `Only Show`, `Alert First`, `Pinned Provider`)
+    - Dropdown Detail Percents still show all windows for providers that have them
+  - `Recent Quota Change Only` chooses the provider by recent change, but displays that provider's current priority-based usage (not delta amount)
+- **Multiple-Percentage Display FOR Dropdown Detail Percents**: Providers with multiple usage windows show everything
+  - Claude: `Claude: 5h%, 7d%` format showing 5-hour and 7-day windows
+    - Exception: Don't show extra usage
+  - Kimi: `Kimi: 5h%, 7d%` format showing 5-hour and 7-day windows
   - Example: `Claude: 0%, 100%` where 0% is 5h usage, 100% is 7d usage
+  - Example: `Codex: 0%, 100%, 3%, 50%` where 0% is 5h usage, 100% is 7d usage, 3% is 5h Spark usage, 50% is 7d Spark usage
   - Each percentage is individually colored based on thresholds  
 
 ### Multi-Account Provider Rules (from PR #55)

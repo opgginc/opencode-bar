@@ -6,6 +6,51 @@ import os.log
 
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "StatusBarController")
 
+private enum StatusBarMetricKind {
+    case cost
+    case usage
+}
+
+private enum UsageDisplayWindowPriority: Int, CaseIterable {
+    case weekly = 0
+    case monthly = 1
+    case daily = 2
+    case hourly = 3
+    case fallback = 4
+}
+
+private struct UsagePercentCandidate {
+    let percent: Double
+    let priority: UsageDisplayWindowPriority
+}
+
+extension StatusBarController: NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu === self.menu else { return }
+        isMainMenuTracking = true
+        debugLog("menuWillOpen: tracking enabled")
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        guard menu === self.menu else { return }
+        isMainMenuTracking = false
+        debugLog("menuDidClose: tracking disabled")
+        flushDeferredUIUpdatesIfNeeded()
+    }
+}
+
+private struct StatusBarProviderSnapshot: Equatable {
+    let value: Double
+    let kind: StatusBarMetricKind
+}
+
+private struct RecentChangeCandidate: Equatable {
+    let identifier: ProviderIdentifier
+    let kind: StatusBarMetricKind
+    let delta: Double
+    let observedAt: Date
+}
+
 enum UsageFetcherError: LocalizedError {
     case noCustomerId
     case noUsageData
@@ -39,7 +84,15 @@ final class StatusBarController: NSObject {
     private var launchAtLoginItem: NSMenuItem!
     private var installCLIItem: NSMenuItem!
     private var refreshIntervalMenu: NSMenu!
+    private var menuBarDisplayModeMenu: NSMenu!
+    private var onlyShowModeMenu: NSMenu!
+    private var onlyShowProviderMenu: NSMenu!
+    private var criticalBadgeMenuItem: NSMenuItem!
+    private var showProviderNameMenuItem: NSMenuItem!
     private var refreshTimer: Timer?
+    private var isMainMenuTracking = false
+    private var hasDeferredMenuRebuild = false
+    private var hasDeferredStatusBarRefresh = false
 
     private var currentUsage: CopilotUsage?
     private var lastFetchTime: Date?
@@ -58,14 +111,18 @@ final class StatusBarController: NSObject {
     private var historyMenuItem: NSMenuItem!
     var predictionPeriodMenu: NSMenu!
 
-     // Multi-provider properties
-     private var providerResults: [ProviderIdentifier: ProviderResult] = [:]
-     private var loadingProviders: Set<ProviderIdentifier> = []
-     private var enabledProvidersMenu: NSMenu!
-     private var lastProviderErrors: [ProviderIdentifier: String] = [:]
-     private var viewErrorDetailsItem: NSMenuItem!
-     private var orphanedSubscriptionKeys: [String] = []
-     private var orphanedSubscriptionTotal: Double = 0
+    // Multi-provider properties
+    private var providerResults: [ProviderIdentifier: ProviderResult] = [:]
+    private var loadingProviders: Set<ProviderIdentifier> = []
+    private var enabledProvidersMenu: NSMenu!
+    private var lastProviderErrors: [ProviderIdentifier: String] = [:]
+    private var viewErrorDetailsItem: NSMenuItem!
+    private var orphanedSubscriptionKeys: [String] = []
+    private var orphanedSubscriptionTotal: Double = 0
+    private let criticalUsageThreshold: Double = 90.0
+    private let recentChangeMaxAge: TimeInterval = 3 * 60 * 60
+    private var previousProviderSnapshots: [ProviderIdentifier: StatusBarProviderSnapshot] = [:]
+    private var recentChangeCandidate: RecentChangeCandidate?
 
     private var usagePredictor: UsagePredictor {
         UsagePredictor(weights: predictionPeriod.weights)
@@ -110,6 +167,93 @@ final class StatusBarController: NSObject {
         }
     }
 
+    private var menuBarDisplayMode: MenuBarDisplayMode {
+        get {
+            let rawValue = UserDefaults.standard.integer(forKey: StatusBarDisplayPreferences.modeKey)
+            if let mode = MenuBarDisplayMode(rawValue: rawValue) {
+                return mode
+            }
+
+            // Legacy migration: old enum used rawValue 3 for recent-change mode.
+            if rawValue == 3 {
+                if UserDefaults.standard.object(forKey: StatusBarDisplayPreferences.onlyShowModeKey) == nil {
+                    UserDefaults.standard.set(OnlyShowMode.recentChange.rawValue, forKey: StatusBarDisplayPreferences.onlyShowModeKey)
+                }
+                UserDefaults.standard.set(MenuBarDisplayMode.onlyShow.rawValue, forKey: StatusBarDisplayPreferences.modeKey)
+                return .onlyShow
+            }
+
+            return .defaultMode
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: StatusBarDisplayPreferences.modeKey)
+            updateStatusBarDisplayMenuState()
+            updateStatusBarText()
+        }
+    }
+
+    private var onlyShowMode: OnlyShowMode {
+        get {
+            if let object = UserDefaults.standard.object(forKey: StatusBarDisplayPreferences.onlyShowModeKey) {
+                if let rawValue = object as? Int, let mode = OnlyShowMode(rawValue: rawValue) {
+                    return mode
+                }
+            }
+
+            // Legacy migration: map old toggle to alert mode.
+            if boolPreference(forKey: StatusBarDisplayPreferences.showAlertFirstKey, defaultValue: false) {
+                return .alertFirst
+            }
+
+            if menuBarDisplayProvider != nil {
+                return .pinnedProvider
+            }
+
+            return .defaultMode
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: StatusBarDisplayPreferences.onlyShowModeKey)
+            updateStatusBarDisplayMenuState()
+            updateStatusBarText()
+        }
+    }
+
+    private var menuBarDisplayProvider: ProviderIdentifier? {
+        get {
+            guard let rawValue = UserDefaults.standard.string(forKey: StatusBarDisplayPreferences.providerKey) else {
+                return nil
+            }
+            return ProviderIdentifier(rawValue: rawValue)
+        }
+        set {
+            UserDefaults.standard.set(newValue?.rawValue, forKey: StatusBarDisplayPreferences.providerKey)
+            updateStatusBarDisplayMenuState()
+            updateStatusBarText()
+        }
+    }
+
+    private var criticalBadgeEnabled: Bool {
+        get {
+            boolPreference(forKey: StatusBarDisplayPreferences.criticalBadgeKey, defaultValue: true)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: StatusBarDisplayPreferences.criticalBadgeKey)
+            updateStatusBarDisplayMenuState()
+            updateStatusBarText()
+        }
+    }
+
+    private var showProviderName: Bool {
+        get {
+            boolPreference(forKey: StatusBarDisplayPreferences.showProviderNameKey, defaultValue: false)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: StatusBarDisplayPreferences.showProviderNameKey)
+            updateStatusBarDisplayMenuState()
+            updateStatusBarText()
+        }
+    }
+
     override init() {
         super.init()
         debugLog("StatusBarController init started")
@@ -144,6 +288,28 @@ final class StatusBarController: NSObject {
             } else {
                 try? data.write(to: URL(fileURLWithPath: path))
             }
+        }
+    }
+
+    private func boolPreference(forKey key: String, defaultValue: Bool) -> Bool {
+        if UserDefaults.standard.object(forKey: key) == nil {
+            return defaultValue
+        }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+
+    private func flushDeferredUIUpdatesIfNeeded() {
+        if hasDeferredMenuRebuild {
+            hasDeferredMenuRebuild = false
+            debugLog("flushDeferredUIUpdatesIfNeeded: applying deferred menu rebuild")
+            updateMultiProviderMenu()
+            return
+        }
+
+        if hasDeferredStatusBarRefresh {
+            hasDeferredStatusBarRefresh = false
+            debugLog("flushDeferredUIUpdatesIfNeeded: applying deferred status bar refresh")
+            updateStatusBarText()
         }
     }
 
@@ -190,6 +356,7 @@ final class StatusBarController: NSObject {
 
     private func setupMenu() {
         menu = NSMenu()
+        menu.delegate = self
 
         historyMenuItem = NSMenuItem(title: "Usage History", action: nil, keyEquivalent: "")
         historyMenuItem.image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Usage History")
@@ -226,6 +393,70 @@ final class StatusBarController: NSObject {
         refreshIntervalItem.submenu = refreshIntervalMenu
         menu.addItem(refreshIntervalItem)
         updateRefreshIntervalMenu()
+
+        let statusBarOptionsItem = NSMenuItem(title: "Status Bar Options", action: nil, keyEquivalent: "")
+        statusBarOptionsItem.image = NSImage(systemSymbolName: "menubar.rectangle", accessibilityDescription: "Status Bar Options")
+        let statusBarOptionsMenu = NSMenu()
+
+        let displayModeItem = NSMenuItem(title: "Menu Bar Display", action: nil, keyEquivalent: "")
+        displayModeItem.image = NSImage(systemSymbolName: "textformat.size", accessibilityDescription: "Menu Bar Display")
+        menuBarDisplayModeMenu = NSMenu()
+        for mode in MenuBarDisplayMode.allCases {
+            if mode == .onlyShow {
+                let onlyShowItem = NSMenuItem(title: mode.title, action: nil, keyEquivalent: "")
+                onlyShowItem.tag = mode.rawValue
+                onlyShowModeMenu = NSMenu()
+                for onlyShowMode in OnlyShowMode.allCases {
+                    if onlyShowMode == .pinnedProvider {
+                        let pinnedProviderItem = NSMenuItem(title: onlyShowMode.title, action: nil, keyEquivalent: "")
+                        onlyShowProviderMenu = NSMenu()
+                        for identifier in ProviderIdentifier.allCases {
+                            let providerItem = NSMenuItem(
+                                title: identifier.displayName,
+                                action: #selector(menuBarOnlyShowProviderSelected(_:)),
+                                keyEquivalent: ""
+                            )
+                            providerItem.target = self
+                            providerItem.representedObject = identifier.rawValue
+                            onlyShowProviderMenu.addItem(providerItem)
+                        }
+                        pinnedProviderItem.submenu = onlyShowProviderMenu
+                        onlyShowModeMenu.addItem(pinnedProviderItem)
+                    } else {
+                        let onlyShowModeItem = NSMenuItem(
+                            title: onlyShowMode.title,
+                            action: #selector(onlyShowModeSelected(_:)),
+                            keyEquivalent: ""
+                        )
+                        onlyShowModeItem.target = self
+                        onlyShowModeItem.tag = onlyShowMode.rawValue
+                        onlyShowModeMenu.addItem(onlyShowModeItem)
+                    }
+                }
+                onlyShowItem.submenu = onlyShowModeMenu
+                menuBarDisplayModeMenu.addItem(onlyShowItem)
+            } else {
+                let modeItem = NSMenuItem(title: mode.title, action: #selector(menuBarDisplayModeSelected(_:)), keyEquivalent: "")
+                modeItem.target = self
+                modeItem.tag = mode.rawValue
+                menuBarDisplayModeMenu.addItem(modeItem)
+            }
+        }
+        displayModeItem.submenu = menuBarDisplayModeMenu
+        statusBarOptionsMenu.addItem(displayModeItem)
+        statusBarOptionsMenu.addItem(NSMenuItem.separator())
+
+        criticalBadgeMenuItem = NSMenuItem(title: "Critical Badge", action: #selector(toggleCriticalBadge(_:)), keyEquivalent: "")
+        criticalBadgeMenuItem.target = self
+        statusBarOptionsMenu.addItem(criticalBadgeMenuItem)
+
+        showProviderNameMenuItem = NSMenuItem(title: "Show Provider Name", action: #selector(toggleShowProviderName(_:)), keyEquivalent: "")
+        showProviderNameMenuItem.target = self
+        statusBarOptionsMenu.addItem(showProviderNameMenuItem)
+
+        statusBarOptionsItem.submenu = statusBarOptionsMenu
+        menu.addItem(statusBarOptionsItem)
+        updateStatusBarDisplayMenuState()
 
         predictionPeriodMenu = NSMenu()
         for period in PredictionPeriod.allCases {
@@ -303,6 +534,82 @@ final class StatusBarController: NSObject {
         }
     }
 
+    @objc private func menuBarDisplayModeSelected(_ sender: NSMenuItem) {
+        guard let mode = MenuBarDisplayMode(rawValue: sender.tag) else { return }
+        debugLog("menuBarDisplayModeSelected: mode=\(mode.title)")
+        menuBarDisplayMode = mode
+    }
+
+    @objc private func onlyShowModeSelected(_ sender: NSMenuItem) {
+        guard let mode = OnlyShowMode(rawValue: sender.tag) else { return }
+        debugLog("onlyShowModeSelected: mode=\(mode.title)")
+        menuBarDisplayMode = .onlyShow
+        onlyShowMode = mode
+    }
+
+    @objc private func menuBarOnlyShowProviderSelected(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let identifier = ProviderIdentifier(rawValue: rawValue) else {
+            return
+        }
+        debugLog("menuBarOnlyShowProviderSelected: provider=\(identifier.displayName)")
+        menuBarDisplayMode = .onlyShow
+        onlyShowMode = .pinnedProvider
+        menuBarDisplayProvider = identifier
+    }
+
+    @objc private func toggleCriticalBadge(_ sender: NSMenuItem) {
+        criticalBadgeEnabled.toggle()
+        debugLog("toggleCriticalBadge: value=\(criticalBadgeEnabled)")
+    }
+
+    @objc private func toggleShowProviderName(_ sender: NSMenuItem) {
+        showProviderName.toggle()
+        debugLog("toggleShowProviderName: value=\(showProviderName)")
+    }
+
+    private func updateStatusBarDisplayMenuState() {
+        if let menuBarDisplayModeMenu {
+            let currentMode = menuBarDisplayMode
+            let currentOnlyShowMode = onlyShowMode
+            let currentProvider = menuBarDisplayProvider
+            for item in menuBarDisplayModeMenu.items {
+                if let submenu = item.submenu, submenu === onlyShowModeMenu {
+                    item.state = (currentMode == .onlyShow) ? .on : .off
+
+                    for onlyShowItem in submenu.items {
+                        if let providerSubmenu = onlyShowItem.submenu {
+                            onlyShowItem.state = (currentMode == .onlyShow && currentOnlyShowMode == .pinnedProvider) ? .on : .off
+                            for providerItem in providerSubmenu.items {
+                                guard let rawValue = providerItem.representedObject as? String,
+                                      let identifier = ProviderIdentifier(rawValue: rawValue) else {
+                                    continue
+                                }
+                                providerItem.state = (
+                                    currentMode == .onlyShow &&
+                                    currentOnlyShowMode == .pinnedProvider &&
+                                    currentProvider == identifier
+                                ) ? .on : .off
+                                providerItem.isEnabled = isProviderEnabled(identifier)
+                            }
+                        } else if let mode = OnlyShowMode(rawValue: onlyShowItem.tag) {
+                            onlyShowItem.state = (currentMode == .onlyShow && currentOnlyShowMode == mode) ? .on : .off
+                        }
+                    }
+                    continue
+                }
+
+                if let mode = MenuBarDisplayMode(rawValue: item.tag) {
+                    item.state = (mode == currentMode) ? .on : .off
+                    continue
+                }
+            }
+        }
+
+        criticalBadgeMenuItem?.state = criticalBadgeEnabled ? .on : .off
+        showProviderNameMenuItem?.state = showProviderName ? .on : .off
+    }
+
     private func updatePredictionPeriodMenu() {
         for item in predictionPeriodMenu.items {
             item.state = (item.tag == predictionPeriod.rawValue) ? .on : .off
@@ -330,6 +637,8 @@ final class StatusBarController: NSObject {
         let current = isProviderEnabled(identifier)
         UserDefaults.standard.set(!current, forKey: key)
         updateEnabledProvidersMenu()
+        updateStatusBarDisplayMenuState()
+        updateStatusBarText()
         refreshClicked()
     }
 
@@ -388,8 +697,13 @@ final class StatusBarController: NSObject {
             return
         }
         isFetching = true
-        debugLog("fetchUsage: showing loading")
-        statusBarIconView?.showLoading()
+        if isMainMenuTracking {
+            hasDeferredStatusBarRefresh = true
+            debugLog("fetchUsage: menu is open, deferring loading indicator")
+        } else {
+            debugLog("fetchUsage: showing loading")
+            statusBarIconView?.showLoading()
+        }
 
         debugLog("fetchUsage: creating Task")
         Task { @MainActor in
@@ -514,6 +828,400 @@ final class StatusBarController: NSObject {
         let payAsYouGo = calculatePayAsYouGoTotal(providerResults: providerResults, copilotUsage: copilotUsage)
         let subscriptions = SubscriptionSettingsManager.shared.getTotalMonthlySubscriptionCost()
         return payAsYouGo + subscriptions
+    }
+
+    private struct AlertProviderCandidate {
+        let identifier: ProviderIdentifier
+        let usedPercent: Double
+    }
+
+    private func formatCostForStatusBar(_ cost: Double) -> String {
+        String(format: "$%.2f", cost)
+    }
+
+    private func selectedPinnedProvider() -> ProviderIdentifier? {
+        if let selected = menuBarDisplayProvider, isProviderEnabled(selected) {
+            return selected
+        }
+        return ProviderIdentifier.allCases.first(where: { isProviderEnabled($0) })
+    }
+
+    private func normalizedUsagePercent(_ percent: Double?) -> Double? {
+        guard let percent, percent.isFinite else { return nil }
+        return min(max(percent, 0), 999)
+    }
+
+    private func dailyPercentFromDetails(_ details: DetailedUsage?) -> Double? {
+        guard let details else { return nil }
+        if let limit = details.limit, limit > 0, let used = details.dailyUsage {
+            return (used / limit) * 100.0
+        }
+        return details.dailyUsage
+    }
+
+    private func usagePercentCandidates(
+        identifier: ProviderIdentifier,
+        usage: ProviderUsage,
+        details: DetailedUsage?
+    ) -> [UsagePercentCandidate] {
+        var candidates: [UsagePercentCandidate] = []
+        func add(_ percent: Double?, priority: UsageDisplayWindowPriority) {
+            guard let normalized = normalizedUsagePercent(percent) else { return }
+            candidates.append(UsagePercentCandidate(percent: normalized, priority: priority))
+        }
+
+        switch identifier {
+        case .claude:
+            add(details?.sevenDayUsage, priority: .weekly)
+            add(details?.sonnetUsage, priority: .weekly)
+            add(details?.opusUsage, priority: .weekly)
+            add(details?.extraUsageUtilizationPercent, priority: .monthly)
+            add(details?.fiveHourUsage, priority: .hourly)
+        case .kimi:
+            add(details?.sevenDayUsage, priority: .weekly)
+            add(details?.fiveHourUsage, priority: .hourly)
+        case .codex:
+            add(details?.secondaryUsage, priority: .weekly)
+            add(details?.sparkSecondaryUsage, priority: .weekly)
+            add(dailyPercentFromDetails(details), priority: .daily)
+            add(details?.sparkUsage, priority: .hourly)
+        case .copilot:
+            if let used = details?.copilotUsedRequests,
+               let limit = details?.copilotLimitRequests,
+               limit > 0 {
+                add((Double(used) / Double(limit)) * 100.0, priority: .monthly)
+            }
+            add(usage.usagePercentage, priority: .monthly)
+        case .zaiCodingPlan:
+            add(details?.mcpUsagePercent, priority: .monthly)
+            add(details?.tokenUsagePercent, priority: .hourly)
+        case .nanoGpt:
+            add(details?.mcpUsagePercent, priority: .monthly)
+            add(details?.tokenUsagePercent, priority: .daily)
+        case .chutes:
+            add(dailyPercentFromDetails(details), priority: .daily)
+        case .synthetic:
+            add(details?.fiveHourUsage, priority: .hourly)
+        case .antigravity, .geminiCLI, .openRouter, .openCode, .openCodeZen:
+            break
+        }
+
+        add(usage.usagePercentage, priority: .fallback)
+        return candidates
+    }
+
+    private func preferredUsedPercent(
+        identifier: ProviderIdentifier,
+        usage: ProviderUsage,
+        details: DetailedUsage?
+    ) -> Double? {
+        let candidates = usagePercentCandidates(identifier: identifier, usage: usage, details: details)
+        guard let selectedPriority = candidates.map(\.priority.rawValue).min() else {
+            return nil
+        }
+
+        return candidates
+            .filter { $0.priority.rawValue == selectedPriority }
+            .map(\.percent)
+            .max()
+    }
+
+    private func usedPercentsForStatusBar(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
+        var usedPercents: [Double] = []
+
+        if case .quotaBased = result.usage,
+           let percent = preferredUsedPercent(identifier: identifier, usage: result.usage, details: result.details) {
+            usedPercents.append(percent)
+        }
+
+        if let accounts = result.accounts {
+            for account in accounts {
+                guard case .quotaBased = account.usage else { continue }
+                if let percent = preferredUsedPercent(identifier: identifier, usage: account.usage, details: account.details) {
+                    usedPercents.append(percent)
+                }
+            }
+        }
+
+        if identifier == .geminiCLI, let geminiAccounts = result.details?.geminiAccounts {
+            for account in geminiAccounts {
+                if let percent = normalizedUsagePercent(100.0 - account.remainingPercentage) {
+                    usedPercents.append(percent)
+                }
+            }
+        }
+
+        return usedPercents
+    }
+
+    private func usagePercentsForMostUsed(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
+        usedPercentsForStatusBar(identifier: identifier, result: result).filter { $0 <= 100.0 }
+    }
+
+    private func usedPercentsForChangeDetection(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
+        var usedPercents: [Double] = []
+
+        func appendMetrics(usage: ProviderUsage, details: DetailedUsage?) {
+            guard case .quotaBased = usage else { return }
+            if let percent = normalizedUsagePercent(usage.usagePercentage) {
+                usedPercents.append(percent)
+            }
+
+            if let details {
+                let extraPercents: [Double?] = [
+                    details.fiveHourUsage,
+                    details.sevenDayUsage,
+                    details.sonnetUsage,
+                    details.opusUsage,
+                    details.secondaryUsage,
+                    details.sparkUsage,
+                    details.sparkSecondaryUsage,
+                    details.tokenUsagePercent,
+                    details.mcpUsagePercent
+                ]
+                for percent in extraPercents {
+                    if let normalized = normalizedUsagePercent(percent) {
+                        usedPercents.append(normalized)
+                    }
+                }
+            }
+        }
+
+        appendMetrics(usage: result.usage, details: result.details)
+
+        if let accounts = result.accounts {
+            for account in accounts {
+                appendMetrics(usage: account.usage, details: account.details)
+            }
+        }
+
+        if identifier == .geminiCLI, let geminiAccounts = result.details?.geminiAccounts {
+            for account in geminiAccounts {
+                if let percent = normalizedUsagePercent(100.0 - account.remainingPercentage) {
+                    usedPercents.append(percent)
+                }
+            }
+        }
+
+        return usedPercents
+    }
+
+    private func statusSnapshot(for identifier: ProviderIdentifier, result: ProviderResult) -> StatusBarProviderSnapshot? {
+        switch result.usage {
+        case .payAsYouGo(_, let cost, _):
+            return StatusBarProviderSnapshot(
+                value: max(0.0, cost ?? 0.0),
+                kind: .cost
+            )
+        case .quotaBased:
+            let cappedPercents = usedPercentsForChangeDetection(identifier: identifier, result: result).map { min($0, 100.0) }
+            // Use aggregate quota usage for change detection so non-max windows/accounts can still trigger updates.
+            let aggregatePercent = cappedPercents.isEmpty
+                ? min(max(result.usage.usagePercentage, 0.0), 100.0)
+                : cappedPercents.reduce(0.0, +)
+            return StatusBarProviderSnapshot(value: max(0.0, aggregatePercent), kind: .usage)
+        }
+    }
+
+    private func refreshRecentChangeCandidate() {
+        var currentSnapshots: [ProviderIdentifier: StatusBarProviderSnapshot] = [:]
+        for (identifier, result) in providerResults {
+            guard isProviderEnabled(identifier) else { continue }
+            guard case .quotaBased = result.usage else { continue }
+            guard let snapshot = statusSnapshot(for: identifier, result: result) else { continue }
+            currentSnapshots[identifier] = snapshot
+        }
+
+        guard !currentSnapshots.isEmpty else {
+            previousProviderSnapshots = [:]
+            recentChangeCandidate = nil
+            debugLog("refreshRecentChangeCandidate: no snapshots")
+            return
+        }
+
+        if previousProviderSnapshots.isEmpty {
+            previousProviderSnapshots = currentSnapshots
+            debugLog("refreshRecentChangeCandidate: baseline snapshots saved")
+            return
+        }
+
+        if currentSnapshots == previousProviderSnapshots {
+            if let existing = recentChangeCandidate, currentSnapshots[existing.identifier] == nil {
+                recentChangeCandidate = nil
+            }
+            debugLog("refreshRecentChangeCandidate: snapshots unchanged, keeping previous candidate")
+            return
+        }
+
+        var bestCandidate: RecentChangeCandidate?
+        for (identifier, newSnapshot) in currentSnapshots {
+            guard let oldSnapshot = previousProviderSnapshots[identifier],
+                  oldSnapshot.kind == newSnapshot.kind else {
+                continue
+            }
+
+            let delta = newSnapshot.value - oldSnapshot.value
+            let absDelta = abs(delta)
+            let minThreshold: Double = (newSnapshot.kind == .cost) ? 0.01 : 0.01
+            guard absDelta >= minThreshold else { continue }
+
+            if bestCandidate == nil || absDelta > abs(bestCandidate!.delta) {
+                bestCandidate = RecentChangeCandidate(
+                    identifier: identifier,
+                    kind: newSnapshot.kind,
+                    delta: delta,
+                    observedAt: Date()
+                )
+            }
+        }
+
+        previousProviderSnapshots = currentSnapshots
+        if let bestCandidate {
+            recentChangeCandidate = bestCandidate
+        } else if let existing = recentChangeCandidate, currentSnapshots[existing.identifier] == nil {
+            recentChangeCandidate = nil
+        }
+
+        if let bestCandidate {
+            debugLog(
+                "refreshRecentChangeCandidate: provider=\(bestCandidate.identifier.displayName), kind=\(bestCandidate.kind), delta=\(String(format: "%.2f", bestCandidate.delta))"
+            )
+        } else {
+            debugLog("refreshRecentChangeCandidate: no significant change, keeping previous candidate")
+        }
+    }
+
+    private func mostCriticalProvider() -> AlertProviderCandidate? {
+        var best: AlertProviderCandidate?
+        for (identifier, result) in providerResults {
+            guard isProviderEnabled(identifier) else { continue }
+
+            let percents = usagePercentsForMostUsed(identifier: identifier, result: result)
+            guard let maxPercent = percents.max(), maxPercent >= criticalUsageThreshold else {
+                continue
+            }
+
+            if best == nil || maxPercent > best!.usedPercent {
+                best = AlertProviderCandidate(identifier: identifier, usedPercent: maxPercent)
+            }
+        }
+        return best
+    }
+
+    private func formatRecentChangeText(_ candidate: RecentChangeCandidate) -> String {
+        let provider = candidate.identifier.shortDisplayName
+        guard let result = providerResults[candidate.identifier] else {
+            return provider
+        }
+
+        switch result.usage {
+        case .payAsYouGo(_, let cost, _):
+            return "\(provider) \(formatCostForStatusBar(cost ?? 0.0))"
+        case .quotaBased:
+            let percent = preferredUsedPercent(
+                identifier: candidate.identifier,
+                usage: result.usage,
+                details: result.details
+            ) ?? min(max(result.usage.usagePercentage, 0.0), 999.0)
+            return "\(provider) \(String(format: "%.0f%%", percent))"
+        }
+    }
+
+    private func formatAlertText(identifier: ProviderIdentifier, usedPercent: Double) -> String {
+        let usageText = String(format: "%.0f%% used", usedPercent)
+        if showProviderName {
+            return "\(identifier.shortDisplayName) \(usageText)"
+        }
+        return usageText
+    }
+
+    private func formatProviderForStatusBar(identifier: ProviderIdentifier, result: ProviderResult) -> String {
+        switch result.usage {
+        case .payAsYouGo(_, let cost, _):
+            let costText = formatCostForStatusBar(cost ?? 0)
+            return showProviderName ? "\(identifier.shortDisplayName) \(costText)" : costText
+        case .quotaBased:
+            let maxPercent = usedPercentsForStatusBar(identifier: identifier, result: result).max() ?? result.usage.usagePercentage
+            let usageText = String(format: "%.0f%% used", maxPercent)
+            return showProviderName ? "\(identifier.shortDisplayName) \(usageText)" : usageText
+        }
+    }
+
+    private func updateStatusBarText() {
+        if isMainMenuTracking {
+            hasDeferredStatusBarRefresh = true
+            debugLog("updateStatusBarText: deferred while menu is open")
+            return
+        }
+        hasDeferredStatusBarRefresh = false
+
+        let criticalCandidate = mostCriticalProvider()
+        let shouldShowCriticalBadge = criticalBadgeEnabled && criticalCandidate != nil
+        statusBarIconView?.setCriticalBadgeVisible(shouldShowCriticalBadge)
+
+        switch menuBarDisplayMode {
+        case .iconOnly:
+            debugLog("updateStatusBarText: mode=Icon Only")
+            statusBarIconView?.updateIconOnly()
+        case .totalCost:
+            let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
+            debugLog("updateStatusBarText: mode=Total Cost, value=\(String(format: "$%.2f", totalCost))")
+            statusBarIconView?.update(displayText: formatCostForStatusBar(totalCost))
+        case .onlyShow:
+            switch onlyShowMode {
+            case .alertFirst:
+                if let criticalCandidate {
+                    let alertText = formatAlertText(
+                        identifier: criticalCandidate.identifier,
+                        usedPercent: criticalCandidate.usedPercent
+                    )
+                    debugLog(
+                        "updateStatusBarText: mode=Only Show(Alert First), provider=\(criticalCandidate.identifier.displayName), used=\(Int(criticalCandidate.usedPercent.rounded()))%"
+                    )
+                    statusBarIconView?.update(displayText: alertText)
+                } else {
+                    let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
+                    debugLog("updateStatusBarText: mode=Only Show(Alert First), no critical provider, fallback total=\(String(format: "$%.2f", totalCost))")
+                    statusBarIconView?.update(displayText: formatCostForStatusBar(totalCost))
+                }
+            case .pinnedProvider:
+                guard let provider = selectedPinnedProvider() else {
+                    debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), no provider available, fallback to total")
+                    let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
+                    statusBarIconView?.update(displayText: formatCostForStatusBar(totalCost))
+                    return
+                }
+
+                if let result = providerResults[provider] {
+                    let text = formatProviderForStatusBar(identifier: provider, result: result)
+                    debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), provider=\(provider.displayName), text=\(text)")
+                    statusBarIconView?.update(displayText: text)
+                } else {
+                    let fallback = showProviderName ? provider.shortDisplayName : "N/A"
+                    debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), missing result for \(provider.displayName), fallback=\(fallback)")
+                    statusBarIconView?.update(displayText: fallback)
+                }
+            case .recentChange:
+                if let recentChangeCandidate, Date().timeIntervalSince(recentChangeCandidate.observedAt) <= recentChangeMaxAge {
+                    let text = formatRecentChangeText(recentChangeCandidate)
+                    debugLog("updateStatusBarText: mode=Only Show(Recent Quota Change Only), text=\(text)")
+                    statusBarIconView?.update(displayText: text)
+                } else {
+                    if let recentChangeCandidate {
+                        let staleMinutes = Int(Date().timeIntervalSince(recentChangeCandidate.observedAt) / 60.0)
+                        debugLog(
+                            "updateStatusBarText: mode=Only Show(Recent Quota Change Only), candidate stale (\(staleMinutes)m), fallback total cost"
+                        )
+                        self.recentChangeCandidate = nil
+                    } else {
+                        debugLog("updateStatusBarText: mode=Only Show(Recent Quota Change Only), no candidate, fallback total cost")
+                    }
+
+                    let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
+                    statusBarIconView?.update(displayText: formatCostForStatusBar(totalCost))
+                }
+            }
+        }
     }
 
     private func sanitizedSubscriptionKey(_ key: String) -> String {
@@ -652,6 +1360,14 @@ final class StatusBarController: NSObject {
 
       private func updateMultiProviderMenu() {
           debugLog("updateMultiProviderMenu: started")
+          if isMainMenuTracking {
+              hasDeferredMenuRebuild = true
+              hasDeferredStatusBarRefresh = true
+              debugLog("updateMultiProviderMenu: deferred while menu is open")
+              return
+          }
+          hasDeferredMenuRebuild = false
+
           guard let separatorIndex = menu.items.firstIndex(where: { $0.isSeparatorItem }) else {
               debugLog("updateMultiProviderMenu: no separator found, returning")
               return
@@ -680,6 +1396,9 @@ final class StatusBarController: NSObject {
 
           guard !providerResults.isEmpty else {
               debugLog("updateMultiProviderMenu: no data, returning")
+              recentChangeCandidate = nil
+              updateStatusBarDisplayMenuState()
+              updateStatusBarText()
               return
           }
 
@@ -1040,12 +1759,7 @@ final class StatusBarController: NSObject {
                             displayName += " (No usage data)"
                         }
 
-                        // Build percentage array for display
-                        // Claude: show 5h, 7d, and Sonnet weekly usage
-                        // Kimi: show both 5h and 7d usage windows
-                        // Codex: show base primary/weekly plus Spark primary/weekly windows
-                        // Z.AI: show both 5h token window and MCP usage
-                        // Other providers: show single usage percentage
+                        // Keep menu list rows in multi-window format (e.g., 5h, weekly, monthly together).
                         let usedPercents: [Double]
                         if identifier == .claude,
                            let details = account.details,
@@ -1178,7 +1892,7 @@ final class StatusBarController: NSObject {
                 for account in geminiAccounts {
                     hasQuota = true
                     let accountNumber = account.accountIndex + 1
-                    let usedPercent = 100 - account.remainingPercentage
+                    let usedPercent = normalizedUsagePercent(100.0 - account.remainingPercentage) ?? 0.0
                     let normalizedEmail = account.email.trimmingCharacters(in: .whitespacesAndNewlines)
                     var displayName = "Gemini CLI"
 
@@ -1268,7 +1982,9 @@ final class StatusBarController: NSObject {
         menu.insertItem(separator3, at: insertIndex)
 
         let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
-        statusBarIconView?.update(cost: totalCost)
+        refreshRecentChangeCandidate()
+        updateStatusBarDisplayMenuState()
+        updateStatusBarText()
         debugLog("updateMultiProviderMenu: completed successfully, totalCost=$\(totalCost)")
         logMenuStructure()
     }
@@ -1777,8 +2493,8 @@ final class StatusBarController: NSObject {
     }
 
       private func updateUIForSuccess(usage: CopilotUsage) {
-          let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: usage)
-          statusBarIconView?.update(cost: totalCost)
+          currentUsage = usage
+          updateStatusBarText()
           signInItem.isHidden = true
           updateHistorySubmenu()
           updateMultiProviderMenu()
@@ -1787,7 +2503,7 @@ final class StatusBarController: NSObject {
     private func updateUIForLoggedOut() {
         logger.info("updateUIForLoggedOut: showing default status")
         debugLog("updateUIForLoggedOut: reset status bar icon to default")
-        statusBarIconView?.update(cost: 0)
+        updateStatusBarText()
         signInItem.isHidden = false
     }
 
