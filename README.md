@@ -286,6 +286,12 @@ Quit (⌘Q)
 | **Pay-as-you-go** | `Pay-as-you-go: $XX.XX` | Sum of all pay-as-you-go provider costs (OpenRouter + OpenCode Zen) |
 | **Quota Status** | `Quota Status: $XXX/m` | Shows total monthly subscription cost if any quota-based providers have subscription settings configured. If no subscriptions are set, shows just "Quota Status". |
 
+##### Status Bar Options
+
+- **Menu Bar Display**: Choose one of `Total Cost`, `Icon Only`, or `Only Show`.
+- **Critical Badge**: Toggle on/off to show or hide the critical-usage badge.
+- **Show Provider Name**: Toggle on/off to include provider names in status bar text.
+
 > **Note**: Subscription settings are only available for quota-based providers. Pay-as-you-go providers do not have subscription options since they charge based on actual usage.
 >
 > **Status Bar Percentage Rule**: macOS top status bar percentage displays use one fixed priority:

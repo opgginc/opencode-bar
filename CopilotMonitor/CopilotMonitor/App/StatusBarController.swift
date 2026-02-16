@@ -839,6 +839,13 @@ final class StatusBarController: NSObject {
         String(format: "$%.2f", cost)
     }
 
+    private func formatCostOrStatusBarBrand(_ cost: Double) -> String {
+        if cost <= 0 {
+            return "OC Bar"
+        }
+        return formatCostForStatusBar(cost)
+    }
+
     private func selectedPinnedProvider() -> ProviderIdentifier? {
         if let selected = menuBarDisplayProvider, isProviderEnabled(selected) {
             return selected
@@ -1123,7 +1130,7 @@ final class StatusBarController: NSObject {
                 usage: result.usage,
                 details: result.details
             ) ?? min(max(result.usage.usagePercentage, 0.0), 999.0)
-            return "\(provider) \(String(format: "%.0f%%", percent))"
+            return "\(provider) \(String(format: "%.0f%% used", percent))"
         }
     }
 
@@ -1166,7 +1173,7 @@ final class StatusBarController: NSObject {
         case .totalCost:
             let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
             debugLog("updateStatusBarText: mode=Total Cost, value=\(String(format: "$%.2f", totalCost))")
-            statusBarIconView?.update(displayText: formatCostForStatusBar(totalCost))
+            statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
         case .onlyShow:
             switch onlyShowMode {
             case .alertFirst:
@@ -1182,13 +1189,13 @@ final class StatusBarController: NSObject {
                 } else {
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
                     debugLog("updateStatusBarText: mode=Only Show(Alert First), no critical provider, fallback total=\(String(format: "$%.2f", totalCost))")
-                    statusBarIconView?.update(displayText: formatCostForStatusBar(totalCost))
+                    statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
                 }
             case .pinnedProvider:
                 guard let provider = selectedPinnedProvider() else {
                     debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), no provider available, fallback to total")
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
-                    statusBarIconView?.update(displayText: formatCostForStatusBar(totalCost))
+                    statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
                     return
                 }
 
@@ -1197,8 +1204,9 @@ final class StatusBarController: NSObject {
                     debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), provider=\(provider.displayName), text=\(text)")
                     statusBarIconView?.update(displayText: text)
                 } else {
-                    let fallback = showProviderName ? provider.shortDisplayName : "N/A"
-                    debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), missing result for \(provider.displayName), fallback=\(fallback)")
+                    let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
+                    let fallback = formatCostOrStatusBarBrand(totalCost)
+                    debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), missing result for \(provider.displayName), fallback total=\(String(format: "$%.2f", totalCost))")
                     statusBarIconView?.update(displayText: fallback)
                 }
             case .recentChange:
@@ -1218,7 +1226,7 @@ final class StatusBarController: NSObject {
                     }
 
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
-                    statusBarIconView?.update(displayText: formatCostForStatusBar(totalCost))
+                    statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
                 }
             }
         }
