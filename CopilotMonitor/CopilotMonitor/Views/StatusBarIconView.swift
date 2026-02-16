@@ -6,6 +6,9 @@ private let statusBarIconLogger = Logger(subsystem: "com.opencodeproviders", cat
 // MARK: - Status Bar Icon View
 final class StatusBarIconView: NSView {
     private var addOnCost: Double = 0
+    private var overrideText: String?
+    private var iconOnlyMode = false
+    private var isCriticalBadgeVisible = false
     private var isLoading = false
     private var hasError = false
     private var loadingAnimationTimer: Timer?
@@ -21,6 +24,8 @@ final class StatusBarIconView: NSView {
     private let statusBarHeight: CGFloat = 23
     private let loadingAnimationInterval: TimeInterval = 0.07
     private let loadingRotationStepDegrees: CGFloat = 30
+    private let criticalBadgeSize: CGFloat = 6
+    private let criticalBadgeInset: CGFloat = 1
 
     /// Nil means icon-only rendering (no text reservation).
     private var statusText: String? {
@@ -28,6 +33,10 @@ final class StatusBarIconView: NSView {
             return nil
         } else if hasError {
             return "Err"
+        } else if iconOnlyMode {
+            return nil
+        } else if let overrideText {
+            return overrideText
         } else if addOnCost > 0 {
             return formatCost(addOnCost)
         } else {
@@ -72,14 +81,45 @@ final class StatusBarIconView: NSView {
     func update(cost: Double = 0) {
         stopLoadingAnimation()
         addOnCost = cost
+        overrideText = nil
+        iconOnlyMode = false
         isLoading = false
         hasError = false
         redrawWithSizeUpdate()
     }
 
+    func update(displayText: String) {
+        stopLoadingAnimation()
+        addOnCost = 0
+        overrideText = displayText
+        iconOnlyMode = false
+        isLoading = false
+        hasError = false
+        redrawWithSizeUpdate()
+    }
+
+    func updateIconOnly() {
+        stopLoadingAnimation()
+        addOnCost = 0
+        overrideText = nil
+        iconOnlyMode = true
+        isLoading = false
+        hasError = false
+        redrawWithSizeUpdate()
+    }
+
+    func setCriticalBadgeVisible(_ isVisible: Bool) {
+        guard isCriticalBadgeVisible != isVisible else { return }
+        isCriticalBadgeVisible = isVisible
+        needsDisplay = true
+    }
+
     func showLoading() {
         isLoading = true
         hasError = false
+        overrideText = nil
+        iconOnlyMode = false
+        isCriticalBadgeVisible = false
         startLoadingAnimation()
         redrawWithSizeUpdate()
     }
@@ -89,6 +129,9 @@ final class StatusBarIconView: NSView {
         hasError = true
         isLoading = false
         addOnCost = 0
+        overrideText = nil
+        iconOnlyMode = false
+        isCriticalBadgeVisible = false
         redrawWithSizeUpdate()
     }
 
@@ -98,7 +141,9 @@ final class StatusBarIconView: NSView {
         let color = textColor
         let yOffset: CGFloat = 4
 
-        drawCopilotIcon(at: NSPoint(x: leftPadding, y: yOffset), size: iconSize, color: color)
+        let iconOrigin = NSPoint(x: leftPadding, y: yOffset)
+        drawCopilotIcon(at: iconOrigin, size: iconSize, color: color)
+        drawCriticalBadgeIfNeeded(iconOrigin: iconOrigin, iconSize: iconSize)
 
         if let statusText {
             let textOrigin = NSPoint(x: leftPadding + iconSize + textSpacing, y: yOffset)
@@ -131,6 +176,18 @@ final class StatusBarIconView: NSView {
         ]
         let attrString = NSAttributedString(string: text, attributes: attributes)
         attrString.draw(at: origin)
+    }
+
+    private func drawCriticalBadgeIfNeeded(iconOrigin: NSPoint, iconSize: CGFloat) {
+        guard isCriticalBadgeVisible, !isLoading, !hasError else { return }
+
+        let badgeX = iconOrigin.x + iconSize - criticalBadgeSize + criticalBadgeInset
+        let badgeY = iconOrigin.y + iconSize - criticalBadgeSize + criticalBadgeInset
+        let badgeRect = NSRect(x: badgeX, y: badgeY, width: criticalBadgeSize, height: criticalBadgeSize)
+
+        NSColor.systemRed.setFill()
+        let path = NSBezierPath(ovalIn: badgeRect)
+        path.fill()
     }
 
     private func redrawWithSizeUpdate() {
@@ -186,10 +243,6 @@ final class StatusBarIconView: NSView {
     }
 
     private func formatCost(_ cost: Double) -> String {
-        if cost >= 10 {
-            return String(format: "$%.1f", cost)
-        } else {
-            return String(format: "$%.2f", cost)
-        }
+        String(format: "$%.2f", cost)
     }
 }
