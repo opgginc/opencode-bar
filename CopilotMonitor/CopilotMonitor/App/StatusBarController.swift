@@ -78,6 +78,11 @@ final class StatusBarController: NSObject {
         case failedNoCache
     }
 
+    private enum GrowthEvent: String {
+        case shareSnapshotClicked = "share_snapshot_clicked"
+        case shareSnapshotXOpened = "share_snapshot_x_opened"
+    }
+
     struct HistoryUIState {
         let history: UsageHistory?
         let prediction: UsagePrediction?
@@ -249,6 +254,12 @@ final class StatusBarController: NSObject {
         installCLIItem.target = self
         menu.addItem(installCLIItem)
         updateCLIInstallState()
+
+        let shareSnapshotItem = NSMenuItem(title: "Share Usage Snapshot...", action: #selector(shareUsageSnapshotClicked), keyEquivalent: "")
+        shareSnapshotItem.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Share Usage Snapshot")
+        shareSnapshotItem.target = self
+        menu.addItem(shareSnapshotItem)
+        debugLog("setupMenu: Share Usage Snapshot menu item added")
 
         menu.addItem(NSMenuItem.separator())
 
@@ -1815,6 +1826,42 @@ final class StatusBarController: NSObject {
             NSWorkspace.shared.open(url)
         }
     }
+
+    @objc private func shareUsageSnapshotClicked() {
+        logger.info("Share Usage Snapshot triggered")
+        debugLog("shareUsageSnapshotClicked: started")
+        trackGrowthEvent(.shareSnapshotClicked)
+
+        guard let shareText = buildUsageShareSnapshotText() else {
+            debugLog("shareUsageSnapshotClicked: no provider results available")
+            showAlert(
+                title: "No Usage Data Yet",
+                message: "Refresh usage data first, then try sharing again."
+            )
+            return
+        }
+
+        copyToClipboard(shareText)
+        debugLog("shareUsageSnapshotClicked: snapshot copied to clipboard")
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.messageText = "Usage Snapshot Copied"
+        alert.informativeText = "Your usage summary is in the clipboard. Open X to share it now."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open X")
+        alert.addButton(withTitle: "Close")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            openXShareIntent(with: shareText)
+            trackGrowthEvent(.shareSnapshotXOpened)
+            debugLog("shareUsageSnapshotClicked: x intent opened")
+        } else {
+            debugLog("shareUsageSnapshotClicked: closed without opening x intent")
+        }
+    }
     
     @objc private func viewErrorDetailsClicked() {
         logger.info("⌨️ [Keyboard] ⌘E View Error Details triggered")
@@ -1956,7 +2003,105 @@ final class StatusBarController: NSObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        logger.info("Error log copied to clipboard")
+        logger.info("Text copied to clipboard")
+    }
+
+    private func buildUsageShareSnapshotText() -> String? {
+        guard !providerResults.isEmpty else {
+            return nil
+        }
+
+        let totalTracked = calculateTotalWithSubscriptions(
+            providerResults: providerResults,
+            copilotUsage: currentUsage
+        )
+        let payAsYouGoTotal = calculatePayAsYouGoTotal(
+            providerResults: providerResults,
+            copilotUsage: currentUsage
+        )
+        let subscriptionTotal = SubscriptionSettingsManager.shared.getTotalMonthlySubscriptionCost()
+
+        var lines = [
+            "My OpenCode Bar usage snapshot",
+            String(format: "- Total tracked this month: $%.2f", totalTracked),
+            String(format: "- Pay-as-you-go spend: $%.2f", payAsYouGoTotal),
+            String(format: "- Quota subscriptions: $%.2f/m", subscriptionTotal)
+        ]
+
+        if let topPayAsYouGo = topPayAsYouGoShareLine() {
+            lines.append("- \(topPayAsYouGo)")
+        }
+
+        if let topQuota = topQuotaShareLine() {
+            lines.append("- \(topQuota)")
+        }
+
+        lines.append("")
+        lines.append("Track your AI provider usage in one menu bar app:")
+        lines.append("https://github.com/opgginc/opencode-bar")
+
+        return lines.joined(separator: "\n")
+    }
+
+    private func topPayAsYouGoShareLine() -> String? {
+        var candidates: [(name: String, cost: Double)] = []
+
+        let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen]
+        for identifier in payAsYouGoOrder where isProviderEnabled(identifier) {
+            guard let result = providerResults[identifier] else { continue }
+            guard case .payAsYouGo(_, let cost, _) = result.usage else { continue }
+            guard let cost, cost > 0 else { continue }
+            candidates.append((name: identifier.displayName, cost: cost))
+        }
+
+        if isProviderEnabled(.copilot),
+           let copilotOverageCost = providerResults[.copilot]?.details?.copilotOverageCost,
+           copilotOverageCost > 0 {
+            candidates.append((name: "GitHub Copilot Add-on", cost: copilotOverageCost))
+        }
+
+        guard let top = candidates.max(by: { $0.cost < $1.cost }) else {
+            return nil
+        }
+
+        return String(format: "Top spend: %@ at $%.2f", top.name, top.cost)
+    }
+
+    private func topQuotaShareLine() -> String? {
+        let candidates = providerResults.compactMap { identifier, result -> (name: String, usagePercent: Double)? in
+            guard isProviderEnabled(identifier) else { return nil }
+            guard case .quotaBased = result.usage else { return nil }
+            return (name: identifier.displayName, usagePercent: max(0, result.usage.usagePercentage))
+        }
+
+        guard let top = candidates.max(by: { $0.usagePercent < $1.usagePercent }) else {
+            return nil
+        }
+
+        return String(format: "Highest quota usage: %@ at %.0f%% used", top.name, top.usagePercent)
+    }
+
+    private func openXShareIntent(with text: String) {
+        var components = URLComponents(string: "https://x.com/intent/post")
+        components?.queryItems = [URLQueryItem(name: "text", value: text)]
+
+        guard let url = components?.url else {
+            debugLog("openXShareIntent: failed to build URL")
+            return
+        }
+
+        NSWorkspace.shared.open(url)
+    }
+
+    private func trackGrowthEvent(_ event: GrowthEvent) {
+        let keyPrefix = "growth.\(event.rawValue)"
+        let countKey = "\(keyPrefix).count"
+        let timestampKey = "\(keyPrefix).lastTimestamp"
+        let count = UserDefaults.standard.integer(forKey: countKey) + 1
+        UserDefaults.standard.set(count, forKey: countKey)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: timestampKey)
+        logger.info("Growth event recorded: \(event.rawValue, privacy: .public), count: \(count)")
+        debugLog("growthEvent: \(event.rawValue), count=\(count)")
     }
     
     private func showCopiedConfirmation() {
