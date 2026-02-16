@@ -1010,7 +1010,7 @@ final class StatusBarController: NSObject {
                         }
 
                         // Build percentage array for display
-                        // Claude: show 5h, 7d, and extra usage (if enabled)
+                        // Claude: show 5h, 7d, and Sonnet weekly usage
                         // Kimi: show both 5h and 7d usage windows
                         // Codex: show base primary/weekly plus Spark primary/weekly windows
                         // Z.AI: show both 5h token window and MCP usage
@@ -1021,12 +1021,8 @@ final class StatusBarController: NSObject {
                            let fiveHour = details.fiveHourUsage,
                            let sevenDay = details.sevenDayUsage {
                             var percents: [Double] = [fiveHour, sevenDay]
-                            if details.extraUsageEnabled == true,
-                               let limitUSD = details.extraUsageMonthlyLimitUSD,
-                               limitUSD > 0 {
-                                let usedUSD = details.extraUsageUsedUSD ?? 0
-                                let percent = details.extraUsageUtilizationPercent ?? ((usedUSD / limitUSD) * 100)
-                                percents.append(percent)
+                            if let sonnetUsage = details.sonnetUsage {
+                                percents.append(sonnetUsage)
                             }
                             usedPercents = percents
                         } else if identifier == .kimi,
@@ -1074,12 +1070,8 @@ final class StatusBarController: NSObject {
                        let fiveHour = details.fiveHourUsage,
                        let sevenDay = details.sevenDayUsage {
                         var percents: [Double] = [fiveHour, sevenDay]
-                        if details.extraUsageEnabled == true,
-                           let limitUSD = details.extraUsageMonthlyLimitUSD,
-                           limitUSD > 0 {
-                            let usedUSD = details.extraUsageUsedUSD ?? 0
-                            let percent = details.extraUsageUtilizationPercent ?? ((usedUSD / limitUSD) * 100)
-                            percents.append(percent)
+                        if let sonnetUsage = details.sonnetUsage {
+                            percents.append(sonnetUsage)
                         }
                         usedPercents = percents
                     } else if identifier == .kimi,
