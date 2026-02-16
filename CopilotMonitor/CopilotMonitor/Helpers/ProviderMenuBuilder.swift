@@ -305,18 +305,17 @@ extension StatusBarController {
 
                     let rows = createUsageWindowRow(label: "Extra (Monthly)", usagePercent: percent)
                     rows.forEach { submenu.addItem($0) }
+                    debugLog("createDetailSubmenu(claude): rendering Extra Usage limit rows without left indent")
 
                     let limitItem = NSMenuItem()
                     limitItem.view = createDisabledLabelView(
-                        text: String(format: "Limit: $%.2f/m", limitUSD),
-                        indent: MenuDesignToken.Spacing.submenuIndent
+                        text: String(format: "Limit: $%.2f/m", limitUSD)
                     )
                     submenu.addItem(limitItem)
 
                     let usedItem = NSMenuItem()
                     usedItem.view = createDisabledLabelView(
-                        text: String(format: "Used: $%.2f", usedUSD),
-                        indent: MenuDesignToken.Spacing.submenuIndent
+                        text: String(format: "Used: $%.2f", usedUSD)
                     )
                     submenu.addItem(usedItem)
                 }
@@ -1262,13 +1261,16 @@ extension StatusBarController {
             rightTextField.isHidden = false
         } else {
             debugLog("createPaceView: predict label computed: \(paceInfo.predictText)")
+            let isPredictWarning = paceInfo.status == .slightlyFast || paceInfo.status == .tooFast
+            let predictValueColor: NSColor = isPredictWarning ? emphasisColor : .secondaryLabelColor
+            debugLog("createPaceView: predict color mode = \(isPredictWarning ? "warning" : "default"), status = \(paceInfo.status)")
             rightAttributedString.append(NSAttributedString(
                 string: "Predict: ",
                 attributes: [.font: NSFont.systemFont(ofSize: fontSize), .foregroundColor: NSColor.secondaryLabelColor]
             ))
             rightAttributedString.append(NSAttributedString(
                 string: paceInfo.predictText,
-                attributes: [.font: NSFont.systemFont(ofSize: fontSize), .foregroundColor: emphasisColor]
+                attributes: [.font: NSFont.systemFont(ofSize: fontSize), .foregroundColor: predictValueColor]
             ))
             rightTextField.isHidden = false
         }
