@@ -1155,12 +1155,12 @@ final class StatusBarController: NSObject {
                 usage: result.usage,
                 details: result.details
             ) ?? min(max(result.usage.usagePercentage, 0.0), 999.0)
-            return "\(provider) \(String(format: "%.0f%% used", percent))"
+            return "\(provider) \(String(format: "%.0f%%", percent))"
         }
     }
 
     private func formatAlertText(identifier: ProviderIdentifier, usedPercent: Double) -> String {
-        let usageText = String(format: "%.0f%% used", usedPercent)
+        let usageText = String(format: "%.0f%%", usedPercent)
         if showProviderName {
             return "\(identifier.shortDisplayName) \(usageText)"
         }
@@ -1174,7 +1174,7 @@ final class StatusBarController: NSObject {
             return showProviderName ? "\(identifier.shortDisplayName) \(costText)" : costText
         case .quotaBased:
             let maxPercent = preferredUsedPercentForStatusBar(identifier: identifier, result: result) ?? result.usage.usagePercentage
-            let usageText = String(format: "%.0f%% used", maxPercent)
+            let usageText = String(format: "%.0f%%", maxPercent)
             return showProviderName ? "\(identifier.shortDisplayName) \(usageText)" : usageText
         }
     }

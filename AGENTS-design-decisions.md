@@ -100,6 +100,7 @@ Quit (⌘Q)
 - **Prefer to use 'used' instead of 'left'**: Prefer to use percentage is "used" instead of "left/remaining"
   - ✅ `3h: 75% used`
   - ❌ `23%` (ambiguous - is it used or remaining?)
+    - But this is allowed when the display needs to be very compact
   - ❌ `23% remaining`
 - **Specify time**: Always include time component when displaying quota with time limits
   - ✅ `5h: 60% used`
@@ -112,6 +113,7 @@ Quit (⌘Q)
   - Format: `Token From: <path>` in submenu
   - Examples: `~/.local/share/opencode/auth.json`, `VS Code`, `Keychain`
 - **Status Bar Percent Priority (IMMUTABLE) FOR macOS TOP STATUS BAR**: `Status Bar Percent` uses a **SINGLE** fixed window priority
+  - Text text should be super short and compact.
   - Priority order: `Weekly` → `Monthly` → `Daily` → `Hourly` → fallback
     - Fallback means using provider aggregate usage only when no explicit window metric exists
   - If multiple values exist in the same priority window, display the highest one
