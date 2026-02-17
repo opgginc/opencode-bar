@@ -742,7 +742,8 @@ extension StatusBarController {
             submenu.addItem(item)
         }
 
-        if let authSource = details.authSource {
+        // Skip generic "Token From:" for providers that already render it in their case block above.
+        if let authSource = details.authSource, identifier != .copilot {
             submenu.addItem(NSMenuItem.separator())
             let authItem = NSMenuItem()
             authItem.view = createDisabledLabelView(
