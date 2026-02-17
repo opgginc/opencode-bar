@@ -48,6 +48,7 @@
 		CLICLAUDE11111111111111 /* ClaudeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DDC1B4DE6B5118CE4AE8F82 /* ClaudeProvider.swift */; };
 		CLICODEX111111111111111 /* CodexProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76783C44AA2329AE3FA7E981 /* CodexProvider.swift */; };
 		CLICOPILOT11111111111111 /* CopilotCLIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLICOPILOT22222222222222 /* CopilotCLIProvider.swift */; };
+		CLICOPILOTUSAGE111111111 /* CopilotUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22222222222222222222222 /* CopilotUsage.swift */; };
 		CLICOPY111111111111111111 /* opencodebar-cli in Embed CLI */ = {isa = PBXBuildFile; fileRef = CLI5555555555555555555555 /* opencodebar-cli */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		CLIHISTORY11111111111111 /* CopilotHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B1085A77EF4A58E5B5EC71B /* CopilotHistoryService.swift */; };
 		CLIKIMI1111111111111111 /* KimiProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = KI2222222222222222222222 /* KimiProvider.swift */; };
@@ -565,6 +566,7 @@
 			CLIPROVMGR11111111111111 /* CLIProviderManager.swift in Sources */,
 			CLICOPILOT11111111111111 /* CopilotCLIProvider.swift in Sources */,
 			CLIHISTORY11111111111111 /* CopilotHistoryService.swift in Sources */,
+			CLICOPILOTUSAGE111111111 /* CopilotUsage.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};
