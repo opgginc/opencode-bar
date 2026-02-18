@@ -68,6 +68,8 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 | **Nano-GPT** | Quota-based | Daily/monthly unit quotas, USD/NANO balance |
 | **Kimi for Coding (Kimi K2.5)** | Quota-based | Usage limits, membership level, reset time |
 | **Z.AI Coding Plan** | Quota-based | Token/MCP quotas, model usage, tool usage (24h) |
+| **Brave Search** | Quota-based | Monthly search quota, reset schedule |
+| **Tavily** | Quota-based | Monthly search quota, plan usage |
 | **Synthetic** | Quota-based | 5h usage limit, request limits, reset time |
 | **Antigravity** | Quota-based | Local language server monitoring |
 | **Chutes AI** | Quota-based | Daily quota limits (300/2000/5000), credits balance |
