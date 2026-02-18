@@ -2307,8 +2307,18 @@ final class TokenManager: @unchecked Sendable {
     func getTavilyAPIKey() -> String? {
         guard let config = readOpenCodeConfigJSON() else { return nil }
 
+        let envKey = nestedString(in: config, path: ["mcp", "tavily", "environment", "TAVILY_API_KEY"])
+        if let resolved = resolveConfigValue(envKey) {
+            return resolved
+        }
+
         let authorization = nestedString(in: config, path: ["mcp", "tavily", "headers", "Authorization"])
-        return resolveConfigValue(authorization)
+        if let resolved = resolveConfigValue(authorization) {
+            return resolved
+        }
+
+        let headerKey = nestedString(in: config, path: ["mcp", "tavily", "headers", "X-API-Key"])
+        return resolveConfigValue(headerKey)
     }
 
     func getBraveSearchAPIKey() -> String? {

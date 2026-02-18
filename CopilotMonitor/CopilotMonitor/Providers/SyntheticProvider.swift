@@ -116,6 +116,12 @@ final class SyntheticProvider: ProviderProtocol {
 private let tavilyLogger = Logger(subsystem: "com.opencodeproviders", category: "TavilySearchProvider")
 private let braveSearchLogger = Logger(subsystem: "com.opencodeproviders", category: "BraveSearchProvider")
 
+private func normalizedQuotaUsagePercent(used: Int, limit: Int) -> Double? {
+    guard limit > 0 else { return nil }
+    let percent = (Double(used) / Double(limit)) * 100.0
+    return min(max(percent, 0), 100)
+}
+
 private struct TavilyUsageResponse: Decodable {
     struct Account: Decodable {
         let currentPlan: String?
@@ -265,6 +271,7 @@ final class TavilySearchProvider: ProviderProtocol {
 
         let remaining = max(0, resolvedLimit - resolvedUsed)
         let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: resolvedLimit, overagePermitted: false)
+        let mcpUsagePercent = normalizedQuotaUsagePercent(used: resolvedUsed, limit: resolvedLimit)
 
         let authSource = tokenManager.lastFoundOpenCodeConfigPath?.path ?? "~/.config/opencode/opencode.json"
         let resetText = formatEstimatedMonthlyResetText()
@@ -274,10 +281,12 @@ final class TavilySearchProvider: ProviderProtocol {
             limitRemaining: Double(remaining),
             resetPeriod: resetText,
             authSource: authSource,
-            authUsageSummary: decoded.account?.currentPlan ?? "Auto refresh"
+            authUsageSummary: decoded.account?.currentPlan ?? "Auto refresh",
+            mcpUsagePercent: mcpUsagePercent
         )
 
-        tavilyLogger.info("Tavily usage fetched: \(resolvedUsed)/\(resolvedLimit)")
+        let percentLogValue = mcpUsagePercent.map { String(format: "%.2f", $0) } ?? "nil"
+        tavilyLogger.info("Tavily usage fetched: used=\(resolvedUsed), limit=\(resolvedLimit), usedPercent=\(percentLogValue)")
         return ProviderResult(usage: usage, details: details)
     }
 
@@ -351,6 +360,7 @@ final class BraveSearchProvider: ProviderProtocol {
         }
 
         let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: limit, overagePermitted: false)
+        let mcpUsagePercent = normalizedQuotaUsagePercent(used: used, limit: limit)
         let resetText = formatResetText(seconds: state.lastResetSeconds)
         let authSource = tokenManager.lastFoundOpenCodeConfigPath?.path ?? "~/.config/opencode/opencode.json"
         let sourceSummary = mode == .eventOnly ? "Estimated (event-based)" : "Mode: \(mode.title)"
@@ -361,8 +371,12 @@ final class BraveSearchProvider: ProviderProtocol {
             limitRemaining: Double(remaining),
             resetPeriod: resetText,
             authSource: authSource,
-            authUsageSummary: sourceSummary
+            authUsageSummary: sourceSummary,
+            mcpUsagePercent: mcpUsagePercent
         )
+
+        let percentLogValue = mcpUsagePercent.map { String(format: "%.2f", $0) } ?? "nil"
+        braveSearchLogger.info("Brave Search usage computed: mode=\(mode.title), used=\(used), limit=\(limit), usedPercent=\(percentLogValue)")
 
         return ProviderResult(usage: usage, details: details)
     }
@@ -389,8 +403,11 @@ final class BraveSearchProvider: ProviderProtocol {
         var mutable = state
         let currentMonth = monthKey(for: Date())
         if mutable.eventMonth != currentMonth {
+            let previousMonth = mutable.eventMonth
             mutable.eventMonth = currentMonth
             mutable.eventEstimatedUsed = 0
+            mutable.eventCursor = nil
+            braveSearchLogger.info("Brave Search month rollover: previousMonth=\(previousMonth), currentMonth=\(currentMonth), cursorCleared=true")
         }
         return mutable
     }
@@ -434,6 +451,8 @@ final class BraveSearchProvider: ProviderProtocol {
         defaults.set(state.eventEstimatedUsed, forKey: BravePrefKey.eventEstimatedUsed)
         if let cursor = state.eventCursor {
             defaults.set(cursor, forKey: BravePrefKey.eventCursor)
+        } else {
+            defaults.removeObject(forKey: BravePrefKey.eventCursor)
         }
         defaults.set(state.eventMonth, forKey: BravePrefKey.eventMonth)
     }
