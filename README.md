@@ -1,18 +1,11 @@
-## Weekly Changelog (Feb 10-16, 2026)
+## Weekly Changelog (Feb 17-23, 2026)
 
 ### Highlights
-- Added Nano-GPT provider support across the menu app and CLI ([#76](https://github.com/opgginc/opencode-bar/pull/76)).
-- Added Codex LB account discovery and improved Codex Spark usage parsing ([#74](https://github.com/opgginc/opencode-bar/pull/74), [#77](https://github.com/opgginc/opencode-bar/pull/77)).
-- Added Gemini CLI auto-detection with account-aware labeling and metadata support ([#75](https://github.com/opgginc/opencode-bar/pull/75)).
-- Improved menu/status panel presentation and compact menu bar icon width behavior ([#79](https://github.com/opgginc/opencode-bar/pull/79), [#80](https://github.com/opgginc/opencode-bar/pull/80)).
+- Added a Share Usage Snapshot menu action that copies a usage summary, offers an X share prompt, and tracks share growth events.
+- Published the weekly changelog entry in the README ([#82](https://github.com/opgginc/opencode-bar/pull/82)).
 
 ### Key PRs
-- [#80](https://github.com/opgginc/opencode-bar/pull/80) Reduce status bar icon width on the Mac Menu Bar
-- [#79](https://github.com/opgginc/opencode-bar/pull/79) Align status panel styling
-- [#77](https://github.com/opgginc/opencode-bar/pull/77) Add Codex Spark window grouping and fallback parsing
-- [#76](https://github.com/opgginc/opencode-bar/pull/76) Add Nano-GPT provider across app and CLI
-- [#75](https://github.com/opgginc/opencode-bar/pull/75) Add Gemini CLI auto-detection
-- [#74](https://github.com/opgginc/opencode-bar/pull/74) Add Codex LB account discovery to status bar menu
+- [#82](https://github.com/opgginc/opencode-bar/pull/82) Add weekly changelog entry
 
 ---
 
