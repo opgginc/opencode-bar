@@ -51,7 +51,7 @@ find_opencode_bin() {
     return 1
 }
 
-OPENCODE_BIN=$(find_opencode_bin)
+OPENCODE_BIN=$(find_opencode_bin || true)
 if [[ -z "$OPENCODE_BIN" ]]; then
     echo "Error: OpenCode CLI not found. Please ensure 'opencode' is in your PATH." >&2
     echo "Searched: PATH, login shell PATH, and common installation locations." >&2
