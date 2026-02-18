@@ -38,7 +38,9 @@ actor ProviderManager {
             OpenCodeZenProvider(),
             KimiProvider(),
             ChutesProvider(),
-            SyntheticProvider()
+            SyntheticProvider(),
+            TavilySearchProvider(),
+            BraveSearchProvider()
         ]
     }
 

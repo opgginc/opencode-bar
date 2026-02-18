@@ -564,6 +564,13 @@ final class TokenManager: @unchecked Sendable {
     private var cachedCopilotAccounts: [CopilotAuthAccount]?
     private var copilotAccountsCacheTimestamp: Date?
 
+    /// Cached OpenCode config JSON (opencode.json)
+    private var cachedOpenCodeConfigJSON: [String: Any]?
+    private var openCodeConfigCacheTimestamp: Date?
+
+    /// Path where opencode.json was found
+    private(set) var lastFoundOpenCodeConfigPath: URL?
+
     private init() {
         logger.info("TokenManager initialized")
     }
@@ -604,6 +611,125 @@ final class TokenManager: @unchecked Sendable {
         paths.append(macOSPath)
 
         return paths
+    }
+
+    /// Possible opencode.json locations in priority order:
+    /// 1. $XDG_CONFIG_HOME/opencode/opencode.json (if XDG_CONFIG_HOME is set)
+    /// 2. ~/.config/opencode/opencode.json (XDG default on macOS/Linux)
+    /// 3. ~/.local/share/opencode/opencode.json (fallback)
+    /// 4. ~/Library/Application Support/opencode/opencode.json (macOS fallback)
+    func getOpenCodeConfigFilePaths() -> [URL] {
+        let fileManager = FileManager.default
+        let homeDir = fileManager.homeDirectoryForCurrentUser
+        var paths: [URL] = []
+
+        if let xdgConfigHome = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"], !xdgConfigHome.isEmpty {
+            let xdgPath = URL(fileURLWithPath: xdgConfigHome)
+                .appendingPathComponent("opencode")
+                .appendingPathComponent("opencode.json")
+            paths.append(xdgPath)
+        }
+
+        let xdgDefaultPath = homeDir
+            .appendingPathComponent(".config")
+            .appendingPathComponent("opencode")
+            .appendingPathComponent("opencode.json")
+        paths.append(xdgDefaultPath)
+
+        let localSharePath = homeDir
+            .appendingPathComponent(".local")
+            .appendingPathComponent("share")
+            .appendingPathComponent("opencode")
+            .appendingPathComponent("opencode.json")
+        paths.append(localSharePath)
+
+        let macOSPath = homeDir
+            .appendingPathComponent("Library")
+            .appendingPathComponent("Application Support")
+            .appendingPathComponent("opencode")
+            .appendingPathComponent("opencode.json")
+        paths.append(macOSPath)
+
+        return paths
+    }
+
+    private func readOpenCodeConfigJSON() -> [String: Any]? {
+        return queue.sync {
+            if let cached = cachedOpenCodeConfigJSON,
+               let timestamp = openCodeConfigCacheTimestamp,
+               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+                return cached
+            }
+
+            let fileManager = FileManager.default
+            let paths = getOpenCodeConfigFilePaths()
+            for configPath in paths {
+                guard fileManager.fileExists(atPath: configPath.path) else {
+                    continue
+                }
+                guard fileManager.isReadableFile(atPath: configPath.path) else {
+                    logger.warning("OpenCode config file not readable at \(configPath.path)")
+                    continue
+                }
+
+                do {
+                    let data = try Data(contentsOf: configPath)
+                    let jsonObject = try JSONSerialization.jsonObject(with: data)
+                    guard let dict = jsonObject as? [String: Any] else {
+                        logger.warning("OpenCode config is not a JSON object at \(configPath.path)")
+                        continue
+                    }
+
+                    lastFoundOpenCodeConfigPath = configPath
+                    cachedOpenCodeConfigJSON = dict
+                    openCodeConfigCacheTimestamp = Date()
+                    return dict
+                } catch {
+                    logger.warning("Failed to parse OpenCode config at \(configPath.path): \(error.localizedDescription)")
+                }
+            }
+
+            lastFoundOpenCodeConfigPath = nil
+            cachedOpenCodeConfigJSON = nil
+            openCodeConfigCacheTimestamp = nil
+            return nil
+        }
+    }
+
+    private func resolveConfigValue(_ rawValue: String?) -> String? {
+        guard var value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+
+        if value.hasPrefix("Bearer ") {
+            value = String(value.dropFirst("Bearer ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if value.hasPrefix("{env:"), value.hasSuffix("}") {
+            let start = value.index(value.startIndex, offsetBy: 5)
+            let end = value.index(before: value.endIndex)
+            let envName = String(value[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !envName.isEmpty else { return nil }
+            let envValue = ProcessInfo.processInfo.environment[envName]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (envValue?.isEmpty == false) ? envValue : nil
+        }
+
+        return value.isEmpty ? nil : value
+    }
+
+    private func nestedString(
+        in dictionary: [String: Any],
+        path: [String]
+    ) -> String? {
+        guard !path.isEmpty else { return nil }
+        var current: Any = dictionary
+        for key in path {
+            guard let nested = current as? [String: Any], let next = nested[key] else {
+                return nil
+            }
+            current = next
+        }
+        return current as? String
     }
 
     /// Returns the path where auth.json was found, or nil if not found
@@ -2176,6 +2302,25 @@ final class TokenManager: @unchecked Sendable {
     func getChutesAPIKey() -> String? {
         guard let auth = readOpenCodeAuth() else { return nil }
         return auth.chutes?.key
+    }
+
+    func getTavilyAPIKey() -> String? {
+        guard let config = readOpenCodeConfigJSON() else { return nil }
+
+        let authorization = nestedString(in: config, path: ["mcp", "tavily", "headers", "Authorization"])
+        return resolveConfigValue(authorization)
+    }
+
+    func getBraveSearchAPIKey() -> String? {
+        guard let config = readOpenCodeConfigJSON() else { return nil }
+
+        let envKey = nestedString(in: config, path: ["mcp", "brave-search", "environment", "BRAVE_API_KEY"])
+        if let resolved = resolveConfigValue(envKey) {
+            return resolved
+        }
+
+        let headerKey = nestedString(in: config, path: ["mcp", "brave-search", "headers", "X-Subscription-Token"])
+        return resolveConfigValue(headerKey)
     }
 
     /// Gets Gemini refresh token from discovered Gemini account sources
