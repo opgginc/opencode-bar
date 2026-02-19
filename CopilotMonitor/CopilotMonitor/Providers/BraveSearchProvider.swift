@@ -368,7 +368,16 @@ final class BraveSearchProvider: ProviderProtocol {
 
     private func readBraveToolRecord(at path: String) -> BraveToolRecord? {
         guard let data = fileManager.contents(atPath: path) else { return nil }
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        let jsonObject: Any
+        do {
+            jsonObject = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            braveSearchLogger.warning("Failed to decode Brave tool record at path=\(path): \(error.localizedDescription)")
+            return nil
+        }
+
+        guard let json = jsonObject as? [String: Any] else {
+            braveSearchLogger.warning("Failed to decode Brave tool record at path=\(path): unexpected JSON root type")
             return nil
         }
 
