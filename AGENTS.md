@@ -56,6 +56,7 @@ let width = MenuDesignToken.Dimension.menuWidth      // 300
 let height = MenuDesignToken.Dimension.itemHeight    // 22
 let fontSize = MenuDesignToken.Dimension.fontSize    // 13
 let iconSize = MenuDesignToken.Dimension.iconSize    // 16
+let geminiIconSize = MenuDesignToken.Dimension.geminiIconSize // 17
 
 let leading = MenuDesignToken.Spacing.leadingOffset      // 14
 let leadingIcon = MenuDesignToken.Spacing.leadingWithIcon // 36
@@ -356,6 +357,12 @@ func buildProviderSubmenu() -> [NSMenuItem] {
        - Solution: Use `self.effectiveAppearance` (view's own appearance) for NSStatusBarButton contexts
        - Vertical Alignment: Adjust offset from `y:3` to `y:4/5` for better visual alignment with other menu bar items
        - Pattern: Always check appearance at the view level, not the app level
+    - **Status Bar Provider Icon Layering & Gemini Scale**:
+       - Keep Original Icon: The primary OpenCode Bar status icon must remain visible at all times
+       - Additive Provider Icon: Provider identity icon is appended next to the primary icon, not substituted
+       - Setting Label: Use `Show Provider Icon` naming for status bar option labels
+       - Gemini Scale Rule: Gemini provider icon should render slightly larger than default provider icons
+       - Token Rule: Use `MenuDesignToken.Dimension.geminiIconSize` for Gemini-sized assets
     - **Cache Timezone Consistency**:
        - UTC vs Local Timezone Mismatch: Cache dates stored in UTC but calendar was using local timezone (KST)
        - Comparison Failures: `isDate(..., inSameDayAs:)` comparisons failing due to timezone mismatch

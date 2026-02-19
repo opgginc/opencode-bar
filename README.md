@@ -302,7 +302,13 @@ Quit (⌘Q)
 
 - **Menu Bar Display**: Choose one of `Total Cost`, `Icon Only`, or `Only Show`.
 - **Critical Badge**: Toggle on/off to show or hide the critical-usage badge.
-- **Show Provider Name**: Toggle on/off to include provider names in status bar text.
+- **Show Provider Icon**: Toggle on/off to append the selected provider icon in the status bar.
+
+> **Status Bar Icon Behavior**:
+> The primary OpenCode Bar status icon always stays visible. Provider icons are rendered as an additional icon next to the primary icon (not a replacement).
+>
+> **Gemini Icon Sizing**:
+> Gemini uses a slightly larger icon size than other providers in both menu rows and the status bar to match the official visual balance.
 
 > **Note**: Subscription settings are only available for quota-based providers. Pay-as-you-go providers do not have subscription options since they charge based on actual usage.
 >
