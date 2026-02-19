@@ -64,8 +64,9 @@ final class NanoGptProviderTests: XCTestCase {
         let usageJSON = """
         {
           "active": true,
-          "limits": { "daily": 5000, "monthly": 60000 },
+          "limits": { "daily": 5000, "weeklyInputTokens": 35000, "monthly": 60000 },
           "daily": { "used": 5, "remaining": 4995, "percentUsed": 0.001, "resetAt": 1738540800000 },
+          "weeklyInputTokens": { "used": 1200, "remaining": 33800, "percentUsed": 0.0342857, "resetAt": 1738886400000 },
           "monthly": { "used": 45, "remaining": 59955, "percentUsed": 0.00075, "resetAt": 1739404800000 },
           "period": { "currentPeriodEnd": "2025-02-13T23:59:59.000Z" }
         }
@@ -113,9 +114,11 @@ final class NanoGptProviderTests: XCTestCase {
         XCTAssertEqual(result.details?.mcpUsageUsed, 45)
         XCTAssertEqual(result.details?.mcpUsageTotal, 60000)
         XCTAssertEqual(result.details?.tokenUsagePercent ?? -1, 0.1, accuracy: 0.001)
+        XCTAssertEqual(result.details?.sevenDayUsage ?? -1, 3.42857, accuracy: 0.001)
         XCTAssertEqual(result.details?.mcpUsagePercent ?? -1, 0.075, accuracy: 0.001)
         XCTAssertEqual(result.details?.creditsBalance ?? -1, 129.46956147, accuracy: 0.0000001)
         XCTAssertEqual(result.details?.totalCredits ?? -1, 26.71801147, accuracy: 0.0000001)
+        XCTAssertNotNil(result.details?.sevenDayReset)
         XCTAssertNotNil(result.details?.mcpUsageReset)
     }
 
@@ -188,5 +191,51 @@ final class NanoGptProviderTests: XCTestCase {
         }
         XCTAssertNil(result.details?.creditsBalance)
         XCTAssertNil(result.details?.totalCredits)
+    }
+
+    func testFetchParsesWeeklyInputTokensFromSnakeCaseVariants() async throws {
+        guard TokenManager.shared.getNanoGptAPIKey() != nil else {
+            throw XCTSkip("Nano-GPT API key not available; skipping fetch test.")
+        }
+
+        let session = makeSession()
+        let provider = NanoGptProvider(tokenManager: .shared, session: session)
+
+        let usageJSON = """
+        {
+          "active": true,
+          "limits": { "daily": 5000, "weekly_input_tokens": 35000, "monthly": 60000 },
+          "daily": { "used": 10, "remaining": 4990, "percent_used": "0.2%", "reset_at": 1738540800000 },
+          "input_tokens": {
+            "weekly_input_tokens": {
+              "usage": 1750,
+              "left": 33250,
+              "usage_percent": 5,
+              "next_reset_at": 1738886400000
+            }
+          },
+          "monthly": { "used": 100, "remaining": 59900, "percentUsed": 0.001666, "resetAt": 1739404800000 }
+        }
+        """
+
+        MockURLProtocol.requestHandler = { request in
+            guard let url = request.url else {
+                throw URLError(.badURL)
+            }
+
+            if url.path == "/api/subscription/v1/usage" {
+                let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                return (response, Data(usageJSON.utf8))
+            }
+
+            let response = HTTPURLResponse(url: url, statusCode: 500, httpVersion: nil, headerFields: nil)!
+            return (response, Data("{}".utf8))
+        }
+
+        let result = try await provider.fetch()
+
+        XCTAssertEqual(result.details?.tokenUsagePercent ?? -1, 0.2, accuracy: 0.001)
+        XCTAssertEqual(result.details?.sevenDayUsage ?? -1, 5.0, accuracy: 0.001)
+        XCTAssertNotNil(result.details?.sevenDayReset)
     }
 }

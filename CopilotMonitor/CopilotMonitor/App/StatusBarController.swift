@@ -916,6 +916,7 @@ final class StatusBarController: NSObject {
             add(details?.mcpUsagePercent, priority: .monthly)
             add(details?.tokenUsagePercent, priority: .hourly)
         case .nanoGpt:
+            add(details?.sevenDayUsage, priority: .weekly)
             add(details?.mcpUsagePercent, priority: .monthly)
             add(details?.tokenUsagePercent, priority: .daily)
         case .chutes:
@@ -1839,7 +1840,11 @@ final class StatusBarController: NSObject {
                             let percents = [account.details?.tokenUsagePercent, account.details?.mcpUsagePercent].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else if identifier == .nanoGpt {
-                            let percents = [account.details?.tokenUsagePercent, account.details?.mcpUsagePercent].compactMap { $0 }
+                            let percents = [
+                                account.details?.sevenDayUsage,
+                                account.details?.tokenUsagePercent,
+                                account.details?.mcpUsagePercent
+                            ].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else {
                             usedPercents = [account.usage.usagePercentage]
@@ -1888,7 +1893,11 @@ final class StatusBarController: NSObject {
                         let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else if identifier == .nanoGpt {
-                        let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
+                        let percents = [
+                            result.details?.sevenDayUsage,
+                            result.details?.tokenUsagePercent,
+                            result.details?.mcpUsagePercent
+                        ].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else {
                         usedPercents = [singlePercent]

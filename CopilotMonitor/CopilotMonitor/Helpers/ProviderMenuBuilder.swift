@@ -582,6 +582,21 @@ extension StatusBarController {
             addSubscriptionItems(to: submenu, provider: .zaiCodingPlan, accountId: accountId)
 
         case .nanoGpt:
+            if let weeklyUsage = details.sevenDayUsage {
+                let rows = createUsageWindowRow(
+                    label: "Weekly Input Tokens",
+                    usagePercent: weeklyUsage,
+                    resetDate: details.sevenDayReset,
+                    windowHours: 24 * 7
+                )
+                rows.forEach { submenu.addItem($0) }
+            }
+
+            if details.sevenDayUsage != nil,
+               details.tokenUsagePercent != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+
             if let dailyUsage = details.tokenUsagePercent {
                 let rows = createUsageWindowRow(
                     label: "Daily",
