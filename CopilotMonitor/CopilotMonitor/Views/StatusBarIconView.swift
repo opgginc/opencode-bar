@@ -7,6 +7,7 @@ private let statusBarIconLogger = Logger(subsystem: "com.opencodeproviders", cat
 final class StatusBarIconView: NSView {
     private var addOnCost: Double = 0
     private var overrideText: String?
+    private var overrideProviderIcon: NSImage?
     private var iconOnlyMode = false
     private var isCriticalBadgeVisible = false
     private var isLoading = false
@@ -19,6 +20,8 @@ final class StatusBarIconView: NSView {
 
     private let leftPadding: CGFloat = 2
     private let iconSize: CGFloat = 16
+    private let providerIconSize: CGFloat = 12
+    private let providerIconSpacing: CGFloat = 3
     private let textSpacing: CGFloat = 4
     private let trailingPadding: CGFloat = 2
     private let statusBarHeight: CGFloat = 23
@@ -55,6 +58,25 @@ final class StatusBarIconView: NSView {
         isLoading ? "dollarsign.circle.fill" : "gauge.medium"
     }
 
+    private var providerIcon: NSImage? {
+        guard !isLoading, !hasError else { return nil }
+        return overrideProviderIcon
+    }
+
+    private var shouldShowProviderIcon: Bool {
+        providerIcon != nil
+    }
+
+    private func effectiveProviderIconSize(for icon: NSImage) -> CGFloat {
+        guard icon.size.width > 0 else { return providerIconSize }
+
+        if icon.size.width >= MenuDesignToken.Dimension.geminiIconSize {
+            return providerIconSize + 2
+        }
+
+        return providerIconSize
+    }
+
     deinit {
         stopLoadingAnimation()
     }
@@ -67,14 +89,18 @@ final class StatusBarIconView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        let iconWidth = leftPadding + iconSize + trailingPadding
+        var totalWidth = leftPadding + iconSize
 
-        guard let statusText else {
-            return NSSize(width: iconWidth, height: statusBarHeight)
+        if let providerIcon {
+            totalWidth += providerIconSpacing + effectiveProviderIconSize(for: providerIcon)
         }
 
-        let textWidth = (statusText as NSString).size(withAttributes: [.font: statusTextFont]).width
-        let totalWidth = iconWidth + textSpacing + textWidth + trailingPadding
+        if let statusText {
+            let textWidth = (statusText as NSString).size(withAttributes: [.font: statusTextFont]).width
+            totalWidth += textSpacing + textWidth
+        }
+
+        totalWidth += trailingPadding
         return NSSize(width: totalWidth, height: statusBarHeight)
     }
 
@@ -82,6 +108,7 @@ final class StatusBarIconView: NSView {
         stopLoadingAnimation()
         addOnCost = cost
         overrideText = nil
+        overrideProviderIcon = nil
         iconOnlyMode = false
         isLoading = false
         hasError = false
@@ -89,9 +116,14 @@ final class StatusBarIconView: NSView {
     }
 
     func update(displayText: String) {
+        update(displayText: displayText, providerIcon: nil)
+    }
+
+    func update(displayText: String, providerIcon: NSImage?) {
         stopLoadingAnimation()
         addOnCost = 0
         overrideText = displayText
+        overrideProviderIcon = providerIcon
         iconOnlyMode = false
         isLoading = false
         hasError = false
@@ -99,9 +131,14 @@ final class StatusBarIconView: NSView {
     }
 
     func updateIconOnly() {
+        updateIconOnly(providerIcon: nil)
+    }
+
+    func updateIconOnly(providerIcon: NSImage?) {
         stopLoadingAnimation()
         addOnCost = 0
         overrideText = nil
+        overrideProviderIcon = providerIcon
         iconOnlyMode = true
         isLoading = false
         hasError = false
@@ -118,6 +155,7 @@ final class StatusBarIconView: NSView {
         isLoading = true
         hasError = false
         overrideText = nil
+        overrideProviderIcon = nil
         iconOnlyMode = false
         isCriticalBadgeVisible = false
         startLoadingAnimation()
@@ -130,6 +168,7 @@ final class StatusBarIconView: NSView {
         isLoading = false
         addOnCost = 0
         overrideText = nil
+        overrideProviderIcon = nil
         iconOnlyMode = false
         isCriticalBadgeVisible = false
         redrawWithSizeUpdate()
@@ -141,24 +180,44 @@ final class StatusBarIconView: NSView {
         let color = textColor
         let yOffset: CGFloat = 4
 
-        let iconOrigin = NSPoint(x: leftPadding, y: yOffset)
-        drawCopilotIcon(at: iconOrigin, size: iconSize, color: color)
-        drawCriticalBadgeIfNeeded(iconOrigin: iconOrigin, iconSize: iconSize)
+        let primaryIconOrigin = NSPoint(x: leftPadding, y: yOffset)
+        drawPrimaryStatusIcon(at: primaryIconOrigin, size: iconSize, color: color)
+        drawCriticalBadgeIfNeeded(iconOrigin: primaryIconOrigin, iconSize: iconSize)
+
+        var textStartX = leftPadding + iconSize
+        if let providerIcon {
+            let renderedProviderIconSize = effectiveProviderIconSize(for: providerIcon)
+            let providerIconOrigin = NSPoint(
+                x: textStartX + providerIconSpacing,
+                y: yOffset + ((iconSize - renderedProviderIconSize) / 2.0)
+            )
+            drawTintedIcon(providerIcon, at: providerIconOrigin, size: renderedProviderIconSize, color: color)
+            textStartX = providerIconOrigin.x + renderedProviderIconSize
+        }
 
         if let statusText {
-            let textOrigin = NSPoint(x: leftPadding + iconSize + textSpacing, y: yOffset)
+            let textOrigin = NSPoint(x: textStartX + textSpacing, y: yOffset)
             drawStatusText(statusText, at: textOrigin, color: color)
         }
     }
 
-    private func drawCopilotIcon(at origin: NSPoint, size: CGFloat, color: NSColor) {
+    private func drawPrimaryStatusIcon(at origin: NSPoint, size: CGFloat, color: NSColor) {
         guard let icon = NSImage(systemSymbolName: currentIconSymbolName, accessibilityDescription: "Usage") else { return }
+        drawTintedIcon(icon, at: origin, size: size, color: color)
+    }
+
+    private func drawTintedIcon(_ sourceImage: NSImage, at origin: NSPoint, size: CGFloat, color: NSColor) {
+        let icon = (sourceImage.copy() as? NSImage) ?? sourceImage
         icon.isTemplate = true
 
-        let tintedImage = NSImage(size: icon.size)
+        let iconSize = icon.size.width > 0 && icon.size.height > 0
+            ? icon.size
+            : NSSize(width: size, height: size)
+
+        let tintedImage = NSImage(size: iconSize)
         tintedImage.lockFocus()
         color.set()
-        let imageRect = NSRect(origin: .zero, size: icon.size)
+        let imageRect = NSRect(origin: .zero, size: iconSize)
         imageRect.fill()
         icon.draw(in: imageRect, from: .zero, operation: .destinationIn, fraction: 1.0)
         tintedImage.unlockFocus()

@@ -16,6 +16,9 @@ enum MenuDesignToken {
         
         /// Standard SF Symbol icon size
         static let iconSize: CGFloat = 16
+
+        /// Gemini icon size is slightly larger to match official visual balance
+        static let geminiIconSize: CGFloat = 17
         
         /// Status indicator dot size (e.g., circle.fill for status)
         static let statusDotSize: CGFloat = 8
