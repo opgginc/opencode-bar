@@ -577,40 +577,54 @@ final class TokenManager: @unchecked Sendable {
 
     // MARK: - OpenCode Auth File Reading
 
+    private func buildOpenCodeFilePaths(
+        envVarName: String,
+        envRelativePathComponents: [String],
+        fallbackRelativePathComponents: [[String]]
+    ) -> [URL] {
+        let fileManager = FileManager.default
+        let homeDir = fileManager.homeDirectoryForCurrentUser
+        var candidates: [URL] = []
+
+        if let envBasePath = ProcessInfo.processInfo.environment[envVarName],
+           !envBasePath.isEmpty {
+            let envURL = envRelativePathComponents.reduce(URL(fileURLWithPath: envBasePath)) { partial, component in
+                partial.appendingPathComponent(component)
+            }
+            candidates.append(envURL)
+        }
+
+        for relativeComponents in fallbackRelativePathComponents {
+            let fallbackURL = relativeComponents.reduce(homeDir) { partial, component in
+                partial.appendingPathComponent(component)
+            }
+            candidates.append(fallbackURL)
+        }
+
+        var deduped: [URL] = []
+        var visited = Set<String>()
+        for candidate in candidates {
+            let normalizedPath = candidate.standardizedFileURL.path
+            if visited.insert(normalizedPath).inserted {
+                deduped.append(candidate)
+            }
+        }
+        return deduped
+    }
+
     /// Possible auth.json locations in priority order:
     /// 1. $XDG_DATA_HOME/opencode/auth.json (if XDG_DATA_HOME is set)
     /// 2. ~/.local/share/opencode/auth.json (XDG default, used by OpenCode)
     /// 3. ~/Library/Application Support/opencode/auth.json (macOS convention fallback)
     func getAuthFilePaths() -> [URL] {
-        let fileManager = FileManager.default
-        let homeDir = fileManager.homeDirectoryForCurrentUser
-        var paths: [URL] = []
-
-        // 1. XDG_DATA_HOME (highest priority if set)
-        if let xdgDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"], !xdgDataHome.isEmpty {
-            let xdgPath = URL(fileURLWithPath: xdgDataHome)
-                .appendingPathComponent("opencode")
-                .appendingPathComponent("auth.json")
-            paths.append(xdgPath)
-        }
-
-        // 2. ~/.local/share/opencode/auth.json (XDG default - OpenCode's primary location)
-        let xdgDefaultPath = homeDir
-            .appendingPathComponent(".local")
-            .appendingPathComponent("share")
-            .appendingPathComponent("opencode")
-            .appendingPathComponent("auth.json")
-        paths.append(xdgDefaultPath)
-
-        // 3. ~/Library/Application Support/opencode/auth.json (macOS convention fallback)
-        let macOSPath = homeDir
-            .appendingPathComponent("Library")
-            .appendingPathComponent("Application Support")
-            .appendingPathComponent("opencode")
-            .appendingPathComponent("auth.json")
-        paths.append(macOSPath)
-
-        return paths
+        return buildOpenCodeFilePaths(
+            envVarName: "XDG_DATA_HOME",
+            envRelativePathComponents: ["opencode", "auth.json"],
+            fallbackRelativePathComponents: [
+                [".local", "share", "opencode", "auth.json"],
+                ["Library", "Application Support", "opencode", "auth.json"]
+            ]
+        )
     }
 
     /// Possible opencode.json locations in priority order:
@@ -619,38 +633,15 @@ final class TokenManager: @unchecked Sendable {
     /// 3. ~/.local/share/opencode/opencode.json (fallback)
     /// 4. ~/Library/Application Support/opencode/opencode.json (macOS fallback)
     func getOpenCodeConfigFilePaths() -> [URL] {
-        let fileManager = FileManager.default
-        let homeDir = fileManager.homeDirectoryForCurrentUser
-        var paths: [URL] = []
-
-        if let xdgConfigHome = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"], !xdgConfigHome.isEmpty {
-            let xdgPath = URL(fileURLWithPath: xdgConfigHome)
-                .appendingPathComponent("opencode")
-                .appendingPathComponent("opencode.json")
-            paths.append(xdgPath)
-        }
-
-        let xdgDefaultPath = homeDir
-            .appendingPathComponent(".config")
-            .appendingPathComponent("opencode")
-            .appendingPathComponent("opencode.json")
-        paths.append(xdgDefaultPath)
-
-        let localSharePath = homeDir
-            .appendingPathComponent(".local")
-            .appendingPathComponent("share")
-            .appendingPathComponent("opencode")
-            .appendingPathComponent("opencode.json")
-        paths.append(localSharePath)
-
-        let macOSPath = homeDir
-            .appendingPathComponent("Library")
-            .appendingPathComponent("Application Support")
-            .appendingPathComponent("opencode")
-            .appendingPathComponent("opencode.json")
-        paths.append(macOSPath)
-
-        return paths
+        return buildOpenCodeFilePaths(
+            envVarName: "XDG_CONFIG_HOME",
+            envRelativePathComponents: ["opencode", "opencode.json"],
+            fallbackRelativePathComponents: [
+                [".config", "opencode", "opencode.json"],
+                [".local", "share", "opencode", "opencode.json"],
+                ["Library", "Application Support", "opencode", "opencode.json"]
+            ]
+        )
     }
 
     private func readOpenCodeConfigJSON() -> [String: Any]? {

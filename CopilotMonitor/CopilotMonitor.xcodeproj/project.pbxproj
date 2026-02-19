@@ -64,6 +64,8 @@
 		F11111111111111111111111 /* UsagePredictor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F22222222222222222222222 /* UsagePredictor.swift */; };
 		F35960B456C28D71BE7575A5 /* GeminiCLIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06EC3B683EB6892E4F9C8316 /* GeminiCLIProvider.swift */; };
 		KI1111111111111111111111 /* KimiProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = KI2222222222222222222222 /* KimiProvider.swift */; };
+		BRAVEAPP1111111111111111 /* BraveSearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = BRAVEFILE22222222222222 /* BraveSearchProvider.swift */; };
+		TAVILYAPP111111111111111 /* TavilySearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = TAVILYFILE22222222222222 /* TavilySearchProvider.swift */; };
 		SYNTHETIC1111111111111111 /* SyntheticProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNTHETIC2222222222222222 /* SyntheticProvider.swift */; };
 		SYNTHTEST2222222222222222 /* SyntheticProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNTHTEST1111111111111111 /* SyntheticProviderTests.swift */; };
 		NANOGPTTESTBF1111111111 /* NanoGptProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = NANOGPTTESTFR1111111111 /* NanoGptProviderTests.swift */; };
@@ -89,6 +91,8 @@
 		CLIANTIGRAVITY11111111 /* AntigravityProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1DA8E47F4CFEFC3571708AD /* AntigravityProvider.swift */; };
 		CLIOPENCZEN1111111111111 /* OpenCodeZenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OZ2222222222222222222222 /* OpenCodeZenProvider.swift */; };
 		CLIKIMI1111111111111111 /* KimiProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = KI2222222222222222222222 /* KimiProvider.swift */; };
+		CLIBRAVE1111111111111111 /* BraveSearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = BRAVEFILE22222222222222 /* BraveSearchProvider.swift */; };
+		CLITAVILY111111111111111 /* TavilySearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = TAVILYFILE22222222222222 /* TavilySearchProvider.swift */; };
 		CLISYNTHETIC1111111111111 /* SyntheticProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNTHETIC2222222222222222 /* SyntheticProvider.swift */; };
 		CLIPROVMGR11111111111111 /* CLIProviderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLIPROVMGR22222222222222 /* CLIProviderManager.swift */; };
 		CLICOPILOT11111111111111 /* CopilotCLIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLICOPILOT22222222222222 /* CopilotCLIProvider.swift */; };
@@ -169,6 +173,8 @@
 		F22222222222222222222222 /* UsagePredictor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePredictor.swift; sourceTree = "<group>"; };
 		F4AE672516E564CC52739BD9 /* CopilotProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CopilotProvider.swift; sourceTree = "<group>"; };
 		KI2222222222222222222222 /* KimiProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KimiProvider.swift; sourceTree = "<group>"; };
+		BRAVEFILE22222222222222 /* BraveSearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveSearchProvider.swift; sourceTree = "<group>"; };
+		TAVILYFILE22222222222222 /* TavilySearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TavilySearchProvider.swift; sourceTree = "<group>"; };
 		ME2222222222222222222222 /* MenuEnums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuEnums.swift; sourceTree = "<group>"; };
 		OC2222222222222222222222 /* OpenCodeProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OpenCodeProvider.swift; sourceTree = "<group>"; };
 		OR2222222222222222222222 /* OpenRouterProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OpenRouterProvider.swift; sourceTree = "<group>"; };
@@ -249,6 +255,8 @@
 				OZ2222222222222222222222 /* OpenCodeZenProvider.swift */,
 				KI2222222222222222222222 /* KimiProvider.swift */,
 				283349002F313176004DADE1 /* ChutesProvider.swift */,
+				TAVILYFILE22222222222222 /* TavilySearchProvider.swift */,
+				BRAVEFILE22222222222222 /* BraveSearchProvider.swift */,
 				SYNTHETIC2222222222222222 /* SyntheticProvider.swift */,
 			);
 			path = Providers;
@@ -561,6 +569,8 @@
 			CLIZAI11111111111111111 /* ZaiCodingPlanProvider.swift in Sources */,
 			NANOGPTCLI11111111111111 /* NanoGptProvider.swift in Sources */,
 			283349022F313176004DADE1 /* ChutesProvider.swift in Sources */,
+			CLITAVILY111111111111111 /* TavilySearchProvider.swift in Sources */,
+			CLIBRAVE1111111111111111 /* BraveSearchProvider.swift in Sources */,
 			CLISYNTHETIC1111111111111 /* SyntheticProvider.swift in Sources */,
 			CLIPROVMGR11111111111111 /* CLIProviderManager.swift in Sources */,
 			CLICOPILOT11111111111111 /* CopilotCLIProvider.swift in Sources */,
@@ -598,6 +608,8 @@
 				OZ1111111111111111111111 /* OpenCodeZenProvider.swift in Sources */,
 				KI1111111111111111111111 /* KimiProvider.swift in Sources */,
 				283349012F313176004DADE1 /* ChutesProvider.swift in Sources */,
+				TAVILYAPP111111111111111 /* TavilySearchProvider.swift in Sources */,
+				BRAVEAPP1111111111111111 /* BraveSearchProvider.swift in Sources */,
 				SYNTHETIC1111111111111111 /* SyntheticProvider.swift in Sources */,
 				283348FF2F313096004DADE1 /* BrowserCookieService.swift in Sources */,
 				6C4146861DE2C13836DE1D35 /* CopilotHistoryService.swift in Sources */,
