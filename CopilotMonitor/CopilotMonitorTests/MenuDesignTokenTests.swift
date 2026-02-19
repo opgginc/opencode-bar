@@ -7,6 +7,7 @@ final class MenuDesignTokenTests: XCTestCase {
         XCTAssertEqual(MenuDesignToken.Dimension.itemHeight, 22)
         XCTAssertEqual(MenuDesignToken.Dimension.fontSize, 13)
         XCTAssertEqual(MenuDesignToken.Dimension.iconSize, 16)
+        XCTAssertEqual(MenuDesignToken.Dimension.geminiIconSize, 17)
         XCTAssertEqual(MenuDesignToken.Dimension.statusDotSize, 8)
     }
     

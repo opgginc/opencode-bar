@@ -2356,9 +2356,12 @@ final class StatusBarController: NSObject {
             image = NSImage(named: "ChutesIcon")
         }
 
-         // Resize icons to 16x16 for consistent menu appearance
+         // Keep consistent icon sizing and make Gemini slightly larger.
          if let image = image {
-             image.size = NSSize(width: 16, height: 16)
+             let iconSize = identifier == .geminiCLI
+                 ? MenuDesignToken.Dimension.geminiIconSize
+                 : MenuDesignToken.Dimension.iconSize
+             image.size = NSSize(width: iconSize, height: iconSize)
          }
          return image
      }

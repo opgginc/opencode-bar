@@ -58,8 +58,23 @@ final class StatusBarIconView: NSView {
         isLoading ? "dollarsign.circle.fill" : "gauge.medium"
     }
 
+    private var providerIcon: NSImage? {
+        guard !isLoading, !hasError else { return nil }
+        return overrideProviderIcon
+    }
+
     private var shouldShowProviderIcon: Bool {
-        overrideProviderIcon != nil && !isLoading && !hasError
+        providerIcon != nil
+    }
+
+    private func effectiveProviderIconSize(for icon: NSImage) -> CGFloat {
+        guard icon.size.width > 0 else { return providerIconSize }
+
+        if icon.size.width >= MenuDesignToken.Dimension.geminiIconSize {
+            return providerIconSize + 2
+        }
+
+        return providerIconSize
     }
 
     deinit {
@@ -76,8 +91,8 @@ final class StatusBarIconView: NSView {
     override var intrinsicContentSize: NSSize {
         var totalWidth = leftPadding + iconSize
 
-        if shouldShowProviderIcon {
-            totalWidth += providerIconSpacing + providerIconSize
+        if let providerIcon {
+            totalWidth += providerIconSpacing + effectiveProviderIconSize(for: providerIcon)
         }
 
         if let statusText {
@@ -170,10 +185,14 @@ final class StatusBarIconView: NSView {
         drawCriticalBadgeIfNeeded(iconOrigin: primaryIconOrigin, iconSize: iconSize)
 
         var textStartX = leftPadding + iconSize
-        if let providerIcon = overrideProviderIcon, shouldShowProviderIcon {
-            let providerIconOrigin = NSPoint(x: textStartX + providerIconSpacing, y: yOffset + 2)
-            drawTintedIcon(providerIcon, at: providerIconOrigin, size: providerIconSize, color: color)
-            textStartX = providerIconOrigin.x + providerIconSize
+        if let providerIcon {
+            let renderedProviderIconSize = effectiveProviderIconSize(for: providerIcon)
+            let providerIconOrigin = NSPoint(
+                x: textStartX + providerIconSpacing,
+                y: yOffset + ((iconSize - renderedProviderIconSize) / 2.0)
+            )
+            drawTintedIcon(providerIcon, at: providerIconOrigin, size: renderedProviderIconSize, color: color)
+            textStartX = providerIconOrigin.x + renderedProviderIconSize
         }
 
         if let statusText {
