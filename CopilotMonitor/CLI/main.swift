@@ -53,6 +53,16 @@ struct JSONFormatter {
                 providerDict["usagePercentage"] = result.usage.usagePercentage
             }
             
+            // Z.AI: include both token and MCP usage percentages
+            if identifier == .zaiCodingPlan {
+                if let tokenPercent = result.details?.tokenUsagePercent {
+                    providerDict["tokenUsagePercent"] = tokenPercent
+                }
+                if let mcpPercent = result.details?.mcpUsagePercent {
+                    providerDict["mcpUsagePercent"] = mcpPercent
+                }
+            }
+            
             if identifier == .geminiCLI, let accounts = result.details?.geminiAccounts, !accounts.isEmpty {
                 var accountsArray: [[String: Any]] = []
                 for account in accounts {
@@ -64,6 +74,7 @@ struct JSONFormatter {
                     }
                     accountDict["remainingPercentage"] = account.remainingPercentage
                     accountDict["modelBreakdown"] = account.modelBreakdown
+                    accountDict["authSource"] = account.authSource
                     accountsArray.append(accountDict)
                 }
                 providerDict["accounts"] = accountsArray
@@ -110,7 +121,7 @@ struct TableFormatter {
                let accounts = result.details?.geminiAccounts,
                accounts.count > 1 {
                 for account in accounts {
-                    output += formatGeminiAccountRow(account: account)
+                    output += formatGeminiAccountRow(account: account, allResults: results)
                     output += "\n"
                 }
             } else {
@@ -143,7 +154,7 @@ struct TableFormatter {
         let typeStr = getProviderType(result)
         let typePadded = typeStr.padding(toLength: columnWidths.type, withPad: " ", startingAt: 0)
         
-        let usageStr = formatUsagePercentage(result)
+        let usageStr = formatUsagePercentage(identifier: identifier, result: result)
         let usagePadded = usageStr.padding(toLength: columnWidths.usage, withPad: " ", startingAt: 0)
         
         let metricsStr = formatMetrics(result)
@@ -160,22 +171,41 @@ struct TableFormatter {
         }
     }
     
-    private static func formatUsagePercentage(_ result: ProviderResult) -> String {
+    private static func formatUsagePercentage(identifier: ProviderIdentifier, result: ProviderResult) -> String {
         switch result.usage {
         case .payAsYouGo:
             // Pay-as-you-go doesn't have meaningful usage percentage - show dash
             return "-"
         case .quotaBased:
+            // Z.AI: show both 5h token and MCP percentages
+            if identifier == .zaiCodingPlan {
+                let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
+                if percents.count == 2 {
+                    return percents.map { String(format: "%.0f%%", $0) }.joined(separator: ",")
+                }
+            }
             let percentage = result.usage.usagePercentage
             return String(format: "%.0f%%", percentage)
         }
     }
     
-    private static func formatGeminiAccountRow(account: GeminiAccountQuota) -> String {
+    private static func formatGeminiAccountRow(account: GeminiAccountQuota, allResults: [ProviderIdentifier: ProviderResult]) -> String {
         let accountName = "Gemini (#\(account.accountIndex + 1))"
         let providerPadded = accountName.padding(toLength: columnWidths.provider, withPad: " ", startingAt: 0)
         let typePadded = "Quota-based".padding(toLength: columnWidths.type, withPad: " ", startingAt: 0)
-        let usageStr = String(format: "%.0f%%", 100 - account.remainingPercentage)
+        let geminiUsedPercent = 100 - account.remainingPercentage
+
+        // For Antigravity-sourced accounts, show both Gemini CLI % and Antigravity %
+        let usageStr: String
+        if account.authSource.lowercased().contains("antigravity"),
+           let antigravityResult = allResults[.antigravity],
+           case .quotaBased(let agRemaining, let agEntitlement, _) = antigravityResult.usage,
+           agEntitlement > 0 {
+            let antigravityUsedPercent = (Double(agEntitlement - agRemaining) / Double(agEntitlement)) * 100
+            usageStr = String(format: "%.0f%%,%.0f%%", geminiUsedPercent, antigravityUsedPercent)
+        } else {
+            usageStr = String(format: "%.0f%%", geminiUsedPercent)
+        }
         let usagePadded = usageStr.padding(toLength: columnWidths.usage, withPad: " ", startingAt: 0)
         
         let metricsStr: String

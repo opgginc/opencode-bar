@@ -1954,9 +1954,22 @@ final class StatusBarController: NSObject {
                     } else if geminiAccounts.count > 1 {
                         displayName = "Gemini CLI #\(accountNumber)"
                     }
+                    // Build percentage array for display
+                    // For Antigravity-sourced accounts, show both Gemini CLI % and Antigravity %
+                    // (same dual-window pattern as Codex)
+                    let usedPercents: [Double]
+                    if account.authSource.lowercased().contains("antigravity"),
+                       let antigravityResult = providerResults[.antigravity],
+                       case .quotaBased(let agRemaining, let agEntitlement, _) = antigravityResult.usage,
+                       agEntitlement > 0 {
+                        let antigravityUsedPercent = (Double(agEntitlement - agRemaining) / Double(agEntitlement)) * 100
+                        usedPercents = [usedPercent, antigravityUsedPercent]
+                    } else {
+                        usedPercents = [usedPercent]
+                    }
                     let item = createNativeQuotaMenuItem(
                         name: displayName,
-                        usedPercent: usedPercent,
+                        usedPercents: usedPercents,
                         icon: iconForProvider(.geminiCLI)
                     )
                     item.tag = 999
