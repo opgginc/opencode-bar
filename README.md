@@ -65,7 +65,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 | **Claude** | Quota-based | 5h/7d usage windows, Sonnet/Opus breakdown |
 | **Codex** | Quota-based | Primary/Secondary quotas, plan type |
 | **Gemini CLI** | Quota-based | Per-model quotas, multi-account support with email labels and account ID details |
-| **Nano-GPT** | Quota-based | Daily/monthly unit quotas, USD/NANO balance |
+| **Nano-GPT** | Quota-based | Weekly input tokens quota, USD/NANO balance |
 | **Kimi for Coding (Kimi K2.5)** | Quota-based | Usage limits, membership level, reset time |
 | **Z.AI Coding Plan** | Quota-based | Token/MCP quotas, model usage, tool usage (24h) |
 | **Synthetic** | Quota-based | 5h usage limit, request limits, reset time |
