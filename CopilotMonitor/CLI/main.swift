@@ -68,6 +68,36 @@ struct JSONFormatter {
                 }
                 providerDict["accounts"] = accountsArray
             }
+
+            // Generic multi-account support (Copilot, etc.)
+            if let accounts = result.accounts, accounts.count > 1 {
+                var accountsArray: [[String: Any]] = []
+                for account in accounts {
+                    var accountDict: [String: Any] = [:]
+                    accountDict["index"] = account.accountIndex
+                    if let accountId = account.accountId {
+                        accountDict["accountId"] = accountId
+                    }
+                    if let authSource = account.details?.authSource {
+                        accountDict["authSource"] = authSource
+                    }
+                    accountDict["usagePercentage"] = account.usage.usagePercentage
+
+                    switch account.usage {
+                    case .quotaBased(let remaining, let entitlement, let overagePermitted):
+                        accountDict["remaining"] = remaining
+                        accountDict["entitlement"] = entitlement
+                        accountDict["overagePermitted"] = overagePermitted
+                    case .payAsYouGo(_, let cost, _):
+                        if let cost = cost {
+                            accountDict["cost"] = cost
+                        }
+                    }
+
+                    accountsArray.append(accountDict)
+                }
+                providerDict["accounts"] = accountsArray
+            }
             
             jsonDict[identifier.rawValue] = providerDict
         }
@@ -82,75 +112,172 @@ struct JSONFormatter {
 }
 
 struct TableFormatter {
-    private static let columnWidths = (
-        provider: 20,
-        type: 15,
-        usage: 10,
-        metrics: 30
-    )
-    
-    static func format(_ results: [ProviderIdentifier: ProviderResult]) -> String {
-        guard !results.isEmpty else {
-            return "No provider data available"
+    private static let minProviderWidth = 20
+    private static let typeWidth = 15
+    private static let usageWidth = 10
+
+    /// Build the display label for a generic multi-account row.
+    private static func accountLabel(identifier: ProviderIdentifier, account: ProviderAccountResult) -> String {
+        if let accountId = account.accountId, !accountId.isEmpty {
+            return "\(identifier.displayName) (\(accountId))"
+        } else {
+            return "\(identifier.displayName) (#\(account.accountIndex + 1))"
         }
-        
-        var output = ""
-        
-        output += formatHeader()
-        output += "\n"
-        output += formatSeparator()
-        output += "\n"
-        
-        let sortedResults = results.sorted { a, b in
-            a.key.displayName < b.key.displayName
+    }
+
+    /// Build the display label for a Gemini account row.
+    private static func geminiLabel(account: GeminiAccountQuota) -> String {
+        return "Gemini (#\(account.accountIndex + 1))"
+    }
+
+    /// Shorten an auth source string for display.
+    /// Full file paths become just the filename; other strings pass through.
+    private static func shortenAuthSource(_ source: String) -> String {
+        if source.hasPrefix("/") || source.hasPrefix("~") {
+            // It's a file path — show just the filename
+            return (source as NSString).lastPathComponent
         }
-        
+        return source
+    }
+
+    /// Pre-compute the metrics column width by scanning ALL row metric strings.
+    private static func computeMetricsWidth(
+        _ sortedResults: [(key: ProviderIdentifier, value: ProviderResult)]
+    ) -> Int {
+        let minMetricsWidth = 30
+        var maxWidth = minMetricsWidth
         for (identifier, result) in sortedResults {
             if identifier == .geminiCLI,
                let accounts = result.details?.geminiAccounts,
                accounts.count > 1 {
                 for account in accounts {
-                    output += formatGeminiAccountRow(account: account)
+                    let metricsStr: String
+                    if let accountId = account.accountId, !accountId.isEmpty {
+                        metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email), id: \(accountId))"
+                    } else {
+                        metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email))"
+                    }
+                    maxWidth = max(maxWidth, metricsStr.count)
+                }
+            } else if let accounts = result.accounts, accounts.count > 1 {
+                for account in accounts {
+                    let metricsStr: String
+                    switch account.usage {
+                    case .payAsYouGo(_, let cost, _):
+                        if let cost = cost {
+                            metricsStr = String(format: "$%.2f spent", cost)
+                        } else {
+                            metricsStr = "Cost unavailable"
+                        }
+                    case .quotaBased(let remaining, let entitlement, let overagePermitted):
+                        if remaining >= 0 {
+                            metricsStr = "\(remaining)/\(entitlement) remaining"
+                        } else {
+                            let overage = abs(remaining)
+                            metricsStr = overagePermitted ? "\(overage) overage (allowed)" : "\(overage) overage (not allowed)"
+                        }
+                    }
+                    let source = account.details?.authSource ?? ""
+                    let sourceLabel = source.isEmpty ? "" : " [\(shortenAuthSource(source))]"
+                    maxWidth = max(maxWidth, metricsStr.count + sourceLabel.count)
+                }
+            } else {
+                maxWidth = max(maxWidth, formatMetrics(result).count)
+            }
+        }
+        return maxWidth
+    }
+
+    /// Pre-compute the provider column width by scanning ALL row labels.
+    private static func computeProviderWidth(
+        _ sortedResults: [(key: ProviderIdentifier, value: ProviderResult)]
+    ) -> Int {
+        var maxWidth = minProviderWidth
+        for (identifier, result) in sortedResults {
+            if identifier == .geminiCLI,
+               let accounts = result.details?.geminiAccounts,
+               accounts.count > 1 {
+                for account in accounts {
+                    maxWidth = max(maxWidth, geminiLabel(account: account).count)
+                }
+            } else if let accounts = result.accounts, accounts.count > 1 {
+                for account in accounts {
+                    maxWidth = max(maxWidth, accountLabel(identifier: identifier, account: account).count)
+                }
+            } else {
+                maxWidth = max(maxWidth, identifier.displayName.count)
+            }
+        }
+        return maxWidth
+    }
+
+    static func format(_ results: [ProviderIdentifier: ProviderResult]) -> String {
+        guard !results.isEmpty else {
+            return "No provider data available"
+        }
+
+        let sortedResults = results.sorted { $0.key.displayName < $1.key.displayName }
+        let providerWidth = computeProviderWidth(sortedResults)
+        let metricsWidth = computeMetricsWidth(sortedResults)
+
+        var output = ""
+
+        output += formatHeader(providerWidth: providerWidth)
+        output += "\n"
+        output += formatSeparator(providerWidth: providerWidth, metricsWidth: metricsWidth)
+        output += "\n"
+
+        for (identifier, result) in sortedResults {
+            if identifier == .geminiCLI,
+               let accounts = result.details?.geminiAccounts,
+               accounts.count > 1 {
+                for account in accounts {
+                    output += formatGeminiAccountRow(account: account, providerWidth: providerWidth)
+                    output += "\n"
+                }
+            } else if let accounts = result.accounts, accounts.count > 1 {
+                for account in accounts {
+                    output += formatAccountRow(identifier: identifier, account: account, providerWidth: providerWidth)
                     output += "\n"
                 }
             } else {
-                output += formatRow(identifier: identifier, result: result)
+                output += formatRow(identifier: identifier, result: result, providerWidth: providerWidth)
                 output += "\n"
             }
         }
-        
+
         return output
     }
-    
-    private static func formatHeader() -> String {
-        let provider = "Provider".padding(toLength: columnWidths.provider, withPad: " ", startingAt: 0)
-        let type = "Type".padding(toLength: columnWidths.type, withPad: " ", startingAt: 0)
-        let usage = "Usage".padding(toLength: columnWidths.usage, withPad: " ", startingAt: 0)
+
+    private static func formatHeader(providerWidth: Int) -> String {
+        let provider = "Provider".padding(toLength: providerWidth, withPad: " ", startingAt: 0)
+        let type = "Type".padding(toLength: typeWidth, withPad: " ", startingAt: 0)
+        let usage = "Usage".padding(toLength: usageWidth, withPad: " ", startingAt: 0)
         let metrics = "Key Metrics"
-        
+
         return "\(provider)  \(type)  \(usage)  \(metrics)"
     }
-    
-    private static func formatSeparator() -> String {
-        let totalWidth = columnWidths.provider + columnWidths.type + columnWidths.usage + 30 + 6
+
+    private static func formatSeparator(providerWidth: Int, metricsWidth: Int) -> String {
+        let totalWidth = providerWidth + typeWidth + usageWidth + metricsWidth + 6
         return String(repeating: "─", count: totalWidth)
     }
-    
-    private static func formatRow(identifier: ProviderIdentifier, result: ProviderResult) -> String {
+
+    private static func formatRow(identifier: ProviderIdentifier, result: ProviderResult, providerWidth: Int) -> String {
         let providerName = identifier.displayName
-        let providerPadded = providerName.padding(toLength: columnWidths.provider, withPad: " ", startingAt: 0)
-        
+        let providerPadded = providerName.padding(toLength: providerWidth, withPad: " ", startingAt: 0)
+
         let typeStr = getProviderType(result)
-        let typePadded = typeStr.padding(toLength: columnWidths.type, withPad: " ", startingAt: 0)
-        
+        let typePadded = typeStr.padding(toLength: typeWidth, withPad: " ", startingAt: 0)
+
         let usageStr = formatUsagePercentage(result)
-        let usagePadded = usageStr.padding(toLength: columnWidths.usage, withPad: " ", startingAt: 0)
-        
+        let usagePadded = usageStr.padding(toLength: usageWidth, withPad: " ", startingAt: 0)
+
         let metricsStr = formatMetrics(result)
-        
+
         return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)"
     }
-    
+
     private static func getProviderType(_ result: ProviderResult) -> String {
         switch result.usage {
         case .payAsYouGo:
@@ -159,25 +286,24 @@ struct TableFormatter {
             return "Quota-based"
         }
     }
-    
+
     private static func formatUsagePercentage(_ result: ProviderResult) -> String {
         switch result.usage {
         case .payAsYouGo:
-            // Pay-as-you-go doesn't have meaningful usage percentage - show dash
             return "-"
         case .quotaBased:
             let percentage = result.usage.usagePercentage
             return String(format: "%.0f%%", percentage)
         }
     }
-    
-    private static func formatGeminiAccountRow(account: GeminiAccountQuota) -> String {
-        let accountName = "Gemini (#\(account.accountIndex + 1))"
-        let providerPadded = accountName.padding(toLength: columnWidths.provider, withPad: " ", startingAt: 0)
-        let typePadded = "Quota-based".padding(toLength: columnWidths.type, withPad: " ", startingAt: 0)
+
+    private static func formatGeminiAccountRow(account: GeminiAccountQuota, providerWidth: Int) -> String {
+        let label = geminiLabel(account: account)
+        let providerPadded = label.padding(toLength: providerWidth, withPad: " ", startingAt: 0)
+        let typePadded = "Quota-based".padding(toLength: typeWidth, withPad: " ", startingAt: 0)
         let usageStr = String(format: "%.0f%%", 100 - account.remainingPercentage)
-        let usagePadded = usageStr.padding(toLength: columnWidths.usage, withPad: " ", startingAt: 0)
-        
+        let usagePadded = usageStr.padding(toLength: usageWidth, withPad: " ", startingAt: 0)
+
         let metricsStr: String
         if let accountId = account.accountId, !accountId.isEmpty {
             metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email), id: \(accountId))"
@@ -186,6 +312,44 @@ struct TableFormatter {
         }
 
         return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)"
+    }
+
+    private static func formatAccountRow(identifier: ProviderIdentifier, account: ProviderAccountResult, providerWidth: Int) -> String {
+        let label = accountLabel(identifier: identifier, account: account)
+        let providerPadded = label.padding(toLength: providerWidth, withPad: " ", startingAt: 0)
+
+        let typeStr: String
+        let usageStr: String
+        let metricsStr: String
+
+        switch account.usage {
+        case .payAsYouGo(_, let cost, _):
+            typeStr = "Pay-as-you-go"
+            usageStr = "-"
+            if let cost = cost {
+                metricsStr = String(format: "$%.2f spent", cost)
+            } else {
+                metricsStr = "Cost unavailable"
+            }
+        case .quotaBased(let remaining, let entitlement, let overagePermitted):
+            typeStr = "Quota-based"
+            let percentage = account.usage.usagePercentage
+            usageStr = String(format: "%.0f%%", percentage)
+            if remaining >= 0 {
+                metricsStr = "\(remaining)/\(entitlement) remaining"
+            } else {
+                let overage = abs(remaining)
+                metricsStr = overagePermitted ? "\(overage) overage (allowed)" : "\(overage) overage (not allowed)"
+            }
+        }
+
+        let source = account.details?.authSource ?? ""
+        let sourceLabel = source.isEmpty ? "" : " [\(shortenAuthSource(source))]"
+
+        let typePadded = typeStr.padding(toLength: typeWidth, withPad: " ", startingAt: 0)
+        let usagePadded = usageStr.padding(toLength: usageWidth, withPad: " ", startingAt: 0)
+
+        return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)\(sourceLabel)"
     }
     
     private static func formatMetrics(_ result: ProviderResult) -> String {

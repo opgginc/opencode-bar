@@ -174,10 +174,12 @@ final class CopilotProvider: ProviderProtocol {
         switch source {
         case .opencodeAuth:
             return 3
-        case .vscodeHosts:
+        case .copilotCliKeychain:
             return 2
-        case .vscodeApps:
+        case .vscodeHosts:
             return 1
+        case .vscodeApps:
+            return 0
         case .none:
             return 0
         }

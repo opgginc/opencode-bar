@@ -345,10 +345,24 @@ struct ClaudeAuthAccount {
 }
 
 /// Auth source types for GitHub Copilot token discovery
-enum CopilotAuthSource {
+enum CopilotAuthSource: CustomStringConvertible {
     case opencodeAuth
+    case copilotCliKeychain
     case vscodeHosts
     case vscodeApps
+    
+    var description: String {
+        switch self {
+        case .opencodeAuth:
+            return "opencodeAuth"
+        case .copilotCliKeychain:
+            return "copilotCliKeychain"
+        case .vscodeHosts:
+            return "vscodeHosts"
+        case .vscodeApps:
+            return "vscodeApps"
+        }
+    }
 }
 
 /// Unified GitHub Copilot token model used by the provider layer
@@ -1678,7 +1692,94 @@ final class TokenManager: @unchecked Sendable {
         return accounts
     }
 
-    /// Gets all GitHub Copilot token accounts (OpenCode auth + VS Code Copilot tokens)
+    /// Read GitHub Copilot CLI credentials from macOS Keychain
+    /// Service name: "copilot-cli", class: kSecClassGenericPassword
+    /// Account format: "https://github.com:username"
+    /// Password: GitHub OAuth token
+    private func readCopilotCliKeychainAccounts() -> [CopilotAuthAccount] {
+        let service = "copilot-cli"
+
+        // Step 1: Query for all matching items to get their accounts
+        let listQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+
+        var listResult: AnyObject?
+        let listStatus = SecItemCopyMatching(listQuery as CFDictionary, &listResult)
+
+        guard listStatus == errSecSuccess else {
+            if listStatus == errSecItemNotFound {
+                logger.debug("[CopilotKeychain] No Keychain items found for service '\(service)'")
+            } else {
+                logger.warning("[CopilotKeychain] Failed to list Keychain items for '\(service)', status: \(listStatus)")
+            }
+            return []
+        }
+
+        // Get array of account attributes
+        let items: [[String: Any]]
+        if let dict = listResult as? [String: Any] {
+            items = [dict]
+        } else if let array = listResult as? [[String: Any]] {
+            items = array
+        } else {
+            logger.warning("[CopilotKeychain] Unexpected result type when listing items")
+            return []
+        }
+
+        var accounts: [CopilotAuthAccount] = []
+
+        // Step 2: For each item, query individually to get the password data
+        for (index, item) in items.enumerated() {
+            guard let account = item[kSecAttrAccount as String] as? String else {
+                continue
+            }
+
+            // Query individually for this account to get the password
+            let dataQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne
+            ]
+
+            var dataResult: AnyObject?
+            let dataStatus = SecItemCopyMatching(dataQuery as CFDictionary, &dataResult)
+
+            guard dataStatus == errSecSuccess,
+                  let passwordData = dataResult as? Data,
+                  let token = String(data: passwordData, encoding: .utf8),
+                  !token.isEmpty else {
+                logger.warning("[CopilotKeychain] Failed to get token for account '\(account)' (status: \(dataStatus))")
+                continue
+            }
+
+            // Parse username from account field (format: "https://github.com:username")
+            var login: String?
+            let components = account.components(separatedBy: ":")
+            if components.count >= 2 {
+                login = components.last
+            }
+
+            accounts.append(
+                CopilotAuthAccount(
+                    accessToken: token,
+                    accountId: nil,
+                    login: login,
+                    authSource: "Keychain (copilot-cli)",
+                    source: .copilotCliKeychain
+                )
+            )
+        }
+
+        return accounts
+    }
+
+    /// Gets all GitHub Copilot token accounts (OpenCode auth + Copilot CLI Keychain + VS Code Copilot tokens)
     func getGitHubCopilotAccounts() -> [CopilotAuthAccount] {
         if let cached = queue.sync(execute: {
             if let cached = cachedCopilotAccounts,
@@ -1708,6 +1809,9 @@ final class TokenManager: @unchecked Sendable {
             )
         }
 
+        // Add Copilot CLI Keychain accounts
+        accounts.append(contentsOf: readCopilotCliKeychainAccounts())
+
         for path in copilotTokenPaths() {
             guard let dict = readJSONDictionary(at: path) else { continue }
             let source: CopilotAuthSource = path.lastPathComponent == "apps.json" ? .vscodeApps : .vscodeHosts
@@ -1715,6 +1819,7 @@ final class TokenManager: @unchecked Sendable {
         }
 
         let deduped = dedupeCopilotAccounts(accounts)
+        
         logger.info("GitHub Copilot token accounts discovered: \(deduped.count)")
         queue.sync {
             cachedCopilotAccounts = deduped
@@ -1726,7 +1831,8 @@ final class TokenManager: @unchecked Sendable {
     private func dedupeCopilotAccounts(_ accounts: [CopilotAuthAccount]) -> [CopilotAuthAccount] {
         func priority(for source: CopilotAuthSource) -> Int {
             switch source {
-            case .opencodeAuth: return 2
+            case .opencodeAuth: return 3
+            case .copilotCliKeychain: return 2
             case .vscodeHosts: return 1
             case .vscodeApps: return 0
             }
@@ -1735,7 +1841,9 @@ final class TokenManager: @unchecked Sendable {
         var byToken: [String: CopilotAuthAccount] = [:]
         for account in accounts {
             if let existing = byToken[account.accessToken] {
-                if priority(for: account.source) > priority(for: existing.source) {
+                let existingPriority = priority(for: existing.source)
+                let newPriority = priority(for: account.source)
+                if newPriority > existingPriority {
                     byToken[account.accessToken] = account
                 }
             } else {
@@ -2043,6 +2151,9 @@ final class TokenManager: @unchecked Sendable {
 
             guard httpResponse.statusCode == 200 else {
                 logger.error("Copilot API returned status: \(httpResponse.statusCode)")
+                if let responseBody = String(data: data, encoding: .utf8) {
+                    logger.error("Copilot API error response: \(responseBody)")
+                }
                 return nil
             }
 
@@ -2091,8 +2202,10 @@ final class TokenManager: @unchecked Sendable {
                 }
             }
 
+            // Try multiple quota sources for different API versions
             let limitedUserQuotas = json["limited_user_quotas"] as? [String: Any]
             let monthlyQuotas = json["monthly_quotas"] as? [String: Any]
+            let quotaSnapshots = json["quota_snapshots"] as? [String: Any]
 
             func quotaValue(_ dict: [String: Any]?, key: String) -> Int? {
                 guard let dict = dict else { return nil }
@@ -2103,14 +2216,52 @@ final class TokenManager: @unchecked Sendable {
                 return nil
             }
 
+            // Legacy API format: monthly_quotas and limited_user_quotas
             let monthlyCompletions = quotaValue(monthlyQuotas, key: "completions")
             let monthlyChat = quotaValue(monthlyQuotas, key: "chat")
             let limitedCompletions = quotaValue(limitedUserQuotas, key: "completions")
             let limitedChat = quotaValue(limitedUserQuotas, key: "chat")
 
-            let quotaLimit = monthlyCompletions ?? monthlyChat
+            // New API format: quota_snapshots (contains entitlement/remaining for each quota type)
+            var snapshotEntitlement: Int?
+            var snapshotRemaining: Int?
+            if let snapshots = quotaSnapshots {
+                // Sum up entitlement and remaining from all quota types
+                var totalEntitlement = 0
+                var totalRemaining = 0
+                var hasUnlimited = false
+                
+                for (_, value) in snapshots {
+                    if let quota = value as? [String: Any] {
+                        // Check if this quota type is unlimited
+                        if let unlimited = quota["unlimited"] as? Bool, unlimited {
+                            hasUnlimited = true
+                        }
+                        
+                        // Add entitlement and remaining
+                        if let entitlement = quotaValue(quota, key: "entitlement"), entitlement > 0 {
+                            totalEntitlement += entitlement
+                        }
+                        if let remaining = quotaValue(quota, key: "remaining") {
+                            totalRemaining += remaining
+                        }
+                    }
+                }
+                
+                if totalEntitlement > 0 {
+                    snapshotEntitlement = totalEntitlement
+                    snapshotRemaining = totalRemaining
+                } else if hasUnlimited {
+                    // If unlimited but no specific entitlement, use a placeholder
+                    snapshotEntitlement = 0
+                    snapshotRemaining = 0
+                }
+            }
+
+            // Combine all quota sources with priority: snapshots > monthly > legacy
+            let quotaLimit = snapshotEntitlement ?? monthlyCompletions ?? monthlyChat
                 ?? ((monthlyCompletions != nil || monthlyChat != nil) ? (monthlyCompletions ?? 0) + (monthlyChat ?? 0) : nil)
-            let quotaRemaining = limitedCompletions ?? limitedChat
+            let quotaRemaining = snapshotRemaining ?? limitedCompletions ?? limitedChat
                 ?? ((limitedCompletions != nil || limitedChat != nil) ? (limitedCompletions ?? 0) + (limitedChat ?? 0) : nil)
 
             if let resetDate = resetDate {
@@ -2593,6 +2744,12 @@ final class TokenManager: @unchecked Sendable {
         lines.append("")
         lines.append("[GitHub Copilot]")
         lines.append("  OpenCode auth.json (\(shortPath(openCodePath))): \(tokenStatus(hasAuth: openCodeAuth != nil, token: openCodeAuth?.githubCopilot?.access, accountId: openCodeAuth?.githubCopilot?.accountId))")
+
+        // Copilot CLI Keychain status
+        let copilotCliKeychainAccounts = readCopilotCliKeychainAccounts()
+        let copilotCliStatus = copilotCliKeychainAccounts.isEmpty ? "NOT FOUND" : "FOUND (\(copilotCliKeychainAccounts.count) account(s))"
+        lines.append("  Copilot CLI Keychain (copilot-cli): \(copilotCliStatus)")
+
         let copilotBase = homeDir
             .appendingPathComponent("Library")
             .appendingPathComponent("Application Support")
