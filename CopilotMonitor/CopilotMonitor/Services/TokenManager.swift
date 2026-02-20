@@ -564,46 +564,163 @@ final class TokenManager: @unchecked Sendable {
     private var cachedCopilotAccounts: [CopilotAuthAccount]?
     private var copilotAccountsCacheTimestamp: Date?
 
+    /// Cached OpenCode config JSON (opencode.json)
+    private var cachedOpenCodeConfigJSON: [String: Any]?
+    private var openCodeConfigCacheTimestamp: Date?
+
+    /// Path where opencode.json was found
+    private(set) var lastFoundOpenCodeConfigPath: URL?
+
     private init() {
         logger.info("TokenManager initialized")
     }
 
     // MARK: - OpenCode Auth File Reading
 
+    private func buildOpenCodeFilePaths(
+        envVarName: String,
+        envRelativePathComponents: [String],
+        fallbackRelativePathComponents: [[String]]
+    ) -> [URL] {
+        let fileManager = FileManager.default
+        let homeDir = fileManager.homeDirectoryForCurrentUser
+        var candidates: [URL] = []
+
+        if let envBasePath = ProcessInfo.processInfo.environment[envVarName],
+           !envBasePath.isEmpty {
+            let envURL = envRelativePathComponents.reduce(URL(fileURLWithPath: envBasePath)) { partial, component in
+                partial.appendingPathComponent(component)
+            }
+            candidates.append(envURL)
+        }
+
+        for relativeComponents in fallbackRelativePathComponents {
+            let fallbackURL = relativeComponents.reduce(homeDir) { partial, component in
+                partial.appendingPathComponent(component)
+            }
+            candidates.append(fallbackURL)
+        }
+
+        var deduped: [URL] = []
+        var visited = Set<String>()
+        for candidate in candidates {
+            let normalizedPath = candidate.standardizedFileURL.path
+            if visited.insert(normalizedPath).inserted {
+                deduped.append(candidate)
+            }
+        }
+        return deduped
+    }
+
     /// Possible auth.json locations in priority order:
     /// 1. $XDG_DATA_HOME/opencode/auth.json (if XDG_DATA_HOME is set)
     /// 2. ~/.local/share/opencode/auth.json (XDG default, used by OpenCode)
     /// 3. ~/Library/Application Support/opencode/auth.json (macOS convention fallback)
     func getAuthFilePaths() -> [URL] {
-        let fileManager = FileManager.default
-        let homeDir = fileManager.homeDirectoryForCurrentUser
-        var paths: [URL] = []
+        return buildOpenCodeFilePaths(
+            envVarName: "XDG_DATA_HOME",
+            envRelativePathComponents: ["opencode", "auth.json"],
+            fallbackRelativePathComponents: [
+                [".local", "share", "opencode", "auth.json"],
+                ["Library", "Application Support", "opencode", "auth.json"]
+            ]
+        )
+    }
 
-        // 1. XDG_DATA_HOME (highest priority if set)
-        if let xdgDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"], !xdgDataHome.isEmpty {
-            let xdgPath = URL(fileURLWithPath: xdgDataHome)
-                .appendingPathComponent("opencode")
-                .appendingPathComponent("auth.json")
-            paths.append(xdgPath)
+    /// Possible opencode.json locations in priority order:
+    /// 1. $XDG_CONFIG_HOME/opencode/opencode.json (if XDG_CONFIG_HOME is set)
+    /// 2. ~/.config/opencode/opencode.json (XDG default on macOS/Linux)
+    /// 3. ~/.local/share/opencode/opencode.json (fallback)
+    /// 4. ~/Library/Application Support/opencode/opencode.json (macOS fallback)
+    func getOpenCodeConfigFilePaths() -> [URL] {
+        return buildOpenCodeFilePaths(
+            envVarName: "XDG_CONFIG_HOME",
+            envRelativePathComponents: ["opencode", "opencode.json"],
+            fallbackRelativePathComponents: [
+                [".config", "opencode", "opencode.json"],
+                [".local", "share", "opencode", "opencode.json"],
+                ["Library", "Application Support", "opencode", "opencode.json"]
+            ]
+        )
+    }
+
+    private func readOpenCodeConfigJSON() -> [String: Any]? {
+        return queue.sync {
+            if let cached = cachedOpenCodeConfigJSON,
+               let timestamp = openCodeConfigCacheTimestamp,
+               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+                return cached
+            }
+
+            let fileManager = FileManager.default
+            let paths = getOpenCodeConfigFilePaths()
+            for configPath in paths {
+                guard fileManager.fileExists(atPath: configPath.path) else {
+                    continue
+                }
+                guard fileManager.isReadableFile(atPath: configPath.path) else {
+                    logger.warning("OpenCode config file not readable at \(configPath.path)")
+                    continue
+                }
+
+                do {
+                    let data = try Data(contentsOf: configPath)
+                    let jsonObject = try JSONSerialization.jsonObject(with: data)
+                    guard let dict = jsonObject as? [String: Any] else {
+                        logger.warning("OpenCode config is not a JSON object at \(configPath.path)")
+                        continue
+                    }
+
+                    lastFoundOpenCodeConfigPath = configPath
+                    cachedOpenCodeConfigJSON = dict
+                    openCodeConfigCacheTimestamp = Date()
+                    return dict
+                } catch {
+                    logger.warning("Failed to parse OpenCode config at \(configPath.path): \(error.localizedDescription)")
+                }
+            }
+
+            lastFoundOpenCodeConfigPath = nil
+            cachedOpenCodeConfigJSON = nil
+            openCodeConfigCacheTimestamp = nil
+            return nil
+        }
+    }
+
+    private func resolveConfigValue(_ rawValue: String?) -> String? {
+        guard var value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
         }
 
-        // 2. ~/.local/share/opencode/auth.json (XDG default - OpenCode's primary location)
-        let xdgDefaultPath = homeDir
-            .appendingPathComponent(".local")
-            .appendingPathComponent("share")
-            .appendingPathComponent("opencode")
-            .appendingPathComponent("auth.json")
-        paths.append(xdgDefaultPath)
+        if value.hasPrefix("Bearer ") {
+            value = String(value.dropFirst("Bearer ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
 
-        // 3. ~/Library/Application Support/opencode/auth.json (macOS convention fallback)
-        let macOSPath = homeDir
-            .appendingPathComponent("Library")
-            .appendingPathComponent("Application Support")
-            .appendingPathComponent("opencode")
-            .appendingPathComponent("auth.json")
-        paths.append(macOSPath)
+        if value.hasPrefix("{env:"), value.hasSuffix("}") {
+            let start = value.index(value.startIndex, offsetBy: 5)
+            let end = value.index(before: value.endIndex)
+            let envName = String(value[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !envName.isEmpty else { return nil }
+            let envValue = ProcessInfo.processInfo.environment[envName]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (envValue?.isEmpty == false) ? envValue : nil
+        }
 
-        return paths
+        return value.isEmpty ? nil : value
+    }
+
+    private func nestedString(
+        in dictionary: [String: Any],
+        path: [String]
+    ) -> String? {
+        guard !path.isEmpty else { return nil }
+        var current: Any = dictionary
+        for key in path {
+            guard let nested = current as? [String: Any], let next = nested[key] else {
+                return nil
+            }
+            current = next
+        }
+        return current as? String
     }
 
     /// Returns the path where auth.json was found, or nil if not found
@@ -2176,6 +2293,35 @@ final class TokenManager: @unchecked Sendable {
     func getChutesAPIKey() -> String? {
         guard let auth = readOpenCodeAuth() else { return nil }
         return auth.chutes?.key
+    }
+
+    func getTavilyAPIKey() -> String? {
+        guard let config = readOpenCodeConfigJSON() else { return nil }
+
+        let envKey = nestedString(in: config, path: ["mcp", "tavily", "environment", "TAVILY_API_KEY"])
+        if let resolved = resolveConfigValue(envKey) {
+            return resolved
+        }
+
+        let authorization = nestedString(in: config, path: ["mcp", "tavily", "headers", "Authorization"])
+        if let resolved = resolveConfigValue(authorization) {
+            return resolved
+        }
+
+        let headerKey = nestedString(in: config, path: ["mcp", "tavily", "headers", "X-API-Key"])
+        return resolveConfigValue(headerKey)
+    }
+
+    func getBraveSearchAPIKey() -> String? {
+        guard let config = readOpenCodeConfigJSON() else { return nil }
+
+        let envKey = nestedString(in: config, path: ["mcp", "brave-search", "environment", "BRAVE_API_KEY"])
+        if let resolved = resolveConfigValue(envKey) {
+            return resolved
+        }
+
+        let headerKey = nestedString(in: config, path: ["mcp", "brave-search", "headers", "X-Subscription-Token"])
+        return resolveConfigValue(headerKey)
     }
 
     /// Gets Gemini refresh token from discovered Gemini account sources
