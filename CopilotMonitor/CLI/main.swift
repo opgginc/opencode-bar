@@ -140,6 +140,54 @@ struct TableFormatter {
         return source
     }
 
+    /// Pre-compute the metrics column width by scanning ALL row metric strings.
+    private static func computeMetricsWidth(
+        _ sortedResults: [(key: ProviderIdentifier, value: ProviderResult)]
+    ) -> Int {
+        let minMetricsWidth = 30
+        var maxWidth = minMetricsWidth
+        for (identifier, result) in sortedResults {
+            if identifier == .geminiCLI,
+               let accounts = result.details?.geminiAccounts,
+               accounts.count > 1 {
+                for account in accounts {
+                    let metricsStr: String
+                    if let accountId = account.accountId, !accountId.isEmpty {
+                        metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email), id: \(accountId))"
+                    } else {
+                        metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email))"
+                    }
+                    maxWidth = max(maxWidth, metricsStr.count)
+                }
+            } else if let accounts = result.accounts, accounts.count > 1 {
+                for account in accounts {
+                    let metricsStr: String
+                    switch account.usage {
+                    case .payAsYouGo(_, let cost, _):
+                        if let cost = cost {
+                            metricsStr = String(format: "$%.2f spent", cost)
+                        } else {
+                            metricsStr = "Cost unavailable"
+                        }
+                    case .quotaBased(let remaining, let entitlement, let overagePermitted):
+                        if remaining >= 0 {
+                            metricsStr = "\(remaining)/\(entitlement) remaining"
+                        } else {
+                            let overage = abs(remaining)
+                            metricsStr = overagePermitted ? "\(overage) overage (allowed)" : "\(overage) overage (not allowed)"
+                        }
+                    }
+                    let source = account.details?.authSource ?? ""
+                    let sourceLabel = source.isEmpty ? "" : " [\(shortenAuthSource(source))]"
+                    maxWidth = max(maxWidth, metricsStr.count + sourceLabel.count)
+                }
+            } else {
+                maxWidth = max(maxWidth, formatMetrics(result).count)
+            }
+        }
+        return maxWidth
+    }
+
     /// Pre-compute the provider column width by scanning ALL row labels.
     private static func computeProviderWidth(
         _ sortedResults: [(key: ProviderIdentifier, value: ProviderResult)]
@@ -170,12 +218,13 @@ struct TableFormatter {
 
         let sortedResults = results.sorted { $0.key.displayName < $1.key.displayName }
         let providerWidth = computeProviderWidth(sortedResults)
+        let metricsWidth = computeMetricsWidth(sortedResults)
 
         var output = ""
 
         output += formatHeader(providerWidth: providerWidth)
         output += "\n"
-        output += formatSeparator(providerWidth: providerWidth)
+        output += formatSeparator(providerWidth: providerWidth, metricsWidth: metricsWidth)
         output += "\n"
 
         for (identifier, result) in sortedResults {
@@ -209,8 +258,8 @@ struct TableFormatter {
         return "\(provider)  \(type)  \(usage)  \(metrics)"
     }
 
-    private static func formatSeparator(providerWidth: Int) -> String {
-        let totalWidth = providerWidth + typeWidth + usageWidth + 30 + 6
+    private static func formatSeparator(providerWidth: Int, metricsWidth: Int) -> String {
+        let totalWidth = providerWidth + typeWidth + usageWidth + metricsWidth + 6
         return String(repeating: "─", count: totalWidth)
     }
 

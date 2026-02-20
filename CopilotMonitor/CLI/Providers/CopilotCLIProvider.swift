@@ -12,7 +12,6 @@ actor CopilotCLIProvider: ProviderProtocol {
     let type: ProviderType = .quotaBased
 
     private var cachedCustomerId: String?
-    private var cachedUserEmail: String?
 
     // MARK: - Internal Types
 
@@ -60,9 +59,6 @@ actor CopilotCLIProvider: ProviderProtocol {
 
         if let cookies = cookies, cookies.isValid {
             let cookieLogin = cookies.dotcomUser?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let login = cookieLogin, !login.isEmpty {
-                cachedUserEmail = login
-            }
 
             // Match cookie login against token infos to merge plan data
             let matchedToken = matchTokenInfo(login: cookieLogin, tokenInfos: &tokenInfos)
@@ -151,24 +147,30 @@ actor CopilotCLIProvider: ProviderProtocol {
     private func fetchTokenInfos(_ accounts: [CopilotAuthAccount]) async -> [CopilotTokenInfo] {
         var infos: [CopilotTokenInfo] = []
 
-        for account in accounts {
-            let planInfo = await TokenManager.shared.fetchCopilotPlanInfo(accessToken: account.accessToken)
-            var login = account.login
+        await withTaskGroup(of: CopilotTokenInfo.self) { group in
+            for account in accounts {
+                group.addTask {
+                    let planInfo = await TokenManager.shared.fetchCopilotPlanInfo(accessToken: account.accessToken)
+                    var login = account.login
 
-            if login == nil {
-                login = await fetchCopilotUserLogin(accessToken: account.accessToken)
+                    if login == nil {
+                        login = await self.fetchCopilotUserLogin(accessToken: account.accessToken)
+                    }
+
+                    let accountId = account.accountId ?? planInfo?.userId ?? login
+                    return CopilotTokenInfo(
+                        accountId: accountId,
+                        login: login,
+                        planInfo: planInfo,
+                        authSource: account.authSource,
+                        source: account.source
+                    )
+                }
             }
 
-            let accountId = account.accountId ?? planInfo?.userId ?? login
-            infos.append(
-                CopilotTokenInfo(
-                    accountId: accountId,
-                    login: login,
-                    planInfo: planInfo,
-                    authSource: account.authSource,
-                    source: account.source
-                )
-            )
+            for await info in group {
+                infos.append(info)
+            }
         }
 
         return dedupeTokenInfos(infos)
