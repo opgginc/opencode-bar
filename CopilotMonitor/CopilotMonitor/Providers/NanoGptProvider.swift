@@ -11,6 +11,8 @@ private struct NanoGptSubscriptionUsageResponse: Decodable {
 
         private enum CodingKeys: String, CodingKey {
             case daily
+            case dailyInputTokens
+            case dailyInputTokensSnake = "daily_input_tokens"
             case weeklyInputTokens
             case weeklyInputTokensSnake = "weekly_input_tokens"
             case weekly
@@ -23,7 +25,10 @@ private struct NanoGptSubscriptionUsageResponse: Decodable {
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            daily = NanoGptSubscriptionUsageResponse.decodeInt(container, forKey: .daily)
+            daily = NanoGptSubscriptionUsageResponse.decodeInt(
+                container,
+                forKeys: [.daily, .dailyInputTokens, .dailyInputTokensSnake]
+            )
             weeklyInputTokens = NanoGptSubscriptionUsageResponse.decodeInt(
                 container,
                 forKeys: [
@@ -107,6 +112,8 @@ private struct NanoGptSubscriptionUsageResponse: Decodable {
         case active
         case limits
         case daily
+        case dailyInputTokens
+        case dailyInputTokensSnake = "daily_input_tokens"
         case weekly
         case weeklyInputTokens
         case weeklyInputTokensSnake = "weekly_input_tokens"
@@ -140,7 +147,10 @@ private struct NanoGptSubscriptionUsageResponse: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         active = try container.decodeIfPresent(Bool.self, forKey: .active)
         limits = try container.decodeIfPresent(Limits.self, forKey: .limits)
-        daily = try container.decodeIfPresent(WindowUsage.self, forKey: .daily)
+        daily = NanoGptSubscriptionUsageResponse.decodeWindowUsage(
+            container,
+            forKeys: [.daily, .dailyInputTokens, .dailyInputTokensSnake]
+        )
 
         let weeklyWindowFromRoot = NanoGptSubscriptionUsageResponse.decodeWindowUsage(
             container,
@@ -332,40 +342,24 @@ final class NanoGptProvider: ProviderProtocol {
         let usageResponse = try await usageResponseTask
         let balanceResponse = try? await balanceResponseTask
 
-        guard let monthlyLimit = usageResponse.limits?.monthly,
-              monthlyLimit > 0 else {
-            logger.error("Nano-GPT monthly limit missing")
-            throw ProviderError.decodingError("Missing Nano-GPT monthly limit")
+        guard let weeklyLimit = usageResponse.limits?.weeklyInputTokens,
+              weeklyLimit > 0 else {
+            logger.error("Nano-GPT weekly quota limit missing")
+            throw ProviderError.decodingError("Missing Nano-GPT weekly quota limit")
         }
 
-        let monthlyUsed = usageResponse.monthly?.used ?? 0
-        let monthlyRemaining = usageResponse.monthly?.remaining ?? max(0, monthlyLimit - monthlyUsed)
-        let monthlyPercentUsed = normalizedPercent(
-            usageResponse.monthly?.percentUsed,
-            used: monthlyUsed,
-            total: monthlyLimit
+        let weeklyUsed = usageResponse.weeklyInputTokens?.used ?? 0
+        let weeklyRemaining = usageResponse.weeklyInputTokens?.remaining ?? max(0, weeklyLimit - weeklyUsed)
+        let weeklyInputTokenPercentUsed = normalizedPercent(
+            usageResponse.weeklyInputTokens?.percentUsed,
+            used: weeklyUsed,
+            total: weeklyLimit
         )
 
         let usage = ProviderUsage.quotaBased(
-            remaining: max(0, monthlyRemaining),
-            entitlement: monthlyLimit,
+            remaining: max(0, weeklyRemaining),
+            entitlement: weeklyLimit,
             overagePermitted: false
-        )
-
-        let dailyLimit = usageResponse.limits?.daily
-        let dailyUsed = usageResponse.daily?.used
-        let dailyPercentUsed = normalizedPercent(
-            usageResponse.daily?.percentUsed,
-            used: dailyUsed,
-            total: dailyLimit
-        )
-
-        let weeklyInputTokenLimit = usageResponse.limits?.weeklyInputTokens
-        let weeklyInputTokenUsed = usageResponse.weeklyInputTokens?.used
-        let weeklyInputTokenPercentUsed = normalizedPercent(
-            usageResponse.weeklyInputTokens?.percentUsed,
-            used: weeklyInputTokenUsed,
-            total: weeklyInputTokenLimit
         )
 
         let details = DetailedUsage(
@@ -374,19 +368,11 @@ final class NanoGptProvider: ProviderProtocol {
             sevenDayUsage: weeklyInputTokenPercentUsed,
             sevenDayReset: dateFromMilliseconds(usageResponse.weeklyInputTokens?.resetAt),
             creditsBalance: parseDouble(balanceResponse?.usdBalance),
-            authSource: tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json",
-            tokenUsagePercent: dailyPercentUsed,
-            tokenUsageReset: dateFromMilliseconds(usageResponse.daily?.resetAt),
-            tokenUsageUsed: dailyUsed,
-            tokenUsageTotal: dailyLimit,
-            mcpUsagePercent: monthlyPercentUsed,
-            mcpUsageReset: dateFromMilliseconds(usageResponse.monthly?.resetAt),
-            mcpUsageUsed: monthlyUsed,
-            mcpUsageTotal: monthlyLimit
+            authSource: tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
         )
 
         logger.info(
-            "Nano-GPT usage fetched: daily=\(dailyPercentUsed?.description ?? "n/a")% used, weeklyInputTokens=\(weeklyInputTokenPercentUsed?.description ?? "n/a")% used, monthly=\(monthlyPercentUsed?.description ?? "n/a")% used"
+            "Nano-GPT usage fetched: weeklyInputTokens=\(weeklyInputTokenPercentUsed?.description ?? "n/a")% used, limit=\(weeklyLimit), used=\(weeklyUsed), remaining=\(weeklyRemaining)"
         )
 
         return ProviderResult(usage: usage, details: details)
