@@ -592,45 +592,6 @@ extension StatusBarController {
                 rows.forEach { submenu.addItem($0) }
             }
 
-            if details.sevenDayUsage != nil,
-               details.tokenUsagePercent != nil {
-                submenu.addItem(NSMenuItem.separator())
-            }
-
-            if let dailyUsage = details.tokenUsagePercent {
-                let rows = createUsageWindowRow(
-                    label: "Daily",
-                    usagePercent: dailyUsage,
-                    resetDate: details.tokenUsageReset,
-                    windowHours: 24
-                )
-                rows.forEach { submenu.addItem($0) }
-            }
-            if let dailyUsed = details.tokenUsageUsed,
-               let dailyTotal = details.tokenUsageTotal {
-                let item = createLimitRow(label: "Daily Units", used: Double(dailyUsed), total: Double(dailyTotal))
-                submenu.addItem(item)
-            }
-
-            if details.tokenUsagePercent != nil, details.mcpUsagePercent != nil {
-                submenu.addItem(NSMenuItem.separator())
-            }
-
-            if let monthlyUsage = details.mcpUsagePercent {
-                let rows = createUsageWindowRow(
-                    label: "Monthly",
-                    usagePercent: monthlyUsage,
-                    resetDate: details.mcpUsageReset,
-                    isMonthly: true
-                )
-                rows.forEach { submenu.addItem($0) }
-            }
-            if let monthlyUsed = details.mcpUsageUsed,
-               let monthlyTotal = details.mcpUsageTotal {
-                let item = createLimitRow(label: "Monthly Units", used: Double(monthlyUsed), total: Double(monthlyTotal))
-                submenu.addItem(item)
-            }
-
             if details.creditsBalance != nil || details.totalCredits != nil {
                 submenu.addItem(NSMenuItem.separator())
             }

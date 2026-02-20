@@ -917,8 +917,6 @@ final class StatusBarController: NSObject {
             add(details?.tokenUsagePercent, priority: .hourly)
         case .nanoGpt:
             add(details?.sevenDayUsage, priority: .weekly)
-            add(details?.mcpUsagePercent, priority: .monthly)
-            add(details?.tokenUsagePercent, priority: .daily)
         case .chutes:
             add(dailyPercentFromDetails(details), priority: .daily)
         case .synthetic:
