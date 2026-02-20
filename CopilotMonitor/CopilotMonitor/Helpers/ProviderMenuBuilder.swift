@@ -267,10 +267,14 @@ extension StatusBarController {
                 submenu.addItem(NSMenuItem.separator())
             }
             if let sonnet = details.sonnetUsage {
+                let sonnetReset = details.sonnetReset ?? details.sevenDayReset
+                if details.sonnetReset == nil, sonnetReset != nil {
+                    debugLog("createDetailSubmenu(claude): Sonnet reset missing, using Weekly reset fallback")
+                }
                 let items = createUsageWindowRow(
                     label: "Sonnet (Weekly)",
                     usagePercent: sonnet,
-                    resetDate: details.sonnetReset,
+                    resetDate: sonnetReset,
                     windowHours: 168
                 )
                 items.forEach { submenu.addItem($0) }
@@ -279,10 +283,14 @@ extension StatusBarController {
                 submenu.addItem(NSMenuItem.separator())
             }
             if let opus = details.opusUsage {
+                let opusReset = details.opusReset ?? details.sevenDayReset
+                if details.opusReset == nil, opusReset != nil {
+                    debugLog("createDetailSubmenu(claude): Opus reset missing, using Weekly reset fallback")
+                }
                 let items = createUsageWindowRow(
                     label: "Opus (Weekly)",
                     usagePercent: opus,
-                    resetDate: details.opusReset,
+                    resetDate: opusReset,
                     windowHours: 168
                 )
                 items.forEach { submenu.addItem($0) }
@@ -1059,7 +1067,8 @@ extension StatusBarController {
 
         var predictText: String {
             if predictedFinalUsage > 100 {
-                return String(format: "+%.0f%%", predictedFinalUsage)
+                let overagePercent = max(0.0, predictedFinalUsage - 100.0)
+                return String(format: "+%.0f%%", overagePercent)
             }
             return String(format: "%.0f%%", predictedFinalUsage)
         }
@@ -1090,8 +1099,21 @@ extension StatusBarController {
         let now = Date()
         let remainingSeconds = resetTime.timeIntervalSince(now)
         let rawElapsedSeconds = windowSeconds - remainingSeconds
-        let elapsedSeconds = max(0, min(windowSeconds, rawElapsedSeconds))
+        let boundedElapsedSeconds = max(0, min(windowSeconds, rawElapsedSeconds))
 
+        // Rolling windows (especially weekly) can show extreme spikes right after usage starts.
+        // Use a stability floor so Speed/Predict are less noisy in very early phases.
+        let minElapsedRatioForForecast: Double
+        if windowHours >= 168 {
+            minElapsedRatioForForecast = 0.5
+        } else if windowHours >= 24 {
+            minElapsedRatioForForecast = 0.25
+        } else {
+            minElapsedRatioForForecast = 0.05
+        }
+
+        let minElapsedSeconds = windowSeconds * minElapsedRatioForForecast
+        let elapsedSeconds = max(boundedElapsedSeconds, minElapsedSeconds)
         let elapsedRatio = max(0, min(1, elapsedSeconds / windowSeconds))
         let usageRatio = usage / 100.0
         let isExhausted = usage >= 100 && remainingSeconds > 0
