@@ -1,10 +1,9 @@
 #!/bin/bash
-# Backward-compatible alias for local Antigravity server query.
-# Use query-antigravity-server.sh directly for server-only behavior.
-# Use query-antigravity-reversed.sh for cache/proto reverse parsing.
+# Local Antigravity usage query.
+# This now uses cache/proto reverse parsing (no localhost server dependency).
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-exec "$SCRIPT_DIR/query-antigravity-server.sh" "$@"
+exec "$SCRIPT_DIR/query-antigravity-reversed.sh" "$@"
