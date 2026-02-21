@@ -75,14 +75,14 @@ private struct AntigravityCachedAuthStatus: Codable {
     let userStatusProtoBinaryBase64: String?
 }
 
-private enum AntigravityProtobufValue {
+enum AntigravityProtobufValue {
     case varint(UInt64)
     case fixed64(Data)
     case lengthDelimited(Data)
     case fixed32(Data)
 }
 
-private typealias AntigravityProtobufMessage = [Int: [AntigravityProtobufValue]]
+typealias AntigravityProtobufMessage = [Int: [AntigravityProtobufValue]]
 
 private struct AntigravityParsedCacheUsage {
     let email: String?
@@ -216,7 +216,7 @@ final class AntigravityProvider: ProviderProtocol {
         )
     }
 
-    private func parseTimestampMessage(_ data: Data) throws -> Date {
+    func parseTimestampMessage(_ data: Data) throws -> Date {
         let timestampMessage = try parseProtobufMessage(data)
         guard let seconds = extractFirstVarint(from: timestampMessage[1]) else {
             throw ProviderError.decodingError("Timestamp seconds missing")
@@ -226,7 +226,7 @@ final class AntigravityProvider: ProviderProtocol {
         return Date(timeIntervalSince1970: TimeInterval(seconds) + (TimeInterval(nanos) / 1_000_000_000))
     }
 
-    private func parseProtobufMessage(_ data: Data) throws -> AntigravityProtobufMessage {
+    func parseProtobufMessage(_ data: Data) throws -> AntigravityProtobufMessage {
         let bytes = [UInt8](data)
         var index = 0
         var fields: AntigravityProtobufMessage = [:]
@@ -270,7 +270,7 @@ final class AntigravityProvider: ProviderProtocol {
         return fields
     }
 
-    private func readVarint(from bytes: [UInt8], index: inout Int) throws -> UInt64 {
+    func readVarint(from bytes: [UInt8], index: inout Int) throws -> UInt64 {
         var result: UInt64 = 0
         var shift: UInt64 = 0
 
