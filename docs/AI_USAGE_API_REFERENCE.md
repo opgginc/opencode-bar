@@ -202,7 +202,7 @@ Antigravity has **two independent quota systems**:
 | **Gemini CLI** | `cloudcode-pa.googleapis.com` | gemini-2.0/2.5-flash/pro | ~17 hours |
 | **Antigravity Local** | Local cache reverse parsing (`state.vscdb`) | Claude 4.6, Gemini 3, GPT-OSS | ~7 days |
 
-### 4a. Gemini CLI Quota
+### 5a. Gemini CLI Quota
 
 **Token:** `~/.config/opencode/antigravity-accounts.json`
 
