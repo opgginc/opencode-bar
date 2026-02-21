@@ -147,9 +147,11 @@ final class AntigravityProvider: ProviderProtocol {
     }
 
     private func loadCachedAuthStatus() async throws -> AntigravityCachedAuthStatus {
-        guard FileManager.default.fileExists(atPath: cacheDBPath) else {
-            logger.error("Antigravity cache DB not found at \(self.cacheDBPath, privacy: .public)")
-            throw ProviderError.providerError("Antigravity cache DB not found")
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: cacheDBPath),
+              fileManager.isReadableFile(atPath: cacheDBPath) else {
+            logger.error("Antigravity cache DB not readable at \(self.cacheDBPath, privacy: .public)")
+            throw ProviderError.providerError("Antigravity cache DB not readable")
         }
 
         let query = "SELECT CAST(value AS TEXT) FROM ItemTable WHERE key='antigravityAuthStatus';"
@@ -197,7 +199,11 @@ final class AntigravityProvider: ProviderProtocol {
                 guard let quotaPayload = extractFirstLengthDelimited(from: modelMessage[15]) else { continue }
 
                 let quotaMessage = try parseProtobufMessage(quotaPayload)
-                guard let remainingFraction = extractRemainingFraction(from: quotaMessage[1]) else { continue }
+                guard let remainingFraction = extractRemainingFraction(from: quotaMessage[1]),
+                      remainingFraction.isFinite else {
+                    logger.warning("Antigravity cache has non-finite remaining fraction for \(label, privacy: .public)")
+                    continue
+                }
 
                 let clampedFraction = max(0.0, min(1.0, remainingFraction))
                 modelBreakdown[label] = clampedFraction * 100.0
