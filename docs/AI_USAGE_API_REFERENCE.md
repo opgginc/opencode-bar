@@ -8,6 +8,7 @@
 |----------|-----------|
 | Claude, Codex, Copilot, Nano-GPT | `~/.local/share/opencode/auth.json` |
 | Antigravity (Gemini) | `~/.config/opencode/antigravity-accounts.json` |
+| Antigravity (Local cache) | `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb` |
 
 ---
 
@@ -196,10 +197,10 @@ curl -s -X POST "https://nano-gpt.com/api/check-balance" \
 
 Antigravity has **two independent quota systems**:
 
-| System | API | Models | Reset |
-|--------|-----|--------|-------|
+| System | Source | Models | Reset |
+|--------|--------|--------|-------|
 | **Gemini CLI** | `cloudcode-pa.googleapis.com` | gemini-2.0/2.5-flash/pro | ~17 hours |
-| **Antigravity Local** | Language Server (localhost) | Claude 4.5, Gemini 3, GPT-OSS | ~7 days |
+| **Antigravity Local** | Local cache reverse parsing (`state.vscdb`) | Claude 4.6, Gemini 3, GPT-OSS | ~7 days |
 
 ### 4a. Gemini CLI Quota
 
@@ -235,51 +236,50 @@ curl -s -X POST "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuot
 }
 ```
 
-### 4b. Antigravity Local Quota (Language Server)
+### 5b. Antigravity Local Quota (Cache Reverse Parsing)
 
-**Requires:** Antigravity app running
+**Source files:**
+- `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb`
+- `~/.config/opencode/antigravity-accounts.json` (for additional auth metadata)
 
-**Endpoint:** `POST http://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetUserStatus`
+**Notes:**
+- No localhost API call is required.
+- No `language_server_macos` process inspection is required.
+- Data freshness depends on cache update timing by Antigravity.
 
 ```bash
-# 1. Find language_server process and extract CSRF token
-PROCESS=$(ps -ax -o pid=,command= | grep language_server_macos | grep antigravity | head -1)
-PID=$(echo "$PROCESS" | awk '{print $1}')
-CSRF=$(echo "$PROCESS" | grep -oE '\-\-csrf_token[= ]+[^ ]+' | sed 's/--csrf_token[= ]*//')
+# Read cached auth payload
+sqlite3 "$HOME/Library/Application Support/Antigravity/User/globalStorage/state.vscdb" \
+  "SELECT CAST(value AS TEXT) FROM ItemTable WHERE key='antigravityAuthStatus';"
 
-# 2. Find listening ports
-PORTS=$(lsof -nP -iTCP -sTCP:LISTEN -a -p "$PID" | grep -oE ':[0-9]+' | sed 's/://' | sort -u)
-
-# 3. Call API (try each port)
-for port in $PORTS; do
-  curl -s -k -X POST "https://127.0.0.1:${port}/exa.language_server_pb.LanguageServerService/GetUserStatus" \
-    -H "Content-Type: application/json" \
-    -H "Connect-Protocol-Version: 1" \
-    -H "X-Codeium-Csrf-Token: $CSRF" \
-    -d '{"metadata":{"ideName":"antigravity","extensionName":"antigravity","ideVersion":"unknown","locale":"en"}}' && break
-done
+# Run reverse parser script
+bash scripts/query-antigravity-reversed.sh --no-keychain
 ```
 
-**Response:**
+**Response (script output):**
 ```json
 {
-  "userStatus": {
-    "email": "user@example.com",
-    "userTier": { "name": "Free" },
-    "cascadeModelConfigData": {
-      "clientModelConfigs": [
-        {
-          "label": "Claude Sonnet 4.5",
-          "modelOrAlias": { "model": "MODEL_CLAUDE_4_5_SONNET" },
-          "quotaInfo": { "remainingFraction": 0.85, "resetTime": "2026-02-05T17:11:17Z" }
-        },
-        {
-          "label": "Gemini 3 Pro (High)",
-          "modelOrAlias": { "model": "MODEL_PLACEHOLDER_M8" },
-          "quotaInfo": { "remainingFraction": 1, "resetTime": "2026-02-05T17:11:17Z" }
-        }
-      ]
+  "email": "user@example.com",
+  "plan": "cached",
+  "source": "Antigravity Cache (state.vscdb)",
+  "models": [
+    {
+      "label": "Claude Sonnet 4.6 (Thinking)",
+      "model": "cached-proto",
+      "remaining": "85%",
+      "reset": "2026-02-28T16:53:08Z"
+    },
+    {
+      "label": "Gemini 3.1 Pro (High)",
+      "model": "cached-proto",
+      "remaining": "20%",
+      "reset": "2026-02-24T07:25:48Z"
     }
+  ],
+  "auth": {
+    "cacheApiKey": { "present": true, "masked": "ya29.a...abcd" },
+    "oauthTokenBlob": { "present": true, "masked": "CqEECh...xyz=" },
+    "refreshToken": { "present": true, "masked": "1//0et...1234" }
   }
 }
 ```
@@ -374,7 +374,9 @@ Test scripts are located in the `scripts/` folder:
 | `query-copilot.sh` | GitHub Copilot |
 | `query-gemini-cli.sh` | Antigravity - Gemini CLI quota |
 | `query-gemini-oauth-creds.sh` | Gemini CLI oauth_creds identity/token inspection |
-| `query-antigravity-local.sh` | Antigravity - Local quota |
+| `query-antigravity-local.sh` | Antigravity - Local quota (cache reverse parsing alias) |
+| `query-antigravity-reversed.sh` | Antigravity - Local quota (cache reverse parsing) |
+| `query-antigravity-server.sh` | Antigravity - Localhost language server quota (legacy/server-dependent) |
 | `query-all.sh` | All providers |
 
 ```bash
