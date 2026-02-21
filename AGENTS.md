@@ -3,6 +3,7 @@
   - If you find any Korean text, please translate it to English.
 - **UI Language**
   - All user-facing text in the app MUST be in English.
+- Default review language: English.
 
 ### Obey design decisions that specifically decided before by me
 - All the decision is speicifed in `@AGENTS-design-decisions.md` file.
