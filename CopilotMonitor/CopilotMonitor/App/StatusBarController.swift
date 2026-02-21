@@ -1613,10 +1613,17 @@ final class StatusBarController: NSObject {
                 let baseName = multiAccountBaseName(for: .copilot)
                 for account in accounts {
                     hasQuota = true
-                    var displayName = accounts.count > 1 ? "\(baseName) #\(account.accountIndex + 1)" : baseName
+                    // Use accountId (login) when available, otherwise fall back to index
+                    let accountIdentifier: String
+                    if let accountId = account.accountId?.trimmingCharacters(in: .whitespacesAndNewlines), !accountId.isEmpty {
+                        accountIdentifier = accountId
+                    } else {
+                        accountIdentifier = "#\(account.accountIndex + 1)"
+                    }
+                    var displayName = accounts.count > 1 ? "\(baseName) (\(accountIdentifier))" : baseName
                     if accounts.count > 1, showCopilotAuthLabel {
                         let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: .copilot) ?? "Unknown"
-                        displayName += " (\(sourceLabel))"
+                        displayName += " - \(sourceLabel)"
                     }
                     if (account.usage.totalEntitlement ?? 0) == 0 {
                         displayName += " (No usage data)"

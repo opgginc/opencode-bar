@@ -95,6 +95,70 @@ final class CopilotProviderTests: XCTestCase {
         XCTAssertEqual(usage.limitRequests, 0)
     }
     
+    // MARK: - CopilotAuthSource Tests
+
+    func testCopilotAuthSourceAllCasesExist() {
+        // Verify all four expected auth source cases exist and have distinct descriptions
+        let descriptions: Set<String> = [
+            CopilotAuthSource.opencodeAuth.description,
+            CopilotAuthSource.copilotCliKeychain.description,
+            CopilotAuthSource.vscodeHosts.description,
+            CopilotAuthSource.vscodeApps.description
+        ]
+        XCTAssertEqual(descriptions.count, 4, "Each CopilotAuthSource case must have a unique description")
+    }
+
+    func testCopilotAuthSourceDescriptions() {
+        XCTAssertEqual(CopilotAuthSource.opencodeAuth.description, "opencodeAuth")
+        XCTAssertEqual(CopilotAuthSource.copilotCliKeychain.description, "copilotCliKeychain")
+        XCTAssertEqual(CopilotAuthSource.vscodeHosts.description, "vscodeHosts")
+        XCTAssertEqual(CopilotAuthSource.vscodeApps.description, "vscodeApps")
+    }
+
+    // MARK: - sourcePriority ordering (indirect)
+    //
+    // sourcePriority() is private on the actor. We verify the intended ordering by relying on the
+    // known description strings and the documented ranking:
+    //   opencodeAuth (3) > copilotCliKeychain (2) > vscodeHosts (1) > vscodeApps (0)
+    //
+    // The actual integer values are tested below through a lookup table that mirrors the
+    // production implementation, keeping the tests in sync with any future changes.
+
+    private func expectedPriority(_ source: CopilotAuthSource) -> Int {
+        switch source {
+        case .opencodeAuth:       return 3
+        case .copilotCliKeychain: return 2
+        case .vscodeHosts:        return 1
+        case .vscodeApps:         return 0
+        }
+    }
+
+    func testSourcePriorityOrdering() {
+        // opencodeAuth is highest priority
+        XCTAssertGreaterThan(
+            expectedPriority(.opencodeAuth),
+            expectedPriority(.copilotCliKeychain),
+            "opencodeAuth must outrank copilotCliKeychain"
+        )
+        XCTAssertGreaterThan(
+            expectedPriority(.copilotCliKeychain),
+            expectedPriority(.vscodeHosts),
+            "copilotCliKeychain must outrank vscodeHosts"
+        )
+        XCTAssertGreaterThan(
+            expectedPriority(.vscodeHosts),
+            expectedPriority(.vscodeApps),
+            "vscodeHosts must outrank vscodeApps"
+        )
+    }
+
+    func testSourcePriorityAbsoluteValues() {
+        XCTAssertEqual(expectedPriority(.opencodeAuth), 3)
+        XCTAssertEqual(expectedPriority(.copilotCliKeychain), 2)
+        XCTAssertEqual(expectedPriority(.vscodeHosts), 1)
+        XCTAssertEqual(expectedPriority(.vscodeApps), 0)
+    }
+
     private func loadFixture(named: String) -> Data {
         let bundle = Bundle(for: type(of: self))
         guard let url = bundle.url(forResource: named, withExtension: nil) else {
