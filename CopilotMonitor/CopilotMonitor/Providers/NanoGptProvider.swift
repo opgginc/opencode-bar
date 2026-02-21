@@ -440,16 +440,33 @@ final class NanoGptProvider: ProviderProtocol {
     private func normalizedPercent(_ percentValue: Double?, used: Int?, total: Int?) -> Double? {
         if let percentValue {
             if percentValue <= 1.0 {
-                return min(max(percentValue * 100.0, 0), 100)
+                let normalizedFromFraction = clampPercent(percentValue * 100.0)
+
+                if let usageDerivedPercent = derivePercentFromUsage(used: used, total: total) {
+                    let normalizedFromRawPercent = clampPercent(percentValue)
+                    if abs(normalizedFromRawPercent - usageDerivedPercent) < abs(normalizedFromFraction - usageDerivedPercent) {
+                        logger.debug(
+                            "Nano-GPT percent interpreted as raw percent using usage fallback: raw=\(percentValue, privacy: .public), derived=\(usageDerivedPercent, privacy: .public)"
+                        )
+                        return normalizedFromRawPercent
+                    }
+                }
+
+                return normalizedFromFraction
             }
-            return min(max(percentValue, 0), 100)
+            return clampPercent(percentValue)
         }
 
-        guard let used, let total, total > 0 else {
-            return nil
-        }
+        return derivePercentFromUsage(used: used, total: total)
+    }
 
-        return min(max((Double(used) / Double(total)) * 100.0, 0), 100)
+    private func derivePercentFromUsage(used: Int?, total: Int?) -> Double? {
+        guard let used, let total, total > 0 else { return nil }
+        return clampPercent((Double(used) / Double(total)) * 100.0)
+    }
+
+    private func clampPercent(_ value: Double) -> Double {
+        min(max(value, 0), 100)
     }
 
     private func dateFromMilliseconds(_ milliseconds: Int64?) -> Date? {

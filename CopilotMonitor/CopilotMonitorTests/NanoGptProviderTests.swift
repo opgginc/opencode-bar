@@ -354,4 +354,55 @@ final class NanoGptProviderTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+
+    func testFetchInterpretsAmbiguousNumericPercentUsingUsageFallback() async throws {
+        guard TokenManager.shared.getNanoGptAPIKey() != nil else {
+            throw XCTSkip("Nano-GPT API key not available; skipping fetch test.")
+        }
+
+        let session = makeSession()
+        let provider = NanoGptProvider(tokenManager: .shared, session: session)
+
+        let usageJSON = """
+        {
+          "active": true,
+          "limits": { "weeklyInputTokens": 35000 },
+          "weeklyInputTokens": {
+            "used": 175,
+            "remaining": 34825,
+            "percentUsed": 0.5,
+            "resetAt": 1738886400000
+          }
+        }
+        """
+
+        let balanceJSON = """
+        {
+          "usd_balance": "0.00000000",
+          "nano_balance": "0.00000000"
+        }
+        """
+
+        MockURLProtocol.requestHandler = { request in
+            guard let url = request.url else {
+                throw URLError(.badURL)
+            }
+
+            if url.path == "/api/subscription/v1/usage" {
+                let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                return (response, Data(usageJSON.utf8))
+            }
+
+            if url.path == "/api/check-balance" {
+                let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                return (response, Data(balanceJSON.utf8))
+            }
+
+            let response = HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: nil)!
+            return (response, Data())
+        }
+
+        let result = try await provider.fetch()
+        XCTAssertEqual(result.details?.sevenDayUsage ?? -1, 0.5, accuracy: 0.0001)
+    }
 }
