@@ -15,6 +15,14 @@ final class CodexProvider: ProviderProtocol {
     }
 
     private struct RateLimit: Decodable {
+        struct ResolvedWindows {
+            let shortKey: String
+            let shortWindow: RateLimitWindow
+            let longKey: String?
+            let longWindow: RateLimitWindow?
+            let source: String
+        }
+
         let windows: [String: RateLimitWindow]
 
         var primaryWindow: RateLimitWindow? {
@@ -30,8 +38,93 @@ final class CodexProvider: ProviderProtocol {
                 .filter { $0.key.lowercased().contains("spark") }
                 .map { ($0.key, $0.value) }
                 .sorted { lhs, rhs in
-                    lhs.0.localizedStandardCompare(rhs.0) == .orderedAscending
+                    if let lhsSeconds = lhs.1.limit_window_seconds,
+                       let rhsSeconds = rhs.1.limit_window_seconds,
+                       lhsSeconds != rhsSeconds {
+                        return lhsSeconds < rhsSeconds
+                    }
+                    return lhs.0.localizedStandardCompare(rhs.0) == .orderedAscending
                 }
+        }
+
+        func resolvedWindows(excludingSpark: Bool) -> ResolvedWindows? {
+            let entries = windows.filter { key, _ in
+                !excludingSpark || !key.lowercased().contains("spark")
+            }
+            guard !entries.isEmpty else { return nil }
+
+            // Preferred: explicit limit window duration from API.
+            let byLimitSeconds = entries
+                .compactMap { key, window -> (key: String, window: RateLimitWindow, seconds: Int)? in
+                    guard let seconds = window.limit_window_seconds, seconds > 0 else { return nil }
+                    return (key, window, seconds)
+                }
+                .sorted { lhs, rhs in
+                    if lhs.seconds != rhs.seconds {
+                        return lhs.seconds < rhs.seconds
+                    }
+                    return lhs.key.localizedStandardCompare(rhs.key) == .orderedAscending
+                }
+            if let shortest = byLimitSeconds.first {
+                let longest = byLimitSeconds.count > 1 ? byLimitSeconds.last : nil
+                return ResolvedWindows(
+                    shortKey: shortest.key,
+                    shortWindow: shortest.window,
+                    longKey: longest?.key,
+                    longWindow: longest?.window,
+                    source: "limit_window_seconds"
+                )
+            }
+
+            // Fallback: infer short/long windows from remaining time only when clearly separated.
+            let byResetAfterSeconds = entries
+                .compactMap { key, window -> (key: String, window: RateLimitWindow, seconds: Int)? in
+                    guard let seconds = window.reset_after_seconds, seconds > 0 else { return nil }
+                    return (key, window, seconds)
+                }
+                .sorted { lhs, rhs in
+                    if lhs.seconds != rhs.seconds {
+                        return lhs.seconds < rhs.seconds
+                    }
+                    return lhs.key.localizedStandardCompare(rhs.key) == .orderedAscending
+                }
+            if !byResetAfterSeconds.isEmpty,
+               let short = byResetAfterSeconds.first(where: { $0.seconds < 86_400 }),
+               let long = byResetAfterSeconds.last(where: { $0.seconds >= 86_400 }) {
+                return ResolvedWindows(
+                    shortKey: short.key,
+                    shortWindow: short.window,
+                    longKey: long.key,
+                    longWindow: long.window,
+                    source: "reset_after_seconds_heuristic"
+                )
+            }
+
+            // Compatibility fallback for existing response shape.
+            if let primary = primaryWindow {
+                let secondary = secondaryWindow
+                return ResolvedWindows(
+                    shortKey: "primary_window",
+                    shortWindow: primary,
+                    longKey: secondary != nil ? "secondary_window" : nil,
+                    longWindow: secondary,
+                    source: "primary_secondary_fallback"
+                )
+            }
+
+            // Last resort: deterministic key ordering.
+            let sortedByKey = entries.sorted { lhs, rhs in
+                lhs.key.localizedStandardCompare(rhs.key) == .orderedAscending
+            }
+            guard let first = sortedByKey.first else { return nil }
+            let last = sortedByKey.count > 1 ? sortedByKey.last : nil
+            return ResolvedWindows(
+                shortKey: first.key,
+                shortWindow: first.value,
+                longKey: last?.key,
+                longWindow: last?.value,
+                source: "key_order_fallback"
+            )
         }
 
         init(from decoder: Decoder) throws {
@@ -257,38 +350,36 @@ final class CodexProvider: ProviderProtocol {
             throw ProviderError.decodingError(error.localizedDescription)
         }
 
-        guard let primaryWindow = codexResponse.rate_limit.primaryWindow else {
-            logger.error("Codex response missing primary_window")
-            throw ProviderError.decodingError("Missing primary window")
+        guard let baseWindows = codexResponse.rate_limit.resolvedWindows(excludingSpark: true) else {
+            logger.error("Codex response missing usable rate-limit window")
+            throw ProviderError.decodingError("Missing rate-limit window")
         }
-        let secondaryWindow = codexResponse.rate_limit.secondaryWindow
+        let primaryWindow = baseWindows.shortWindow
+        let secondaryWindow = baseWindows.longWindow
         let additionalSparkLimit = codexResponse.additional_rate_limits?.first { limit in
             let name = limit.limit_name ?? ""
             return name.range(of: "spark", options: .caseInsensitive) != nil
-                && limit.rate_limit?.primaryWindow != nil
+                && limit.rate_limit?.resolvedWindows(excludingSpark: false) != nil
         }
-        let inlineSparkWindow = codexResponse.rate_limit.sparkWindows.first
+        let inlineSparkWindows = codexResponse.rate_limit.sparkWindows
+        let inlineSparkPrimary = inlineSparkWindows.first
+        let inlineSparkSecondary = inlineSparkWindows.count > 1 ? inlineSparkWindows.last : nil
+        let additionalSparkWindows = additionalSparkLimit?.rate_limit?.resolvedWindows(excludingSpark: false)
         let primaryUsedPercent = primaryWindow.used_percent
-        let primaryResetSeconds = primaryWindow.reset_after_seconds ?? 0
-        let secondaryUsedPercent = secondaryWindow?.used_percent ?? 0.0
-        let secondaryResetSeconds = secondaryWindow?.reset_after_seconds ?? 0
-        let sparkUsedPercent = inlineSparkWindow?.1.used_percent
-            ?? additionalSparkLimit?.rate_limit?.primaryWindow?.used_percent
-        let sparkWindowLabel = normalizeSparkWindowLabel(inlineSparkWindow?.0 ?? additionalSparkLimit?.limit_name)
-        let sparkResetSeconds = inlineSparkWindow?.1.reset_after_seconds
-            ?? additionalSparkLimit?.rate_limit?.primaryWindow?.reset_after_seconds
-        let sparkSecondaryUsedPercent = inlineSparkWindow == nil
-            ? additionalSparkLimit?.rate_limit?.secondaryWindow?.used_percent
-            : nil
-        let sparkSecondaryResetSeconds = inlineSparkWindow == nil
-            ? additionalSparkLimit?.rate_limit?.secondaryWindow?.reset_after_seconds
-            : nil
+        let secondaryUsedPercent = secondaryWindow?.used_percent
+        let sparkUsedPercent = inlineSparkPrimary?.1.used_percent
+            ?? additionalSparkWindows?.shortWindow.used_percent
+        let sparkWindowLabel = normalizeSparkWindowLabel(inlineSparkPrimary?.0 ?? additionalSparkLimit?.limit_name)
+        let sparkSecondaryUsedPercent = inlineSparkSecondary?.1.used_percent
+            ?? (inlineSparkPrimary == nil ? additionalSparkWindows?.longWindow?.used_percent : nil)
 
         let now = Date()
-        let primaryResetDate = now.addingTimeInterval(TimeInterval(primaryResetSeconds))
-        let secondaryResetDate = secondaryWindow != nil ? now.addingTimeInterval(TimeInterval(secondaryResetSeconds)) : nil
-        let sparkResetDate = sparkResetSeconds != nil ? now.addingTimeInterval(TimeInterval(sparkResetSeconds ?? 0)) : nil
-        let sparkSecondaryResetDate = sparkSecondaryResetSeconds != nil ? now.addingTimeInterval(TimeInterval(sparkSecondaryResetSeconds ?? 0)) : nil
+        let primaryResetDate = resolveResetDate(now: now, window: primaryWindow)
+        let secondaryResetDate = secondaryWindow.flatMap { resolveResetDate(now: now, window: $0) }
+        let sparkResetDate = inlineSparkPrimary.flatMap { resolveResetDate(now: now, window: $0.1) }
+            ?? additionalSparkWindows.flatMap { resolveResetDate(now: now, window: $0.shortWindow) }
+        let sparkSecondaryResetDate = inlineSparkSecondary.flatMap { resolveResetDate(now: now, window: $0.1) }
+            ?? (inlineSparkPrimary == nil ? additionalSparkWindows?.longWindow.flatMap { resolveResetDate(now: now, window: $0) } : nil)
 
         let remaining = Int(100 - primaryUsedPercent)
         let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
@@ -313,14 +404,28 @@ final class CodexProvider: ProviderProtocol {
         let sparkSummary = sparkUsedPercent.map { String(format: "%.1f%%", $0) } ?? "none"
         let sparkWeeklySummary = sparkSecondaryUsedPercent.map { String(format: "%.1f%%", $0) } ?? "none"
         let sparkSource: String
-        if inlineSparkWindow != nil {
+        if inlineSparkPrimary != nil {
             sparkSource = "rate_limit"
         } else if additionalSparkLimit != nil {
             sparkSource = "additional_rate_limits"
         } else {
             sparkSource = "none"
         }
-        logger.debug("Codex usage fetched (\(authUsageSummary)): email=\(account.email ?? "unknown"), primary=\(primaryUsedPercent)%, secondary=\(secondaryUsedPercent)%, spark_primary=\(sparkSummary), spark_secondary=\(sparkWeeklySummary), spark_source=\(sparkSource), plan=\(codexResponse.plan_type ?? "unknown"), spark_window=\(sparkWindowLabel ?? "none")")
+        let secondarySummary = secondaryUsedPercent.map { String(format: "%.1f%%", $0) } ?? "none"
+        logger.debug(
+            """
+            Codex usage fetched (\(authUsageSummary)): \
+            email=\(account.email ?? "unknown"), \
+            base_short=\(primaryUsedPercent)%(\(baseWindows.shortKey)), \
+            base_long=\(secondarySummary)(\(baseWindows.longKey ?? "none")), \
+            base_source=\(baseWindows.source), \
+            spark_primary=\(sparkSummary), \
+            spark_secondary=\(sparkWeeklySummary), \
+            spark_source=\(sparkSource), \
+            spark_window=\(sparkWindowLabel ?? "none"), \
+            plan=\(codexResponse.plan_type ?? "unknown")
+            """
+        )
 
         let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: 100, overagePermitted: false)
         return CodexAccountCandidate(
@@ -365,6 +470,19 @@ final class CodexProvider: ProviderProtocol {
             return normalized.capitalized
         }
         return normalized
+    }
+
+    private func resolveResetDate(now: Date, window: RateLimitWindow) -> Date? {
+        if let resetAfterSeconds = window.reset_after_seconds {
+            return now.addingTimeInterval(TimeInterval(resetAfterSeconds))
+        }
+        if let resetAt = window.reset_at {
+            if resetAt > 2_000_000_000_000 {
+                return Date(timeIntervalSince1970: TimeInterval(resetAt) / 1000.0)
+            }
+            return Date(timeIntervalSince1970: TimeInterval(resetAt))
+        }
+        return nil
     }
 
     private func sameDate(_ lhs: Date?, _ rhs: Date?) -> Bool {

@@ -1066,10 +1066,6 @@ extension StatusBarController {
         }
 
         var predictText: String {
-            if predictedFinalUsage > 100 {
-                let overagePercent = max(0.0, predictedFinalUsage - 100.0)
-                return String(format: "+%.0f%%", overagePercent)
-            }
             return String(format: "%.0f%%", predictedFinalUsage)
         }
     }
