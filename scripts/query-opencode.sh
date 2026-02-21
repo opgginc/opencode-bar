@@ -5,12 +5,43 @@
 
 set -e
 
-OPENCODE_BIN="$HOME/.opencode/bin/opencode"
+find_opencode_bin() {
+    local bin_path
 
-if [[ ! -x "$OPENCODE_BIN" ]]; then
-    echo "Error: OpenCode CLI not found at $OPENCODE_BIN"
+    bin_path=$(command -v opencode 2>/dev/null || true)
+    if [[ -n "$bin_path" && -x "$bin_path" ]]; then
+        echo "$bin_path"
+        return 0
+    fi
+
+    bin_path=$(zsh -lic 'command -v opencode 2>/dev/null' 2>/dev/null || true)
+    if [[ -n "$bin_path" && -x "$bin_path" ]]; then
+        echo "$bin_path"
+        return 0
+    fi
+
+    for candidate in \
+        "$HOME/.opencode/bin/opencode" \
+        "/opt/homebrew/bin/opencode" \
+        "/usr/local/bin/opencode" \
+        "$HOME/.local/bin/opencode"; do
+        if [[ -x "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+OPENCODE_BIN="$(find_opencode_bin || true)"
+
+if [[ -z "$OPENCODE_BIN" ]]; then
+    echo "Error: OpenCode CLI not found in PATH or common locations"
     exit 1
 fi
+
+echo "Using OpenCode binary: $OPENCODE_BIN"
 
 # Default to last 30 days
 DAYS="${1:-30}"
