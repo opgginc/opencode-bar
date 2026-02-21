@@ -59,7 +59,8 @@ final class TavilySearchProvider: ProviderProtocol {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let authValue = apiKey.lowercased().hasPrefix("bearer ") ? apiKey : "Bearer \(apiKey)"
+        request.setValue(authValue, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await session.data(for: request)

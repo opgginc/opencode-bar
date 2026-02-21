@@ -2441,7 +2441,7 @@ final class StatusBarController: NSObject {
 
         let used = max(0, entitlement - remaining)
         let usagePercent = (Double(used) / Double(entitlement)) * 100.0
-        let filledBlocks = Int((Double(used) / Double(max(entitlement, 1))) * 10)
+        let filledBlocks = min(10, Int((Double(used) / Double(max(entitlement, 1))) * 10))
         let emptyBlocks = max(0, 10 - filledBlocks)
         let progressBar = String(repeating: "═", count: filledBlocks) + String(repeating: "░", count: emptyBlocks)
 

@@ -514,7 +514,12 @@ final class BraveSearchProvider: ProviderProtocol {
 
     private func formatResetText(seconds: Int?) -> String? {
         guard let seconds else { return nil }
-        let resetDate = Date().addingTimeInterval(TimeInterval(seconds))
+        let resetDate: Date
+        if seconds >= 1_000_000_000 {
+            resetDate = Date(timeIntervalSince1970: TimeInterval(seconds))
+        } else {
+            resetDate = Date().addingTimeInterval(TimeInterval(seconds))
+        }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm z"
         formatter.timeZone = TimeZone.current
