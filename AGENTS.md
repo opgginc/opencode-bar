@@ -642,4 +642,62 @@ func buildProviderSubmenu() -> [NSMenuItem] {
         - Pattern: Validate commit message doesn't contain Korean/Chinese/Japanese characters before accepting commit
         - Reference: Project policy states "All of comments in code base, commit message, PR content and title should be written in English"
 
+     - **Rolling Window Forecast Stability Floor**:
+        - Spike Problem: Weekly/monthly rolling windows show extreme usage spikes right after a new window starts (very little elapsed time inflates speed/predict values)
+        - Root Cause: Dividing small usage by very small elapsed time produces unrealistically high pace predictions
+        - Fix: Apply a minimum elapsed-time ratio before computing speed/predict (e.g., 50% for weekly, 25% for daily, 5% for hourly)
+        - Pattern: let elapsedSeconds = max(boundedElapsedSeconds, windowSeconds * minElapsedRatioForForecast)
+        - Benefit: Pace and Predict values remain stable and meaningful during the early phase of each window
+     - **Predict Text Overage Calculation**:
+        - Double-Counting Bug: Displaying predictedFinalUsage directly as overage percent includes the base 100%, showing inflated numbers
+        - Fix: Subtract 100 from predicted usage before formatting the overage string
+        - Pattern: let overagePercent = max(0.0, predictedFinalUsage - 100.0) then format as +%.0f%%
+        - Context: Predict row in quota-based provider submenus
+     - **Predict Color Suppression When Safe**:
+        - Noise Issue: Predict value was always rendered in emphasis (warning) color, even when usage pace is normal
+        - Fix: Only apply warning color when pace status is slightlyFast or tooFast; use secondaryLabelColor otherwise
+        - Pattern: let isPredictWarning = paceInfo.status == .slightlyFast || paceInfo.status == .tooFast
+        - Benefit: Reduces visual noise and makes warnings more meaningful
+     - **Reset Date Fallback for Sub-Model Windows**:
+        - Missing Reset Date: Sub-model quota windows (e.g., Sonnet, Opus) may not carry their own reset date in the API response
+        - Impact: Usage window row shows no reset time, making it unclear when quota refreshes
+        - Fix: Fall back to the parent weekly reset date when the sub-model reset is nil
+        - Pattern: let sonnetReset = details.sonnetReset ?? details.sevenDayReset
+        - Logging: Add debug log when fallback is used to aid future diagnosis
+     - **Multi-Source Account Deduplication by Email**:
+        - Two-Pass Dedup Problem: First-pass dedup by accountId leaves duplicates when one source has accountId and another does not (e.g., Codex auth vs codex-lb)
+        - Fix: Add a second-pass email-based merge after the primary accountId dedup
+        - Priority: Higher-priority source wins; lower-priority source fields are used as fallback via mergeOpenAIAccount(primary:fallback:)
+        - Pattern: Build emailIndexMap after primary dedup, merge accounts sharing the same normalized lowercase email
+        - Benefit: Prevents duplicate provider rows when the same user account is discovered from multiple auth sources
+     - **Sparkle Update Check Interval Override**:
+        - Preference Overwrite Problem: Setting automaticallyChecksForUpdates and automaticallyDownloadsUpdates on every launch overwrites user preferences stored by Sparkle
+        - Fix: Only update updateCheckInterval when it differs from the desired value; never force-set the boolean flags
+        - Remove: Custom Timer-based background update check loop is redundant when Sparkle manages its own schedule
+        - Pattern: Read current values, log them, only write updateCheckInterval if it needs changing
+        - Benefit: Respects user opt-out of automatic updates and avoids redundant update checks
+     - **Status Bar Icon Width Dynamic Sizing**:
+        - Fixed-Width Problem: Hardcoding status bar icon view width (e.g., 70pt) wastes space when text is short and clips when text is long
+        - Fix: Use NSStatusItem.variableLength and compute width from intrinsicContentSize of the custom view
+        - Callback Pattern: Add onIntrinsicContentSizeDidChange closure on the icon view; call updateStatusItemLayout() whenever content changes
+        - Pattern: statusItem.length = max(minWidth, ceil(iconView.intrinsicContentSize.width))
+        - Benefit: Status bar icon always fits its content without wasted space or clipping
+     - **Provider Name Removed from Status Bar Text**:
+        - Redundancy Issue: Showing provider name as text prefix (e.g., Claude 77%) wastes limited status bar space
+        - Fix: Remove provider name from all status bar text formatters; show only the metric value (e.g., 77%)
+        - Provider Identity: Conveyed via the additive provider icon instead of text
+        - Affected Formatters: formatProviderForStatusBar, formatAlertText, formatRecentChangeText
+        - Pattern: Return only the metric string; let the icon layer handle provider identity
+     - **Antigravity Local Cache Reverse Parsing**:
+        - API Dependency Removed: Antigravity provider no longer calls the localhost language server API
+        - New Approach: Parse usage directly from the local SQLite cache (state.vscdb) using protobuf binary decoding
+        - Benefit: No localhost server dependency, works even when the extension is not running
+        - Key Data: Auth status (email, apiKey, userStatusProtoBinaryBase64) read from cache; protobuf decoded for quota info
+        - Pattern: Read cached auth blob -> base64 decode -> protobuf parse -> extract model quotas and reset times
+     - **Dynamic Binary Discovery in Shell Scripts**:
+        - Same Pattern as Swift App: Shell query scripts must also use multi-strategy binary discovery, not hardcoded paths
+        - Strategy Order: 1) command -v opencode in current PATH, 2) login shell PATH via SHELL -lc which opencode, 3) common fallback paths (Homebrew, default install, pip/pipx)
+        - Error Output: Write discovery errors to stderr so stdout remains clean for data consumers
+        - Pattern: Wrap discovery in a find_opencode_bin() shell function; assign result to OPENCODE_BIN variable
+
      <!-- opencode:reflection:end -->
