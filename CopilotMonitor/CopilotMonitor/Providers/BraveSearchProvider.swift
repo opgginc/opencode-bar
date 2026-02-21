@@ -272,7 +272,9 @@ final class BraveSearchProvider: ProviderProtocol {
         }
 
         mutable.eventCursor = newestCursor
-        mutable.eventLastScanAt = scanStartedAt
+        if !scanResult.didHitProcessingLimit {
+            mutable.eventLastScanAt = scanStartedAt
+        }
         if incrementCount > 0 {
             mutable.eventEstimatedUsed += incrementCount
             braveSearchLogger.info("Brave Search event counter +\(incrementCount), total=\(mutable.eventEstimatedUsed)")

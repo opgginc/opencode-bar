@@ -82,8 +82,8 @@ final class TavilySearchProvider: ProviderProtocol {
             throw ProviderError.decodingError("Invalid Tavily usage response")
         }
 
-        let used = decoded.account?.planUsage ?? decoded.key?.usage
-        let limit = decoded.account?.planLimit ?? decoded.key?.limit
+        let used = decoded.account?.planUsage ?? decoded.account?.paygoUsage ?? decoded.key?.usage
+        let limit = decoded.account?.planLimit ?? decoded.account?.paygoLimit ?? decoded.key?.limit
 
         guard let resolvedUsed = used, let resolvedLimit = limit, resolvedLimit > 0 else {
             throw ProviderError.decodingError("Missing Tavily usage or limit")
@@ -112,13 +112,13 @@ final class TavilySearchProvider: ProviderProtocol {
 
     private func formatEstimatedMonthlyResetText(referenceDate: Date = Date()) -> String {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone.current
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
         let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: referenceDate)) ?? referenceDate
         let nextMonthStart = calendar.date(byAdding: .month, value: 1, to: startOfMonth) ?? referenceDate
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm z"
-        formatter.timeZone = TimeZone.current
+        formatter.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
 
         return "Resets: \(formatter.string(from: nextMonthStart)) (estimated monthly)"
     }

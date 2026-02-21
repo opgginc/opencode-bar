@@ -2417,8 +2417,8 @@ final class StatusBarController: NSObject {
         let submenu = NSMenu()
 
         if isLoading {
-            let loadingItem = NSMenuItem()
-            loadingItem.view = createDisabledLabelView(text: "Loading...")
+            let loadingItem = NSMenuItem(title: "Loading...", action: nil, keyEquivalent: "")
+            loadingItem.isEnabled = false
             submenu.addItem(loadingItem)
             return submenu
         }
