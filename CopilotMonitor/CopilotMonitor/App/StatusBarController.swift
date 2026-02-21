@@ -1949,6 +1949,22 @@ final class StatusBarController: NSObject {
                     hasQuota = true
                     let accountNumber = account.accountIndex + 1
                     let usedPercent = normalizedUsagePercent(100.0 - account.remainingPercentage) ?? 0.0
+                    let usedPercents: [Double]
+
+                    if account.authSource.lowercased().contains("antigravity"),
+                       let antigravityResult = providerResults[.antigravity],
+                       case .quotaBased(let agRemaining, let agEntitlement, _) = antigravityResult.usage,
+                       agEntitlement > 0 {
+                        let antigravityUsedPercent = (Double(agEntitlement - agRemaining) / Double(agEntitlement)) * 100
+                        if let normalizedAntigravity = normalizedUsagePercent(antigravityUsedPercent) {
+                            usedPercents = [usedPercent, normalizedAntigravity]
+                        } else {
+                            usedPercents = [usedPercent]
+                        }
+                    } else {
+                        usedPercents = [usedPercent]
+                    }
+
                     let normalizedEmail = account.email.trimmingCharacters(in: .whitespacesAndNewlines)
                     var displayName = "Gemini CLI"
 
@@ -1963,7 +1979,7 @@ final class StatusBarController: NSObject {
                     }
                     let item = createNativeQuotaMenuItem(
                         name: displayName,
-                        usedPercent: usedPercent,
+                        usedPercents: usedPercents,
                         icon: iconForProvider(.geminiCLI)
                     )
                     item.tag = 999

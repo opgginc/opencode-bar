@@ -5,28 +5,40 @@
 
 set -e
 
+# Find opencode binary using multiple strategies (matches Swift app approach)
 find_opencode_bin() {
-    local bin_path
-
-    bin_path=$(command -v opencode 2>/dev/null || true)
-    if [[ -n "$bin_path" && -x "$bin_path" ]]; then
-        echo "$bin_path"
+    # Strategy 1: Try "which opencode" in current PATH
+    if command -v opencode &> /dev/null; then
+        local resolved_path
+        resolved_path=$(command -v opencode)
+        echo "Found opencode via PATH: $resolved_path" >&2
+        echo "$resolved_path"
         return 0
     fi
 
-    bin_path=$(zsh -lic 'command -v opencode 2>/dev/null' 2>/dev/null || true)
-    if [[ -n "$bin_path" && -x "$bin_path" ]]; then
-        echo "$bin_path"
+    # Strategy 2: Try via login shell to get user's full PATH
+    local shell="${SHELL:-/bin/zsh}"
+    local login_path
+    login_path=$("$shell" -lc 'which opencode 2>/dev/null' 2>/dev/null)
+    if [[ -n "$login_path" && -x "$login_path" ]]; then
+        echo "Found opencode via login shell PATH: $login_path" >&2
+        echo "$login_path"
         return 0
     fi
 
-    for candidate in \
-        "$HOME/.opencode/bin/opencode" \
-        "/opt/homebrew/bin/opencode" \
-        "/usr/local/bin/opencode" \
-        "$HOME/.local/bin/opencode"; do
-        if [[ -x "$candidate" ]]; then
-            echo "$candidate"
+    # Strategy 3: Fallback to common installation paths
+    local fallback_paths=(
+        "/opt/homebrew/bin/opencode"      # Apple Silicon Homebrew
+        "/usr/local/bin/opencode"          # Intel Homebrew
+        "$HOME/.opencode/bin/opencode"     # OpenCode default
+        "$HOME/.local/bin/opencode"        # pip/pipx
+        "/usr/bin/opencode"                # System-wide
+    )
+
+    for candidate_path in "${fallback_paths[@]}"; do
+        if [[ -x "$candidate_path" ]]; then
+            echo "Found opencode via fallback path: $candidate_path" >&2
+            echo "$candidate_path"
             return 0
         fi
     done
@@ -35,9 +47,9 @@ find_opencode_bin() {
 }
 
 OPENCODE_BIN="$(find_opencode_bin || true)"
-
 if [[ -z "$OPENCODE_BIN" ]]; then
-    echo "Error: OpenCode CLI not found in PATH or common locations"
+    echo "Error: OpenCode CLI not found. Please ensure 'opencode' is in your PATH." >&2
+    echo "Searched: PATH, login shell PATH, and common installation locations." >&2
     exit 1
 fi
 
@@ -56,7 +68,7 @@ echo ""
 if [[ "$2" == "--projects" ]]; then
     echo ""
     echo "=== Per-Project Breakdown ==="
-    
+
     # Get list of recent projects from sessions
     SESSIONS_DIR="$HOME/.local/share/opencode/sessions"
     if [[ -d "$SESSIONS_DIR" ]]; then
