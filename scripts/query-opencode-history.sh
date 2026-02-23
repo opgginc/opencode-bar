@@ -14,10 +14,10 @@ set -e
 find_opencode_bin() {
     # Strategy 1: Try "which opencode" in current PATH
     if command -v opencode &> /dev/null; then
-        local path
-        path=$(command -v opencode)
-        echo "Found opencode via PATH: $path" >&2
-        echo "$path"
+        local resolved_path
+        resolved_path=$(command -v opencode)
+        echo "Found opencode via PATH: $resolved_path" >&2
+        echo "$resolved_path"
         return 0
     fi
 
@@ -40,10 +40,10 @@ find_opencode_bin() {
         "/usr/bin/opencode"                # System-wide
     )
 
-    for path in "${fallback_paths[@]}"; do
-        if [[ -x "$path" ]]; then
-            echo "Found opencode via fallback path: $path" >&2
-            echo "$path"
+    for candidate_path in "${fallback_paths[@]}"; do
+        if [[ -x "$candidate_path" ]]; then
+            echo "Found opencode via fallback path: $candidate_path" >&2
+            echo "$candidate_path"
             return 0
         fi
     done
@@ -51,12 +51,14 @@ find_opencode_bin() {
     return 1
 }
 
-OPENCODE_BIN=$(find_opencode_bin || true)
+OPENCODE_BIN="$(find_opencode_bin || true)"
 if [[ -z "$OPENCODE_BIN" ]]; then
     echo "Error: OpenCode CLI not found. Please ensure 'opencode' is in your PATH." >&2
     echo "Searched: PATH, login shell PATH, and common installation locations." >&2
     exit 1
 fi
+
+echo "Using OpenCode binary: $OPENCODE_BIN"
 
 HISTORY_DAYS="${1:-7}"
 OUTPUT_FORMAT="${2:-text}"
