@@ -65,13 +65,13 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 | **Claude** | Quota-based | 5h/7d usage windows, Sonnet/Opus breakdown |
 | **Codex** | Quota-based | Primary/Secondary quotas, plan type |
 | **Gemini CLI** | Quota-based | Per-model quotas, multi-account support with email labels and account ID details |
-| **Nano-GPT** | Quota-based | Daily/monthly unit quotas, USD/NANO balance |
+| **Nano-GPT** | Quota-based | Weekly input tokens quota, USD/NANO balance |
 | **Kimi for Coding (Kimi K2.5)** | Quota-based | Usage limits, membership level, reset time |
 | **Z.AI Coding Plan** | Quota-based | Token/MCP quotas, model usage, tool usage (24h) |
 | **Brave Search** | Quota-based | Monthly search quota, reset schedule |
 | **Tavily** | Quota-based | Monthly search quota, plan usage |
 | **Synthetic** | Quota-based | 5h usage limit, request limits, reset time |
-| **Antigravity** | Quota-based | Local language server monitoring |
+| **Antigravity** | Quota-based | Local cache reverse parsing (`state.vscdb`), no localhost dependency |
 | **Chutes AI** | Quota-based | Daily quota limits (300/2000/5000), credits balance |
 | **GitHub Copilot** | Quota-based | Daily history, overage tracking |
 
@@ -304,7 +304,13 @@ Quit (⌘Q)
 
 - **Menu Bar Display**: Choose one of `Total Cost`, `Icon Only`, or `Only Show`.
 - **Critical Badge**: Toggle on/off to show or hide the critical-usage badge.
-- **Show Provider Name**: Toggle on/off to include provider names in status bar text.
+- **Show Provider Icon**: Toggle on/off to append the selected provider icon in the status bar.
+
+> **Status Bar Icon Behavior**:
+> The primary OpenCode Bar status icon always stays visible. Provider icons are rendered as an additional icon next to the primary icon (not a replacement).
+>
+> **Gemini Icon Sizing**:
+> Gemini uses a slightly larger icon size than other providers in both menu rows and the status bar to match the official visual balance.
 
 > **Note**: Subscription settings are only available for quota-based providers. Pay-as-you-go providers do not have subscription options since they charge based on actual usage.
 >

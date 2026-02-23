@@ -469,7 +469,7 @@ final class StatusBarController: NSObject {
         criticalBadgeMenuItem.target = self
         statusBarOptionsMenu.addItem(criticalBadgeMenuItem)
 
-        showProviderNameMenuItem = NSMenuItem(title: "Show Provider Name", action: #selector(toggleShowProviderName(_:)), keyEquivalent: "")
+        showProviderNameMenuItem = NSMenuItem(title: "Show Provider Icon", action: #selector(toggleShowProviderName(_:)), keyEquivalent: "")
         showProviderNameMenuItem.target = self
         statusBarOptionsMenu.addItem(showProviderNameMenuItem)
 
@@ -946,8 +946,7 @@ final class StatusBarController: NSObject {
             add(details?.mcpUsagePercent, priority: .monthly)
             add(details?.tokenUsagePercent, priority: .hourly)
         case .nanoGpt:
-            add(details?.mcpUsagePercent, priority: .monthly)
-            add(details?.tokenUsagePercent, priority: .daily)
+            add(details?.sevenDayUsage, priority: .weekly)
         case .chutes:
             add(dailyPercentFromDetails(details), priority: .daily)
         case .synthetic:
@@ -1184,42 +1183,47 @@ final class StatusBarController: NSObject {
     }
 
     private func formatRecentChangeText(_ candidate: RecentChangeCandidate) -> String {
-        let provider = candidate.identifier.shortDisplayName
         guard let result = providerResults[candidate.identifier] else {
-            return provider
+            return "--"
         }
 
         switch result.usage {
         case .payAsYouGo(_, let cost, _):
-            return "\(provider) \(formatCostForStatusBar(cost ?? 0.0))"
+            return formatCostForStatusBar(cost ?? 0.0)
         case .quotaBased:
             let percent = preferredUsedPercent(
                 identifier: candidate.identifier,
                 usage: result.usage,
                 details: result.details
             ) ?? min(max(result.usage.usagePercentage, 0.0), 999.0)
-            return "\(provider) \(String(format: "%.0f%%", percent))"
+            return String(format: "%.0f%%", percent)
         }
     }
 
-    private func formatAlertText(identifier: ProviderIdentifier, usedPercent: Double) -> String {
-        let usageText = String(format: "%.0f%%", usedPercent)
-        if showProviderName {
-            return "\(identifier.shortDisplayName) \(usageText)"
-        }
-        return usageText
+    private func formatAlertText(identifier _: ProviderIdentifier, usedPercent: Double) -> String {
+        return String(format: "%.0f%%", usedPercent)
     }
 
     private func formatProviderForStatusBar(identifier: ProviderIdentifier, result: ProviderResult) -> String {
         switch result.usage {
         case .payAsYouGo(_, let cost, _):
             let costText = formatCostForStatusBar(cost ?? 0)
-            return showProviderName ? "\(identifier.shortDisplayName) \(costText)" : costText
+            return costText
         case .quotaBased:
             let maxPercent = preferredUsedPercentForStatusBar(identifier: identifier, result: result) ?? result.usage.usagePercentage
             let usageText = String(format: "%.0f%%", maxPercent)
-            return showProviderName ? "\(identifier.shortDisplayName) \(usageText)" : usageText
+            return usageText
         }
+    }
+
+    private func updateStatusBarDisplay(text: String, provider: ProviderIdentifier? = nil) {
+        let providerIcon = showProviderName ? provider.flatMap { iconForProvider($0) } : nil
+        if let provider, providerIcon != nil {
+            debugLog("updateStatusBarDisplay: providerIcon=\(provider.displayName), text=\(text)")
+        } else {
+            debugLog("updateStatusBarDisplay: providerIcon=default, text=\(text)")
+        }
+        statusBarIconView?.update(displayText: text, providerIcon: providerIcon)
     }
 
     private func updateStatusBarText() {
@@ -1241,7 +1245,7 @@ final class StatusBarController: NSObject {
         case .totalCost:
             let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
             debugLog("updateStatusBarText: mode=Total Cost, value=\(String(format: "$%.2f", totalCost))")
-            statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
+            updateStatusBarDisplay(text: formatCostOrStatusBarBrand(totalCost))
         case .onlyShow:
             switch onlyShowMode {
             case .alertFirst:
@@ -1253,35 +1257,35 @@ final class StatusBarController: NSObject {
                     debugLog(
                         "updateStatusBarText: mode=Only Show(Alert First), provider=\(criticalCandidate.identifier.displayName), used=\(Int(criticalCandidate.usedPercent.rounded()))%"
                     )
-                    statusBarIconView?.update(displayText: alertText)
+                    updateStatusBarDisplay(text: alertText, provider: criticalCandidate.identifier)
                 } else {
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
                     debugLog("updateStatusBarText: mode=Only Show(Alert First), no critical provider, fallback total=\(String(format: "$%.2f", totalCost))")
-                    statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
+                    updateStatusBarDisplay(text: formatCostOrStatusBarBrand(totalCost))
                 }
             case .pinnedProvider:
                 guard let provider = selectedPinnedProvider() else {
                     debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), no provider available, fallback to total")
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
-                    statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
+                    updateStatusBarDisplay(text: formatCostOrStatusBarBrand(totalCost))
                     return
                 }
 
                 if let result = providerResults[provider] {
                     let text = formatProviderForStatusBar(identifier: provider, result: result)
                     debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), provider=\(provider.displayName), text=\(text)")
-                    statusBarIconView?.update(displayText: text)
+                    updateStatusBarDisplay(text: text, provider: provider)
                 } else {
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
                     let fallback = formatCostOrStatusBarBrand(totalCost)
                     debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), missing result for \(provider.displayName), fallback total=\(String(format: "$%.2f", totalCost))")
-                    statusBarIconView?.update(displayText: fallback)
+                    updateStatusBarDisplay(text: fallback)
                 }
             case .recentChange:
                 if let recentChangeCandidate, Date().timeIntervalSince(recentChangeCandidate.observedAt) <= recentChangeMaxAge {
                     let text = formatRecentChangeText(recentChangeCandidate)
                     debugLog("updateStatusBarText: mode=Only Show(Recent Quota Change Only), text=\(text)")
-                    statusBarIconView?.update(displayText: text)
+                    updateStatusBarDisplay(text: text, provider: recentChangeCandidate.identifier)
                 } else {
                     if let recentChangeCandidate {
                         let staleMinutes = Int(Date().timeIntervalSince(recentChangeCandidate.observedAt) / 60.0)
@@ -1294,7 +1298,7 @@ final class StatusBarController: NSObject {
                     }
 
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
-                    statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
+                    updateStatusBarDisplay(text: formatCostOrStatusBarBrand(totalCost))
                 }
             }
         }
@@ -1866,7 +1870,11 @@ final class StatusBarController: NSObject {
                             let percents = [account.details?.tokenUsagePercent, account.details?.mcpUsagePercent].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else if identifier == .nanoGpt {
-                            let percents = [account.details?.tokenUsagePercent, account.details?.mcpUsagePercent].compactMap { $0 }
+                            let percents = [
+                                account.details?.sevenDayUsage,
+                                account.details?.tokenUsagePercent,
+                                account.details?.mcpUsagePercent
+                            ].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else {
                             usedPercents = [account.usage.usagePercentage]
@@ -1915,7 +1923,11 @@ final class StatusBarController: NSObject {
                         let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else if identifier == .nanoGpt {
-                        let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
+                        let percents = [
+                            result.details?.sevenDayUsage,
+                            result.details?.tokenUsagePercent,
+                            result.details?.mcpUsagePercent
+                        ].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else {
                         usedPercents = [singlePercent]
@@ -1969,6 +1981,22 @@ final class StatusBarController: NSObject {
                     hasQuota = true
                     let accountNumber = account.accountIndex + 1
                     let usedPercent = normalizedUsagePercent(100.0 - account.remainingPercentage) ?? 0.0
+                    let usedPercents: [Double]
+
+                    if account.authSource.lowercased().contains("antigravity"),
+                       let antigravityResult = providerResults[.antigravity],
+                       case .quotaBased(let agRemaining, let agEntitlement, _) = antigravityResult.usage,
+                       agEntitlement > 0 {
+                        let antigravityUsedPercent = (Double(agEntitlement - agRemaining) / Double(agEntitlement)) * 100
+                        if let normalizedAntigravity = normalizedUsagePercent(antigravityUsedPercent) {
+                            usedPercents = [usedPercent, normalizedAntigravity]
+                        } else {
+                            usedPercents = [usedPercent]
+                        }
+                    } else {
+                        usedPercents = [usedPercent]
+                    }
+
                     let normalizedEmail = account.email.trimmingCharacters(in: .whitespacesAndNewlines)
                     var displayName = "Gemini CLI"
 
@@ -1983,7 +2011,7 @@ final class StatusBarController: NSObject {
                     }
                     let item = createNativeQuotaMenuItem(
                         name: displayName,
-                        usedPercent: usedPercent,
+                        usedPercents: usedPercents,
                         icon: iconForProvider(.geminiCLI)
                     )
                     item.tag = 999
@@ -2545,9 +2573,12 @@ final class StatusBarController: NSObject {
             image = NSImage(named: "BraveSearchIcon")
         }
 
-         // Resize icons to 16x16 for consistent menu appearance
+         // Keep consistent icon sizing and make Gemini slightly larger.
          if let image = image {
-             image.size = NSSize(width: 16, height: 16)
+             let iconSize = identifier == .geminiCLI
+                 ? MenuDesignToken.Dimension.geminiIconSize
+                 : MenuDesignToken.Dimension.iconSize
+             image.size = NSSize(width: iconSize, height: iconSize)
          }
          return image
      }

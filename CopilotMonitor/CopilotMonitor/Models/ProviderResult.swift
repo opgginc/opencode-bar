@@ -431,6 +431,249 @@ extension DetailedUsage: Codable {
     }
 }
 
+enum FormatterError: LocalizedError {
+    case encodingFailed
+    case invalidData
+
+    var errorDescription: String? {
+        switch self {
+        case .encodingFailed:
+            return "Failed to encode data to JSON"
+        case .invalidData:
+            return "Invalid data format"
+        }
+    }
+}
+
+struct JSONFormatter {
+    static func format(_ results: [ProviderIdentifier: ProviderResult]) throws -> String {
+        var jsonDict: [String: [String: Any]] = [:]
+
+        for (identifier, result) in results {
+            var providerDict: [String: Any] = [:]
+
+            switch result.usage {
+            case .payAsYouGo(_, let cost, let resetsAt):
+                providerDict["type"] = "pay-as-you-go"
+                if let cost = cost {
+                    providerDict["cost"] = cost
+                }
+                if let resetsAt = resetsAt {
+                    let formatter = ISO8601DateFormatter()
+                    providerDict["resetsAt"] = formatter.string(from: resetsAt)
+                }
+
+            case .quotaBased(let remaining, let entitlement, let overagePermitted):
+                providerDict["type"] = "quota-based"
+                providerDict["remaining"] = remaining
+                providerDict["entitlement"] = entitlement
+                providerDict["overagePermitted"] = overagePermitted
+                providerDict["usagePercentage"] = result.usage.usagePercentage
+            }
+
+            // Z.AI: include both token and MCP usage percentages
+            if identifier == .zaiCodingPlan {
+                if let tokenPercent = result.details?.tokenUsagePercent {
+                    providerDict["tokenUsagePercent"] = tokenPercent
+                }
+                if let mcpPercent = result.details?.mcpUsagePercent {
+                    providerDict["mcpUsagePercent"] = mcpPercent
+                }
+            }
+
+            if identifier == .geminiCLI, let accounts = result.details?.geminiAccounts, !accounts.isEmpty {
+                var accountsArray: [[String: Any]] = []
+                for account in accounts {
+                    var accountDict: [String: Any] = [:]
+                    accountDict["index"] = account.accountIndex
+                    accountDict["email"] = account.email
+                    if let accountId = account.accountId, !accountId.isEmpty {
+                        accountDict["accountId"] = accountId
+                    }
+                    accountDict["remainingPercentage"] = account.remainingPercentage
+                    accountDict["modelBreakdown"] = account.modelBreakdown
+                    accountDict["authSource"] = account.authSource
+                    accountsArray.append(accountDict)
+                }
+                providerDict["accounts"] = accountsArray
+            }
+
+            jsonDict[identifier.rawValue] = providerDict
+        }
+
+        let jsonData = try JSONSerialization.data(withJSONObject: jsonDict, options: [.prettyPrinted, .sortedKeys])
+        guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+            throw FormatterError.encodingFailed
+        }
+
+        return jsonString
+    }
+}
+
+struct TableFormatter {
+    private static let columnWidths = (
+        provider: 20,
+        type: 15,
+        usage: 10,
+        metrics: 30
+    )
+
+    static func format(_ results: [ProviderIdentifier: ProviderResult]) -> String {
+        guard !results.isEmpty else {
+            return "No provider data available"
+        }
+
+        var output = ""
+
+        output += formatHeader()
+        output += "\n"
+        output += formatSeparator()
+        output += "\n"
+
+        let sortedResults = results.sorted { a, b in
+            a.key.displayName < b.key.displayName
+        }
+
+        for (identifier, result) in sortedResults {
+            if identifier == .geminiCLI,
+               let accounts = result.details?.geminiAccounts,
+               accounts.count > 1 {
+                for account in accounts {
+                    output += formatGeminiAccountRow(account: account, allResults: results)
+                    output += "\n"
+                }
+            } else {
+                output += formatRow(identifier: identifier, result: result)
+                output += "\n"
+            }
+        }
+
+        return output
+    }
+
+    private static func formatHeader() -> String {
+        let provider = "Provider".padding(toLength: columnWidths.provider, withPad: " ", startingAt: 0)
+        let type = "Type".padding(toLength: columnWidths.type, withPad: " ", startingAt: 0)
+        let usage = "Usage".padding(toLength: columnWidths.usage, withPad: " ", startingAt: 0)
+        let metrics = "Key Metrics"
+
+        return "\(provider)  \(type)  \(usage)  \(metrics)"
+    }
+
+    private static func formatSeparator() -> String {
+        let totalWidth = columnWidths.provider + columnWidths.type + columnWidths.usage + 30 + 6
+        return String(repeating: "─", count: totalWidth)
+    }
+
+    private static func formatRow(identifier: ProviderIdentifier, result: ProviderResult) -> String {
+        let providerName = identifier.displayName
+        let providerPadded = providerName.padding(toLength: columnWidths.provider, withPad: " ", startingAt: 0)
+
+        let typeStr = getProviderType(result)
+        let typePadded = typeStr.padding(toLength: columnWidths.type, withPad: " ", startingAt: 0)
+
+        let usageStr = formatUsagePercentage(identifier: identifier, result: result)
+        let usagePadded = usageStr.padding(toLength: columnWidths.usage, withPad: " ", startingAt: 0)
+
+        let metricsStr = formatMetrics(result)
+
+        return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)"
+    }
+
+    private static func getProviderType(_ result: ProviderResult) -> String {
+        switch result.usage {
+        case .payAsYouGo:
+            return "Pay-as-you-go"
+        case .quotaBased:
+            return "Quota-based"
+        }
+    }
+
+    private static func formatUsagePercentage(identifier: ProviderIdentifier, result: ProviderResult) -> String {
+        switch result.usage {
+        case .payAsYouGo:
+            // Pay-as-you-go doesn't have meaningful usage percentage - show dash
+            return "-"
+        case .quotaBased:
+            // Z.AI: show both token and MCP percentages when both are available
+            if identifier == .zaiCodingPlan {
+                let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
+                if percents.count == 2 {
+                    return percents.map { String(format: "%.0f%%", $0) }.joined(separator: ",")
+                }
+            }
+            let percentage = result.usage.usagePercentage
+            return String(format: "%.0f%%", percentage)
+        }
+    }
+
+    private static func formatGeminiAccountRow(
+        account: GeminiAccountQuota,
+        allResults: [ProviderIdentifier: ProviderResult]
+    ) -> String {
+        let accountName = "Gemini (#\(account.accountIndex + 1))"
+        let providerPadded = accountName.padding(toLength: columnWidths.provider, withPad: " ", startingAt: 0)
+        let typePadded = "Quota-based".padding(toLength: columnWidths.type, withPad: " ", startingAt: 0)
+        let geminiUsedPercent = 100 - account.remainingPercentage
+
+        // For Antigravity-sourced accounts, show both Gemini CLI % and Antigravity %
+        let usageStr: String
+        if account.authSource.lowercased().contains("antigravity"),
+           let antigravityResult = allResults[.antigravity],
+           case .quotaBased(let agRemaining, let agEntitlement, _) = antigravityResult.usage,
+           agEntitlement > 0 {
+            let antigravityUsedPercent = (Double(agEntitlement - agRemaining) / Double(agEntitlement)) * 100
+            usageStr = String(format: "%.0f%%,%.0f%%", geminiUsedPercent, antigravityUsedPercent)
+        } else {
+            usageStr = String(format: "%.0f%%", geminiUsedPercent)
+        }
+        let usagePadded = usageStr.padding(toLength: columnWidths.usage, withPad: " ", startingAt: 0)
+
+        let metricsStr: String
+        if let accountId = account.accountId, !accountId.isEmpty {
+            metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email), id: \(accountId))"
+        } else {
+            metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email))"
+        }
+
+        return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)"
+    }
+
+    private static func formatMetrics(_ result: ProviderResult) -> String {
+        switch result.usage {
+        case .payAsYouGo(_, let cost, let resetsAt):
+            var metrics = ""
+
+            if let cost = cost {
+                metrics += String(format: "$%.2f spent", cost)
+            } else {
+                metrics += "Cost unavailable"
+            }
+
+            if let resetsAt = resetsAt {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "MMM d"
+                let resetDate = formatter.string(from: resetsAt)
+                metrics += " (resets \(resetDate))"
+            }
+
+            return metrics
+
+        case .quotaBased(let remaining, let entitlement, let overagePermitted):
+            if remaining >= 0 {
+                return "\(remaining)/\(entitlement) remaining"
+            } else {
+                let overage = abs(remaining)
+                if overagePermitted {
+                    return "\(overage) overage (allowed)"
+                } else {
+                    return "\(overage) overage (not allowed)"
+                }
+            }
+        }
+    }
+}
+
 /// Shared helper for deduplicating multi-account provider candidates.
 struct CandidateDedupe {
     static func merge<T>(
