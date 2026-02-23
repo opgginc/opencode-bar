@@ -159,6 +159,18 @@ final class StatusBarController: NSObject {
         }
     }
 
+    private var braveRefreshMode: BraveSearchRefreshMode {
+        get {
+            let rawValue = UserDefaults.standard.integer(forKey: SearchEnginePreferences.braveRefreshModeKey)
+            return BraveSearchRefreshMode(rawValue: rawValue) ?? .defaultMode
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: SearchEnginePreferences.braveRefreshModeKey)
+            debugLog("braveRefreshMode updated: \(newValue.title)")
+            refreshClicked()
+        }
+    }
+
     private var predictionPeriod: PredictionPeriod {
         get {
             let rawValue = UserDefaults.standard.integer(forKey: "predictionPeriod")
@@ -265,6 +277,8 @@ final class StatusBarController: NSObject {
 
         TokenManager.shared.logDebugEnvironmentInfo()
         debugLog("Environment debug info logged")
+
+        ensureBraveRefreshModeDefault()
 
         setupStatusItem()
         debugLog("setupStatusItem completed")
@@ -539,9 +553,25 @@ final class StatusBarController: NSObject {
         }
     }
 
+    private func ensureBraveRefreshModeDefault() {
+        if UserDefaults.standard.object(forKey: SearchEnginePreferences.braveRefreshModeKey) == nil {
+            UserDefaults.standard.set(
+                BraveSearchRefreshMode.eventOnly.rawValue,
+                forKey: SearchEnginePreferences.braveRefreshModeKey
+            )
+            debugLog("braveRefreshMode default initialized: \(BraveSearchRefreshMode.eventOnly.title)")
+        }
+    }
+
     @objc private func refreshIntervalSelected(_ sender: NSMenuItem) {
         if let interval = RefreshInterval(rawValue: sender.tag) {
             refreshInterval = interval
+        }
+    }
+
+    @objc private func braveRefreshModeSelected(_ sender: NSMenuItem) {
+        if let mode = BraveSearchRefreshMode(rawValue: sender.tag) {
+            braveRefreshMode = mode
         }
     }
 
@@ -921,6 +951,8 @@ final class StatusBarController: NSObject {
             add(dailyPercentFromDetails(details), priority: .daily)
         case .synthetic:
             add(details?.fiveHourUsage, priority: .hourly)
+        case .tavilySearch, .braveSearch:
+            add(details?.mcpUsagePercent, priority: .monthly)
         case .antigravity, .geminiCLI, .openRouter, .openCode, .openCodeZen:
             break
         }
@@ -2023,6 +2055,18 @@ final class StatusBarController: NSObject {
             }
         }
 
+        if let searchEnginesItem = createSearchEnginesQuotaMenuItem() {
+            hasQuota = true
+            let separator = NSMenuItem.separator()
+            separator.tag = 999
+            menu.insertItem(separator, at: insertIndex)
+            insertIndex += 1
+
+            searchEnginesItem.tag = 999
+            menu.insertItem(searchEnginesItem, at: insertIndex)
+            insertIndex += 1
+        }
+
         if !hasQuota {
             let noItem = NSMenuItem()
             noItem.view = createDisabledLabelView(text: "No providers")
@@ -2347,6 +2391,152 @@ final class StatusBarController: NSObject {
         return item
     }
 
+    private func createSearchEnginesQuotaMenuItem() -> NSMenuItem? {
+        let enabledSearchProviders: [ProviderIdentifier] = [.braveSearch, .tavilySearch].filter { isProviderEnabled($0) }
+        guard !enabledSearchProviders.isEmpty else { return nil }
+
+        let searchEnginesItem = NSMenuItem(title: "Search Engines", action: nil, keyEquivalent: "")
+        searchEnginesItem.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Search Engines")
+
+        let submenu = NSMenu()
+        for identifier in enabledSearchProviders {
+            let rowTitle = identifier.displayName
+            let rowItem = createSearchEngineRow(identifier: identifier, title: rowTitle)
+            submenu.addItem(rowItem)
+        }
+
+        searchEnginesItem.submenu = submenu
+        return searchEnginesItem
+    }
+
+    private func createSearchEngineRow(identifier: ProviderIdentifier, title: String) -> NSMenuItem {
+        if let result = providerResults[identifier] {
+            let rowItem = createNativeQuotaMenuItem(name: title, usedPercent: result.usage.usagePercentage, icon: iconForProvider(identifier))
+            rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: result, errorMessage: nil, isLoading: false)
+            return rowItem
+        }
+
+        if let errorMessage = lastProviderErrors[identifier] {
+            let rowItem = NSMenuItem(title: "\(title) (Error)", action: nil, keyEquivalent: "")
+            rowItem.image = tintedImage(iconForProvider(identifier), color: .systemOrange)
+            rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage, isLoading: false)
+            return rowItem
+        }
+
+        if loadingProviders.contains(identifier) {
+            let rowItem = NSMenuItem(title: "\(title) (Loading...)", action: nil, keyEquivalent: "")
+            rowItem.image = iconForProvider(identifier)
+            rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: nil, errorMessage: nil, isLoading: true)
+            return rowItem
+        }
+
+        let rowItem = NSMenuItem(title: "\(title) (No data)", action: nil, keyEquivalent: "")
+        rowItem.image = iconForProvider(identifier)
+        rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: nil, errorMessage: "No data", isLoading: false)
+        return rowItem
+    }
+
+    private func createSearchEngineDetailSubmenu(
+        identifier: ProviderIdentifier,
+        result: ProviderResult?,
+        errorMessage: String?,
+        isLoading: Bool
+    ) -> NSMenu {
+        let submenu = NSMenu()
+
+        if isLoading {
+            let loadingItem = NSMenuItem(title: "Loading...", action: nil, keyEquivalent: "")
+            loadingItem.isEnabled = false
+            submenu.addItem(loadingItem)
+            return submenu
+        }
+
+        if let errorMessage {
+            let errorItem = NSMenuItem()
+            errorItem.view = createDisabledLabelView(text: "Error: \(errorMessage)", multiline: true)
+            submenu.addItem(errorItem)
+            return submenu
+        }
+
+        guard let result,
+              case .quotaBased(let remaining, let entitlement, _) = result.usage,
+              entitlement > 0 else {
+            let emptyItem = NSMenuItem()
+            emptyItem.view = createDisabledLabelView(text: "Usage data unavailable")
+            submenu.addItem(emptyItem)
+            return submenu
+        }
+
+        let used = max(0, entitlement - remaining)
+        let usagePercent = (Double(used) / Double(entitlement)) * 100.0
+        let filledBlocks = min(10, Int((Double(used) / Double(max(entitlement, 1))) * 10))
+        let emptyBlocks = max(0, 10 - filledBlocks)
+        let progressBar = String(repeating: "═", count: filledBlocks) + String(repeating: "░", count: emptyBlocks)
+
+        let progressItem = NSMenuItem()
+        progressItem.view = createDisabledLabelView(text: "[\(progressBar)] \(used)/\(entitlement)")
+        submenu.addItem(progressItem)
+
+        let usedItem = NSMenuItem()
+        usedItem.view = createDisabledLabelView(text: String(format: "Used: %.0f%% used", usagePercent))
+        submenu.addItem(usedItem)
+
+        let remainingItem = NSMenuItem()
+        remainingItem.view = createDisabledLabelView(text: "Remaining: \(remaining)")
+        submenu.addItem(remainingItem)
+
+        if let resetPeriod = result.details?.resetPeriod, !resetPeriod.isEmpty {
+            let resetItem = NSMenuItem()
+            resetItem.view = createDisabledLabelView(text: resetPeriod)
+            submenu.addItem(resetItem)
+        }
+
+        if let planType = result.details?.planType, !planType.isEmpty {
+            let planItem = NSMenuItem()
+            planItem.view = createDisabledLabelView(text: "Plan: \(planType)")
+            submenu.addItem(planItem)
+        }
+
+        if let authSource = result.details?.authSource, !authSource.isEmpty {
+            submenu.addItem(NSMenuItem.separator())
+            let authItem = NSMenuItem()
+            authItem.view = createDisabledLabelView(
+                text: "Token From: \(authSource)",
+                icon: NSImage(systemSymbolName: "key", accessibilityDescription: "Auth Source"),
+                multiline: true
+            )
+            submenu.addItem(authItem)
+        }
+
+        if identifier == .braveSearch {
+            let lastSyncEpoch = UserDefaults.standard.double(forKey: SearchEnginePreferences.braveLastAPISyncAtKey)
+            if lastSyncEpoch > 0 {
+                let date = Date(timeIntervalSince1970: lastSyncEpoch)
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM-dd HH:mm z"
+                formatter.timeZone = TimeZone.current
+                let syncItem = NSMenuItem()
+                syncItem.view = createDisabledLabelView(text: "Last API Sync: \(formatter.string(from: date))")
+                submenu.addItem(syncItem)
+            }
+
+            submenu.addItem(NSMenuItem.separator())
+            let modeItem = NSMenuItem(title: "Refresh Mode", action: nil, keyEquivalent: "")
+            let modeMenu = NSMenu()
+            for mode in BraveSearchRefreshMode.allCases {
+                let item = NSMenuItem(title: mode.title, action: #selector(braveRefreshModeSelected(_:)), keyEquivalent: "")
+                item.target = self
+                item.tag = mode.rawValue
+                item.state = (mode == braveRefreshMode) ? .on : .off
+                modeMenu.addItem(item)
+            }
+            modeItem.submenu = modeMenu
+            submenu.addItem(modeItem)
+        }
+
+        return submenu
+    }
+
     private func iconForProvider(_ identifier: ProviderIdentifier) -> NSImage? {
         var image: NSImage?
 
@@ -2377,6 +2567,10 @@ final class StatusBarController: NSObject {
             image = NSImage(named: "SyntheticIcon")
         case .chutes:
             image = NSImage(named: "ChutesIcon")
+        case .tavilySearch:
+            image = NSImage(named: "TavilyIcon")
+        case .braveSearch:
+            image = NSImage(named: "BraveSearchIcon")
         }
 
          // Keep consistent icon sizing and make Gemini slightly larger.

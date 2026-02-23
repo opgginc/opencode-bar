@@ -39,3 +39,7 @@ package-lock.json
 
 # VSCode local settings
 .vscode/settings.local.json
+
+# Local runtime artifacts
+data/
+nohup.out

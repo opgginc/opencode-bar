@@ -51,6 +51,41 @@ enum PredictionPeriod: Int, CaseIterable {
     static var defaultPeriod: PredictionPeriod { .oneWeek }
 }
 
+// MARK: - Brave Search Refresh Mode
+enum BraveSearchRefreshMode: Int, CaseIterable {
+    case eventOnly = 0
+    case apiEverySixHours = 1
+    case hybrid = 2
+
+    var title: String {
+        switch self {
+        case .eventOnly: return "Event-based only"
+        case .apiEverySixHours: return "API sync every 6h"
+        case .hybrid: return "Hybrid (event + 6h API)"
+        }
+    }
+
+    var allowsAPISync: Bool {
+        switch self {
+        case .eventOnly:
+            return false
+        case .apiEverySixHours, .hybrid:
+            return true
+        }
+    }
+
+    var allowsEventCounting: Bool {
+        switch self {
+        case .eventOnly, .hybrid:
+            return true
+        case .apiEverySixHours:
+            return false
+        }
+    }
+
+    static var defaultMode: BraveSearchRefreshMode { .eventOnly }
+}
+
 // MARK: - Menu Bar Display
 enum MenuBarDisplayMode: Int, CaseIterable {
     case totalCost = 0
@@ -92,4 +127,16 @@ enum StatusBarDisplayPreferences {
     static let showAlertFirstKey = "statusBarDisplay.showAlertFirst"
     static let criticalBadgeKey = "statusBarDisplay.criticalBadge"
     static let showProviderNameKey = "statusBarDisplay.showProviderName"
+}
+
+enum SearchEnginePreferences {
+    static let braveRefreshModeKey = "searchEngines.brave.refreshMode"
+    static let braveLastAPISyncAtKey = "searchEngines.brave.lastApiSyncAt"
+    static let braveLastUsedKey = "searchEngines.brave.lastUsed"
+    static let braveLastRemainingKey = "searchEngines.brave.lastRemaining"
+    static let braveLastLimitKey = "searchEngines.brave.lastLimit"
+    static let braveLastResetSecondsKey = "searchEngines.brave.lastResetSeconds"
+    static let braveEventEstimatedUsedKey = "searchEngines.brave.eventEstimatedUsed"
+    static let braveEventCursorKey = "searchEngines.brave.eventCursor"
+    static let braveEventMonthKey = "searchEngines.brave.eventMonth"
 }
