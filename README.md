@@ -43,8 +43,7 @@
 ### Homebrew (Easy)
 
 ```bash
-brew tap opgginc/opencode-bar
-brew install --cask opencode-bar
+brew install --cask opgginc/tap/opencode-bar
 ```
 
 ### Download
