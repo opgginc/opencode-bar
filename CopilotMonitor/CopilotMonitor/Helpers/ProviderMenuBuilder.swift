@@ -329,6 +329,17 @@ extension StatusBarController {
                 }
             }
 
+            if let email = details.email?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !email.isEmpty {
+                submenu.addItem(NSMenuItem.separator())
+                let emailItem = NSMenuItem()
+                emailItem.view = createDisabledLabelView(
+                    text: "Email: \(email)",
+                    icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Email")
+                )
+                submenu.addItem(emailItem)
+            }
+
             // === Subscription (includes separator internally) ===
             addSubscriptionItems(to: submenu, provider: .claude, accountId: accountId)
 

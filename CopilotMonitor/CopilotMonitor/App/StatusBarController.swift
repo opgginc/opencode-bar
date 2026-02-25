@@ -1803,33 +1803,38 @@ final class StatusBarController: NSObject {
                         hasQuota = true
                         var displayName = accounts.count > 1 ? "\(baseName) #\(account.accountIndex + 1)" : baseName
 
-                        let codexEmail: String?
-                        if identifier == .codex,
-                           let detailsEmail = account.details?.email?
-                            .trimmingCharacters(in: .whitespacesAndNewlines),
+                        let detailsEmail = account.details?.email?
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let accountEmail: String?
+                        if identifier == .claude,
+                           let detailsEmail,
                            !detailsEmail.isEmpty {
-                            codexEmail = detailsEmail
+                            accountEmail = detailsEmail
+                        } else if identifier == .codex,
+                                  let detailsEmail,
+                                  !detailsEmail.isEmpty {
+                            accountEmail = detailsEmail
                         } else if identifier == .codex,
                                   let accountId = account.accountId?
                             .trimmingCharacters(in: .whitespacesAndNewlines),
                                   !accountId.isEmpty,
                                   let mappedEmail = codexEmailByAccountId[accountId],
                                   !mappedEmail.isEmpty {
-                            codexEmail = mappedEmail
+                            accountEmail = mappedEmail
                         } else if identifier == .codex,
                                   let fallbackEmail = codexEmailByAccountId.values.first,
                                   accounts.count == 1 {
                             // Single-account fallback for legacy cached results that may miss accountId.
-                            codexEmail = fallbackEmail
+                            accountEmail = fallbackEmail
                         } else {
-                            codexEmail = nil
+                            accountEmail = nil
                         }
 
-                        if let codexEmail {
+                        if let accountEmail {
                             if accounts.count > 1 {
-                                displayName += " (\(codexEmail))"
+                                displayName += " (\(accountEmail))"
                             } else {
-                                displayName = "\(baseName) (\(codexEmail))"
+                                displayName = "\(baseName) (\(accountEmail))"
                             }
                         } else if accounts.count > 1, showAuthLabel {
                             let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: identifier) ?? "Unknown"
@@ -3630,5 +3635,157 @@ final class StatusBarController: NSObject {
         predictionPeriodItem.submenu = freshPeriodSubmenu
         historySubmenu.addItem(predictionPeriodItem)
         debugLog("updateHistorySubmenu: completed successfully")
+    }
+}
+
+// MARK: - Demo Mode (for marketing screenshots)
+extension StatusBarController {
+    /// Populates providerResults with rich fake data for marketing screenshots.
+    /// Launch with --demo-mode to activate.
+    func loadDemoData() {
+        debugLog("[🎬 DemoMode] Loading demo data for marketing screenshots")
+        
+        let now = Date()
+        let fiveHoursFromNow = now.addingTimeInterval(5 * 3600)
+        let sevenDaysFromNow = now.addingTimeInterval(7 * 24 * 3600)
+        let oneDayFromNow = now.addingTimeInterval(24 * 3600)
+        let twoDaysFromNow = now.addingTimeInterval(2 * 24 * 3600)
+        
+        providerResults = [
+            // --- Pay-as-you-go ---
+            .openRouter: ProviderResult(
+                usage: .payAsYouGo(utilization: 0, cost: 37.42, resetsAt: nil),
+                details: DetailedUsage(
+                    creditsRemaining: 62.58,
+                    creditsTotal: 100.0,
+                    authSource: "OpenCode"
+                )
+            ),
+            .openCodeZen: ProviderResult(
+                usage: .payAsYouGo(utilization: 0, cost: 12.50, resetsAt: nil),
+                details: DetailedUsage(
+                    sessions: 47,
+                    messages: 312,
+                    avgCostPerDay: 0.42,
+                    authSource: "OpenCode"
+                )
+            ),
+            
+            // --- Quota-based ---
+            .claude: ProviderResult(
+                usage: .quotaBased(remaining: 23, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    fiveHourUsage: 52.0,
+                    fiveHourReset: fiveHoursFromNow,
+                    sevenDayUsage: 82.0,
+                    sevenDayReset: sevenDaysFromNow,
+                    sonnetUsage: 38.0,
+                    sonnetReset: sevenDaysFromNow,
+                    opusUsage: 95.0,
+                    opusReset: sevenDaysFromNow,
+                    extraUsageEnabled: false,
+                    authSource: "OpenCode"
+                )
+            ),
+            .codex: ProviderResult(
+                usage: .quotaBased(remaining: 1, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    secondaryUsage: 45.0,
+                    secondaryReset: sevenDaysFromNow,
+                    primaryReset: fiveHoursFromNow,
+                    creditsBalance: 180.0,
+                    planType: "pro",
+                    authSource: "Codex CLI"
+                )
+            ),
+            .copilot: ProviderResult(
+                usage: .quotaBased(remaining: 1200, entitlement: 1500, overagePermitted: true),
+                details: DetailedUsage(
+                    copilotOverageCost: 2.40,
+                    copilotOverageRequests: 12,
+                    copilotUsedRequests: 300,
+                    copilotLimitRequests: 1500,
+                    copilotQuotaResetDateUTC: oneDayFromNow
+                )
+            ),
+            .kimi: ProviderResult(
+                usage: .quotaBased(remaining: 74, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    fiveHourUsage: 26.0,
+                    fiveHourReset: fiveHoursFromNow,
+                    authSource: "OpenCode"
+                )
+            ),
+            .zaiCodingPlan: ProviderResult(
+                usage: .quotaBased(remaining: 1, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    tokenUsagePercent: 99.0,
+                    tokenUsageReset: oneDayFromNow,
+                    tokenUsageUsed: 990_000,
+                    tokenUsageTotal: 1_000_000,
+                    mcpUsagePercent: 45.0,
+                    mcpUsageReset: oneDayFromNow,
+                    mcpUsageUsed: 45,
+                    mcpUsageTotal: 100,
+                    modelUsageTokens: 500_000,
+                    modelUsageCalls: 128,
+                    toolNetworkSearchCount: 42,
+                    toolWebReadCount: 15,
+                    toolZreadCount: 8
+                )
+            ),
+            .geminiCLI: ProviderResult(
+                usage: .quotaBased(remaining: 85, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    authSource: "OpenCode",
+                    geminiAccounts: [
+                        GeminiAccountQuota(
+                            accountIndex: 0,
+                            email: "user@gmail.com",
+                            accountId: "100663739661147150906",
+                            remainingPercentage: 100.0,
+                            modelBreakdown: [
+                                "gemini-2.5-pro": 100.0,
+                                "gemini-2.5-flash": 100.0
+                            ],
+                            authSource: "Gemini CLI",
+                            earliestReset: sevenDaysFromNow,
+                            modelResetTimes: [
+                                "gemini-2.5-pro": sevenDaysFromNow,
+                                "gemini-2.5-flash": sevenDaysFromNow
+                            ]
+                        ),
+                        GeminiAccountQuota(
+                            accountIndex: 1,
+                            email: "work@company.com",
+                            accountId: "109876543210987654321",
+                            remainingPercentage: 70.0,
+                            modelBreakdown: [
+                                "gemini-2.5-pro": 70.0,
+                                "gemini-2.5-flash": 85.0
+                            ],
+                            authSource: "Antigravity",
+                            earliestReset: twoDaysFromNow,
+                            modelResetTimes: [
+                                "gemini-2.5-pro": twoDaysFromNow,
+                                "gemini-2.5-flash": twoDaysFromNow
+                            ]
+                        )
+                    ]
+                )
+            ),
+        ]
+        
+        // Clear any loading states
+        loadingProviders.removeAll()
+        lastProviderErrors.removeAll()
+        
+        debugLog("[🎬 DemoMode] Demo data loaded: \(providerResults.count) providers")
+        
+        // Rebuild the entire menu with demo data
+        updateMultiProviderMenu()
+        updateStatusBarText()
+        
+        debugLog("[🎬 DemoMode] Menu rebuilt with demo data")
     }
 }
