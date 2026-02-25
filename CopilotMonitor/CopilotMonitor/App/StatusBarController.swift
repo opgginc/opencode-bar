@@ -120,6 +120,7 @@ final class StatusBarController: NSObject {
     private var orphanedSubscriptionKeys: [String] = []
     private var orphanedSubscriptionTotal: Double = 0
     private let criticalUsageThreshold: Double = 90.0
+    private let alertFirstUsageThreshold: Double = 100.0
     private let recentChangeMaxAge: TimeInterval = 3 * 60 * 60
     private var previousProviderSnapshots: [ProviderIdentifier: StatusBarProviderSnapshot] = [:]
     private var recentChangeCandidate: RecentChangeCandidate?
@@ -1023,15 +1024,6 @@ final class StatusBarController: NSObject {
             .max()
     }
 
-    private func usagePercentsForMostUsed(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
-        // Use the global priority-aware selection, then clamp to 100% for critical badge detection.
-        // Over-quota values (e.g. 120%) must still participate in mostCriticalProvider().
-        if let percent = preferredUsedPercentForStatusBar(identifier: identifier, result: result) {
-            return [min(percent, 100.0)]
-        }
-        return []
-    }
-
     private func usedPercentsForChangeDetection(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
         var usedPercents: [Double] = []
 
@@ -1165,21 +1157,33 @@ final class StatusBarController: NSObject {
         }
     }
 
-    private func mostCriticalProvider() -> AlertProviderCandidate? {
-        var best: AlertProviderCandidate?
+    private func quotaAlertCandidates() -> [AlertProviderCandidate] {
+        var candidates: [AlertProviderCandidate] = []
         for (identifier, result) in providerResults {
             guard isProviderEnabled(identifier) else { continue }
-
-            let percents = usagePercentsForMostUsed(identifier: identifier, result: result)
-            guard let maxPercent = percents.max(), maxPercent >= criticalUsageThreshold else {
-                continue
-            }
-
-            if best == nil || maxPercent > best!.usedPercent {
-                best = AlertProviderCandidate(identifier: identifier, usedPercent: maxPercent)
-            }
+            guard case .quotaBased = result.usage else { continue }
+            guard let usedPercent = preferredUsedPercentForStatusBar(identifier: identifier, result: result) else { continue }
+            candidates.append(AlertProviderCandidate(identifier: identifier, usedPercent: usedPercent))
         }
-        return best
+        return candidates
+    }
+
+    private func mostCriticalProvider(minUsagePercent: Double) -> AlertProviderCandidate? {
+        quotaAlertCandidates()
+            .filter { $0.usedPercent >= minUsagePercent }
+            .max(by: { $0.usedPercent < $1.usedPercent })
+    }
+
+    private func singleEnabledQuotaProvider(atOrAbove threshold: Double) -> AlertProviderCandidate? {
+        let candidates = quotaAlertCandidates()
+        guard candidates.count == 1, let candidate = candidates.first, candidate.usedPercent >= threshold else {
+            return nil
+        }
+        return candidate
+    }
+
+    private func mostCriticalProvider() -> AlertProviderCandidate? {
+        mostCriticalProvider(minUsagePercent: criticalUsageThreshold)
     }
 
     private func formatRecentChangeText(_ candidate: RecentChangeCandidate) -> String {
@@ -1249,15 +1253,17 @@ final class StatusBarController: NSObject {
         case .onlyShow:
             switch onlyShowMode {
             case .alertFirst:
-                if let criticalCandidate {
+                let alertFirstCandidate = singleEnabledQuotaProvider(atOrAbove: alertFirstUsageThreshold)
+                    ?? mostCriticalProvider(minUsagePercent: alertFirstUsageThreshold)
+                if let alertFirstCandidate {
                     let alertText = formatAlertText(
-                        identifier: criticalCandidate.identifier,
-                        usedPercent: criticalCandidate.usedPercent
+                        identifier: alertFirstCandidate.identifier,
+                        usedPercent: alertFirstCandidate.usedPercent
                     )
                     debugLog(
-                        "updateStatusBarText: mode=Only Show(Alert First), provider=\(criticalCandidate.identifier.displayName), used=\(Int(criticalCandidate.usedPercent.rounded()))%"
+                        "updateStatusBarText: mode=Only Show(Alert First), provider=\(alertFirstCandidate.identifier.displayName), used=\(Int(alertFirstCandidate.usedPercent.rounded()))%"
                     )
-                    updateStatusBarDisplay(text: alertText, provider: criticalCandidate.identifier)
+                    updateStatusBarDisplay(text: alertText, provider: alertFirstCandidate.identifier)
                 } else {
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
                     debugLog("updateStatusBarText: mode=Only Show(Alert First), no critical provider, fallback total=\(String(format: "$%.2f", totalCost))")
@@ -3773,7 +3779,7 @@ extension StatusBarController {
                         )
                     ]
                 )
-            ),
+            )
         ]
         
         // Clear any loading states
