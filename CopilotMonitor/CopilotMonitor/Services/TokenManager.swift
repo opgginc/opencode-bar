@@ -1474,6 +1474,182 @@ final class TokenManager: @unchecked Sendable {
         return nil
     }
 
+    private func parseJSONDictionary(from data: Data) -> [String: Any]? {
+        guard let json = try? JSONSerialization.jsonObject(with: data, options: []),
+              let dict = json as? [String: Any] else {
+            return nil
+        }
+        return dict
+    }
+
+    private func parseJSONDictionary(from string: String) -> [String: Any]? {
+        guard let data = string.data(using: .utf8) else {
+            return nil
+        }
+        return parseJSONDictionary(from: data)
+    }
+
+    private func parseJSONStringCandidates(_ value: String) -> [String: Any]? {
+        let trimmed = sanitizeJSONString(value).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        var candidates: [String] = [trimmed]
+        if let fragmentStartIndex = trimmed.firstIndex(where: { char in
+            char == "{" || char == "\"" || char == "["
+        }) {
+            let fragment = String(trimmed[fragmentStartIndex...])
+            candidates.append(fragment)
+        }
+
+        for candidate in candidates {
+            if let dict = parseJSONDictionary(from: candidate) {
+                return dict
+            }
+
+            if !candidate.hasPrefix("{"),
+               !candidate.hasSuffix("}"),
+               candidate.contains(":"),
+               let dict = parseJSONDictionary(from: "{\(candidate)}") {
+                logger.info("Decoded wrapped keychain JSON payload")
+                return dict
+            }
+        }
+
+        return nil
+    }
+
+    private func extractQuotedValue(in payload: String, keys: [String]) -> String? {
+        guard !keys.isEmpty else {
+            return nil
+        }
+
+        let escapedKeys = keys.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
+        let pattern = "\"(?:\(escapedKeys))\"\\s*:\\s*\"([^\"]+)\""
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(payload.startIndex..<payload.endIndex, in: payload)
+        guard let match = regex.firstMatch(in: payload, options: [], range: range),
+              match.numberOfRanges > 1,
+              let captureRange = Range(match.range(at: 1), in: payload) else {
+            return nil
+        }
+        let value = payload[captureRange].trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private func extractNumericValue(in payload: String, keys: [String]) -> String? {
+        guard !keys.isEmpty else {
+            return nil
+        }
+
+        let escapedKeys = keys.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
+        let pattern = "\"(?:\(escapedKeys))\"\\s*:\\s*([0-9]+)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(payload.startIndex..<payload.endIndex, in: payload)
+        guard let match = regex.firstMatch(in: payload, options: [], range: range),
+              match.numberOfRanges > 1,
+              let captureRange = Range(match.range(at: 1), in: payload) else {
+            return nil
+        }
+        let value = payload[captureRange].trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private func extractKeychainFieldsFromLoosePayload(_ payload: String) -> [String: Any]? {
+        let sanitized = sanitizeJSONString(payload).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitized.isEmpty else {
+            return nil
+        }
+
+        let tokenKeys = [
+            "accessToken", "access_token",
+            "oauthToken", "oauth_token",
+            "token"
+        ]
+        let emailKeys = [
+            "email", "userEmail", "user_email",
+            "login", "username"
+        ]
+        let accountKeys = ["accountId", "account_id", "userId", "user_id", "id"]
+
+        var recovered: [String: Any] = [:]
+        if let token = extractQuotedValue(in: sanitized, keys: tokenKeys) {
+            recovered["accessToken"] = token
+        }
+        if let email = extractQuotedValue(in: sanitized, keys: emailKeys) {
+            recovered["email"] = email
+        }
+
+        let accountId = extractQuotedValue(in: sanitized, keys: accountKeys)
+            ?? extractNumericValue(in: sanitized, keys: accountKeys)
+        if let accountId {
+            recovered["accountId"] = accountId
+        }
+
+        if recovered["accessToken"] == nil {
+            let plainToken = sanitized.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if plainToken.hasPrefix("sk-ant-") || plainToken.hasPrefix("sk-") {
+                recovered["accessToken"] = plainToken
+            }
+        }
+
+        return recovered.isEmpty ? nil : recovered
+    }
+
+    private func sanitizeJSONString(_ value: String) -> String {
+        let scalars = value.unicodeScalars.filter { scalar in
+            if scalar.value == 9 || scalar.value == 10 || scalar.value == 13 {
+                return true
+            }
+            return scalar.value >= 32
+        }
+        return String(String.UnicodeScalarView(scalars))
+    }
+
+    private func decodeHexString(_ value: String) -> Data? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        let compact = trimmed.replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\t", with: "")
+        var hexPayload = compact
+
+        let isStrictHex = hexPayload.allSatisfy { $0.isHexDigit }
+        if !isStrictHex {
+            let filtered = String(hexPayload.filter { $0.isHexDigit })
+            let minStrictMatch = Int(Double(hexPayload.count) * 0.9)
+            guard filtered.count >= minStrictMatch else {
+                return nil
+            }
+            hexPayload = filtered
+        }
+
+        guard hexPayload.count.isMultiple(of: 2) else {
+            return nil
+        }
+
+        var bytes = Data(capacity: hexPayload.count / 2)
+        var index = hexPayload.startIndex
+        while index < hexPayload.endIndex {
+            let nextIndex = hexPayload.index(index, offsetBy: 2)
+            let byteString = hexPayload[index..<nextIndex]
+            guard let byte = UInt8(byteString, radix: 16) else {
+                return nil
+            }
+            bytes.append(byte)
+            index = nextIndex
+        }
+        return bytes
+    }
+
     private func readKeychainJSON(service: String) -> [String: Any]? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -1492,14 +1668,51 @@ final class TokenManager: @unchecked Sendable {
             return nil
         }
 
-        guard let data = result as? Data,
-              let json = try? JSONSerialization.jsonObject(with: data, options: []),
-              let dict = json as? [String: Any] else {
+        guard let data = result as? Data else {
             logger.warning("Keychain payload for service \(service) is not valid JSON")
             return nil
         }
 
-        return dict
+        if let dict = parseJSONDictionary(from: data) {
+            return dict
+        }
+
+        if let rawString = String(data: data, encoding: .utf8) {
+            let sanitized = sanitizeJSONString(rawString).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if let dict = parseJSONStringCandidates(sanitized) {
+                logger.info("Decoded sanitized keychain JSON payload for service \(service)")
+                return dict
+            }
+
+            if let decodedHexData = decodeHexString(sanitized),
+               !decodedHexData.isEmpty {
+                if let dict = parseJSONDictionary(from: decodedHexData) {
+                    logger.info("Decoded hex-encoded keychain JSON payload for service \(service)")
+                    return dict
+                }
+
+                if let decodedHexString = String(data: decodedHexData, encoding: .utf8) {
+                    if let dict = parseJSONStringCandidates(decodedHexString) {
+                        logger.info("Decoded hex-encoded keychain JSON string payload for service \(service)")
+                        return dict
+                    }
+
+                    if let recovered = extractKeychainFieldsFromLoosePayload(decodedHexString) {
+                        logger.info("Recovered keychain auth fields from hex-encoded loose payload for service \(service)")
+                        return recovered
+                    }
+                }
+            }
+
+            if let recovered = extractKeychainFieldsFromLoosePayload(sanitized) {
+                logger.info("Recovered keychain auth fields from loose payload for service \(service)")
+                return recovered
+            }
+        }
+
+        logger.warning("Keychain payload for service \(service) is not valid JSON")
+        return nil
     }
 
     // MARK: - Antigravity Accounts File Reading
