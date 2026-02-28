@@ -1660,7 +1660,12 @@ final class TokenManager: @unchecked Sendable {
             guard let accessToken = normalizedNonEmpty(accessToken) else { continue }
             let accountId = normalizedNonEmpty(accountIdString) ?? accountIdNumeric.map { String($0) }
             let normalizedRefreshToken = normalizedNonEmpty(refreshToken)
-            let expiresAt = dateFromEpoch(expiresRaw) ?? parseISO8601Date(
+            let expiresAt = expiresRaw.flatMap { rawValue -> Date? in
+                if rawValue < 1_000_000_000 {
+                    return Date().addingTimeInterval(TimeInterval(max(0, rawValue - 60)))
+                }
+                return dateFromEpoch(rawValue)
+            } ?? parseISO8601Date(
                 (candidate.object as? [String: Any]).flatMap { findDirectStringValue(in: $0, matching: expiresKeys) }
             )
 
