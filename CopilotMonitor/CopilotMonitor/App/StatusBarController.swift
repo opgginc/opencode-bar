@@ -1195,11 +1195,16 @@ final class StatusBarController: NSObject {
         case .payAsYouGo(_, let cost, _):
             return formatCostForStatusBar(cost ?? 0.0)
         case .quotaBased:
-            let percent = preferredUsedPercent(
-                identifier: candidate.identifier,
-                usage: result.usage,
-                details: result.details
-            ) ?? min(max(result.usage.usagePercentage, 0.0), 999.0)
+            let percent = preferredUsedPercentForStatusBar(identifier: candidate.identifier, result: result)
+                ?? preferredUsedPercent(
+                    identifier: candidate.identifier,
+                    usage: result.usage,
+                    details: result.details
+                )
+                ?? min(max(result.usage.usagePercentage, 0.0), 999.0)
+            logger.debug(
+                "Recent change percent resolved: provider=\(candidate.identifier.displayName), percent=\(String(format: "%.2f", percent))"
+            )
             return String(format: "%.0f%%", percent)
         }
     }
@@ -1655,8 +1660,8 @@ final class StatusBarController: NSObject {
                         let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: .copilot) ?? "Unknown"
                         displayName += " (\(sourceLabel))"
                     }
-                    if (account.usage.totalEntitlement ?? 0) == 0 {
-                        displayName += " (No usage data)"
+                    if let unavailableLabel = unavailableUsageSuffix(for: account, identifier: .copilot) {
+                        displayName += " (\(unavailableLabel))"
                     }
                     let usedPercent = account.usage.usagePercentage
                     let quotaItem = createNativeQuotaMenuItem(
@@ -1846,8 +1851,8 @@ final class StatusBarController: NSObject {
                             let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: identifier) ?? "Unknown"
                             displayName += " (\(sourceLabel))"
                         }
-                        if (account.usage.totalEntitlement ?? 0) == 0 {
-                            displayName += " (No usage data)"
+                        if let unavailableLabel = unavailableUsageSuffix(for: account, identifier: identifier) {
+                            displayName += " (\(unavailableLabel))"
                         }
 
                         // Keep menu list rows in multi-window format (e.g., 5h, weekly, monthly together).
@@ -2333,6 +2338,20 @@ final class StatusBarController: NSObject {
     
     private func createNativeQuotaMenuItem(name: String, usedPercent: Double, icon: NSImage?) -> NSMenuItem {
         return createNativeQuotaMenuItem(name: name, usedPercents: [usedPercent], icon: icon)
+    }
+
+    private func unavailableUsageSuffix(for account: ProviderAccountResult, identifier: ProviderIdentifier) -> String? {
+        guard (account.usage.totalEntitlement ?? 0) == 0 else { return nil }
+
+        if identifier == .claude,
+           let authErrorMessage = account.details?.authErrorMessage?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !authErrorMessage.isEmpty,
+           authErrorMessage.lowercased().contains("token expired") {
+            return "Token expired"
+        }
+
+        return "No usage data"
     }
 
     // MARK: - Error State Helpers
