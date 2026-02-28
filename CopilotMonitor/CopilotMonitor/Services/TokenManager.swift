@@ -339,9 +339,31 @@ struct ClaudeAuthAccount {
     let accessToken: String
     let accountId: String?
     let email: String?
+    let refreshToken: String?
+    let expiresAt: Date?
     let authSource: String
     let sourceLabels: [String]
     let source: ClaudeAuthSource
+
+    init(
+        accessToken: String,
+        accountId: String?,
+        email: String?,
+        refreshToken: String? = nil,
+        expiresAt: Date? = nil,
+        authSource: String,
+        sourceLabels: [String],
+        source: ClaudeAuthSource
+    ) {
+        self.accessToken = accessToken
+        self.accountId = accountId
+        self.email = email
+        self.refreshToken = refreshToken
+        self.expiresAt = expiresAt
+        self.authSource = authSource
+        self.sourceLabels = sourceLabels
+        self.source = source
+    }
 }
 
 /// Auth source types for GitHub Copilot token discovery
@@ -1474,6 +1496,186 @@ final class TokenManager: @unchecked Sendable {
         return nil
     }
 
+    private func findInt64Value(in object: Any?, matching keys: Set<String>) -> Int64? {
+        if let dict = object as? [String: Any] {
+            for (key, value) in dict {
+                let normalized = normalizedKey(key)
+                if keys.contains(normalized) {
+                    if let intValue = value as? Int64 {
+                        return intValue
+                    }
+                    if let intValue = value as? Int {
+                        return Int64(intValue)
+                    }
+                    if let numberValue = value as? NSNumber {
+                        return numberValue.int64Value
+                    }
+                    if let stringValue = value as? String,
+                       let intValue = Int64(stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                        return intValue
+                    }
+                }
+                if let nested = findInt64Value(in: value, matching: keys) {
+                    return nested
+                }
+            }
+        } else if let array = object as? [Any] {
+            for item in array {
+                if let nested = findInt64Value(in: item, matching: keys) {
+                    return nested
+                }
+            }
+        }
+        return nil
+    }
+
+    private func findDirectStringValue(in dict: [String: Any], matching keys: Set<String>) -> String? {
+        for (key, value) in dict {
+            let normalized = normalizedKey(key)
+            guard keys.contains(normalized),
+                  let stringValue = value as? String else {
+                continue
+            }
+            let trimmed = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
+    }
+
+    private func findDirectInt64Value(in dict: [String: Any], matching keys: Set<String>) -> Int64? {
+        for (key, value) in dict {
+            let normalized = normalizedKey(key)
+            guard keys.contains(normalized) else { continue }
+            if let intValue = value as? Int64 {
+                return intValue
+            }
+            if let intValue = value as? Int {
+                return Int64(intValue)
+            }
+            if let numberValue = value as? NSNumber {
+                return numberValue.int64Value
+            }
+            if let stringValue = value as? String,
+               let intValue = Int64(stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return intValue
+            }
+        }
+        return nil
+    }
+
+    private func dateFromEpoch(_ rawValue: Int64?) -> Date? {
+        guard let rawValue else { return nil }
+        let seconds: Double
+        // Heuristic: values with 13+ digits are milliseconds.
+        if rawValue > 9_999_999_999 {
+            seconds = Double(rawValue) / 1000.0
+        } else {
+            seconds = Double(rawValue)
+        }
+        return Date(timeIntervalSince1970: seconds)
+    }
+
+    private func parseISO8601Date(_ value: String?) -> Date? {
+        guard let value = normalizedNonEmpty(value) else { return nil }
+
+        let formatterWithFrac = ISO8601DateFormatter()
+        formatterWithFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatterWithFrac.date(from: value) {
+            return date
+        }
+
+        let formatterWithoutFrac = ISO8601DateFormatter()
+        formatterWithoutFrac.formatOptions = [.withInternetDateTime]
+        return formatterWithoutFrac.date(from: value)
+    }
+
+    private struct ClaudeOAuthPayload {
+        let accessToken: String
+        let refreshToken: String?
+        let expiresAt: Date?
+        let accountId: String?
+        let email: String?
+    }
+
+    private func valueForNormalizedKey(_ normalizedKeyName: String, in dict: [String: Any]) -> Any? {
+        for (key, value) in dict where normalizedKey(key) == normalizedKeyName {
+            return value
+        }
+        return nil
+    }
+
+    private func extractClaudeOAuthPayload(from dict: [String: Any]) -> ClaudeOAuthPayload? {
+        let accessKeys: Set<String> = ["accesstoken", "oauthtoken", "token"]
+        let refreshKeys: Set<String> = ["refreshtoken", "oauthrefreshtoken", "refresh"]
+        let expiresKeys: Set<String> = ["expiresat", "expires", "expiration", "expiresin"]
+        let accountKeys: Set<String> = ["accountid", "userid", "id"]
+        let emailKeys: Set<String> = ["email", "useremail", "login", "username"]
+
+        var candidates: [(object: Any, allowRecursive: Bool)] = []
+        if let claudeAiOAuth = valueForNormalizedKey("claudeaioauth", in: dict) {
+            candidates.append((claudeAiOAuth, true))
+        }
+        if let claudeOAuth = valueForNormalizedKey("claudeoauth", in: dict) {
+            candidates.append((claudeOAuth, true))
+        }
+        if let oauth = valueForNormalizedKey("oauth", in: dict) {
+            candidates.append((oauth, true))
+        }
+        // Last resort: only direct key lookup on the top-level object to avoid
+        // accidentally picking unrelated nested MCP tokens.
+        candidates.append((dict, false))
+
+        for candidate in candidates {
+            let accessToken: String?
+            let refreshToken: String?
+            let expiresRaw: Int64?
+            let accountIdString: String?
+            let accountIdNumeric: Int64?
+            let email: String?
+
+            if let candidateDict = candidate.object as? [String: Any] {
+                accessToken = findDirectStringValue(in: candidateDict, matching: accessKeys)
+                    ?? (candidate.allowRecursive ? findStringValue(in: candidateDict, matching: accessKeys) : nil)
+                refreshToken = findDirectStringValue(in: candidateDict, matching: refreshKeys)
+                    ?? (candidate.allowRecursive ? findStringValue(in: candidateDict, matching: refreshKeys) : nil)
+                expiresRaw = findDirectInt64Value(in: candidateDict, matching: expiresKeys)
+                    ?? (candidate.allowRecursive ? findInt64Value(in: candidateDict, matching: expiresKeys) : nil)
+                accountIdString = findDirectStringValue(in: candidateDict, matching: accountKeys)
+                    ?? (candidate.allowRecursive ? findStringValue(in: candidateDict, matching: accountKeys) : nil)
+                accountIdNumeric = findDirectInt64Value(in: candidateDict, matching: accountKeys)
+                    ?? (candidate.allowRecursive ? findInt64Value(in: candidateDict, matching: accountKeys) : nil)
+                email = findDirectStringValue(in: candidateDict, matching: emailKeys)
+                    ?? (candidate.allowRecursive ? findStringValue(in: candidateDict, matching: emailKeys) : nil)
+            } else {
+                accessToken = candidate.allowRecursive ? findStringValue(in: candidate.object, matching: accessKeys) : nil
+                refreshToken = candidate.allowRecursive ? findStringValue(in: candidate.object, matching: refreshKeys) : nil
+                expiresRaw = candidate.allowRecursive ? findInt64Value(in: candidate.object, matching: expiresKeys) : nil
+                accountIdString = candidate.allowRecursive ? findStringValue(in: candidate.object, matching: accountKeys) : nil
+                accountIdNumeric = candidate.allowRecursive ? findInt64Value(in: candidate.object, matching: accountKeys) : nil
+                email = candidate.allowRecursive ? findStringValue(in: candidate.object, matching: emailKeys) : nil
+            }
+
+            guard let accessToken = normalizedNonEmpty(accessToken) else { continue }
+            let accountId = normalizedNonEmpty(accountIdString) ?? accountIdNumeric.map { String($0) }
+            let normalizedRefreshToken = normalizedNonEmpty(refreshToken)
+            let expiresAt = dateFromEpoch(expiresRaw) ?? parseISO8601Date(
+                (candidate.object as? [String: Any]).flatMap { findDirectStringValue(in: $0, matching: expiresKeys) }
+            )
+
+            return ClaudeOAuthPayload(
+                accessToken: accessToken,
+                refreshToken: normalizedRefreshToken,
+                expiresAt: expiresAt,
+                accountId: accountId,
+                email: normalizedNonEmpty(email)
+            )
+        }
+
+        return nil
+    }
+
     private func parseJSONDictionary(from data: Data) -> [String: Any]? {
         guard let json = try? JSONSerialization.jsonObject(with: data, options: []),
               let dict = json as? [String: Any] else {
@@ -1576,6 +1778,8 @@ final class TokenManager: @unchecked Sendable {
             "login", "username"
         ]
         let accountKeys = ["accountId", "account_id", "userId", "user_id", "id"]
+        let refreshKeys = ["refreshToken", "refresh_token", "oauthRefreshToken", "oauth_refresh_token", "refresh"]
+        let expiresKeys = ["expiresAt", "expires_at", "expires", "expiration", "expiry"]
 
         var recovered: [String: Any] = [:]
         if let token = extractQuotedValue(in: sanitized, keys: tokenKeys) {
@@ -1589,6 +1793,14 @@ final class TokenManager: @unchecked Sendable {
             ?? extractNumericValue(in: sanitized, keys: accountKeys)
         if let accountId {
             recovered["accountId"] = accountId
+        }
+
+        if let refreshToken = extractQuotedValue(in: sanitized, keys: refreshKeys) {
+            recovered["refreshToken"] = refreshToken
+        }
+
+        if let expiresAt = extractNumericValue(in: sanitized, keys: expiresKeys) {
+            recovered["expiresAt"] = expiresAt
         }
 
         if recovered["accessToken"] == nil {
@@ -1715,6 +1927,46 @@ final class TokenManager: @unchecked Sendable {
         return nil
     }
 
+    private func writeKeychainJSON(service: String, payload: [String: Any]) -> Bool {
+        guard JSONSerialization.isValidJSONObject(payload) else {
+            logger.warning("Refused to write invalid keychain JSON payload for service \(service)")
+            return false
+        }
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service
+            ]
+            let attributes: [String: Any] = [
+                kSecValueData as String: data
+            ]
+
+            let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+            if updateStatus == errSecSuccess {
+                return true
+            }
+
+            if updateStatus == errSecItemNotFound {
+                var addQuery = query
+                addQuery[kSecValueData as String] = data
+                let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+                if addStatus == errSecSuccess {
+                    return true
+                }
+                logger.warning("Failed to add keychain item for service \(service), status: \(addStatus)")
+                return false
+            }
+
+            logger.warning("Failed to update keychain item for service \(service), status: \(updateStatus)")
+            return false
+        } catch {
+            logger.warning("Failed to encode keychain JSON payload for service \(service): \(error.localizedDescription)")
+            return false
+        }
+    }
+
     // MARK: - Antigravity Accounts File Reading
 
     private func antigravityAccountsPath() -> URL {
@@ -1769,37 +2021,26 @@ final class TokenManager: @unchecked Sendable {
             homeDir
                 .appendingPathComponent(".config")
                 .appendingPathComponent("claude-code")
-                .appendingPathComponent("auth.json"),
-            homeDir
-                .appendingPathComponent(".claude")
-                .appendingPathComponent(".credentials.json")
+                .appendingPathComponent("auth.json")
         ]
     }
 
     private func readClaudeCodeAuthFiles() -> [ClaudeAuthAccount] {
-        let accessKeys: Set<String> = ["accesstoken", "oauthtoken", "token"]
-        let accountKeys: Set<String> = ["accountid", "userid", "id"]
-        let emailKeys: Set<String> = ["email", "useremail", "login", "username"]
-
         var accounts: [ClaudeAuthAccount] = []
         for path in claudeCodeAuthPaths() {
             guard let dict = readJSONDictionary(at: path) else { continue }
-            guard let accessToken = findStringValue(in: dict, matching: accessKeys) else { continue }
+            guard let payload = extractClaudeOAuthPayload(from: dict) else { continue }
 
-            let accountIdString = findStringValue(in: dict, matching: accountKeys)
-            let accountIdInt = findIntValue(in: dict, matching: accountKeys)
-            let accountId = accountIdString ?? accountIdInt.map { String($0) }
-            let email = findStringValue(in: dict, matching: emailKeys)
-
-            let source: ClaudeAuthSource = path.path.contains(".credentials.json") ? .claudeLegacyCredentials : .claudeCodeConfig
             accounts.append(
                 ClaudeAuthAccount(
-                    accessToken: accessToken,
-                    accountId: accountId,
-                    email: email,
+                    accessToken: payload.accessToken,
+                    accountId: payload.accountId,
+                    email: payload.email,
+                    refreshToken: payload.refreshToken,
+                    expiresAt: payload.expiresAt,
                     authSource: path.path,
-                    sourceLabels: [claudeSourceLabel(for: source)],
-                    source: source
+                    sourceLabels: [claudeSourceLabel(for: .claudeCodeConfig)],
+                    source: .claudeCodeConfig
                 )
             )
         }
@@ -1807,10 +2048,6 @@ final class TokenManager: @unchecked Sendable {
     }
 
     private func readClaudeCodeKeychainAccounts() -> [ClaudeAuthAccount] {
-        let accessKeys: Set<String> = ["accesstoken", "oauthtoken", "token"]
-        let accountKeys: Set<String> = ["accountid", "userid", "id"]
-        let emailKeys: Set<String> = ["email", "useremail", "login", "username"]
-
         let services = [
             "Claude Code-credentials",
             "Claude Code"
@@ -1819,18 +2056,15 @@ final class TokenManager: @unchecked Sendable {
         var accounts: [ClaudeAuthAccount] = []
         for service in services {
             guard let dict = readKeychainJSON(service: service) else { continue }
-            guard let accessToken = findStringValue(in: dict, matching: accessKeys) else { continue }
-
-            let accountIdString = findStringValue(in: dict, matching: accountKeys)
-            let accountIdInt = findIntValue(in: dict, matching: accountKeys)
-            let accountId = accountIdString ?? accountIdInt.map { String($0) }
-            let email = findStringValue(in: dict, matching: emailKeys)
+            guard let payload = extractClaudeOAuthPayload(from: dict) else { continue }
 
             accounts.append(
                 ClaudeAuthAccount(
-                    accessToken: accessToken,
-                    accountId: accountId,
-                    email: email,
+                    accessToken: payload.accessToken,
+                    accountId: payload.accountId,
+                    email: payload.email,
+                    refreshToken: payload.refreshToken,
+                    expiresAt: payload.expiresAt,
                     authSource: "Keychain (\(service))",
                     sourceLabels: [claudeSourceLabel(for: .claudeCodeKeychain)],
                     source: .claudeCodeKeychain
@@ -1864,6 +2098,8 @@ final class TokenManager: @unchecked Sendable {
                     accessToken: access,
                     accountId: auth.anthropic?.accountId,
                     email: nil,
+                    refreshToken: normalizedNonEmpty(auth.anthropic?.refresh),
+                    expiresAt: dateFromEpoch(auth.anthropic?.expires),
                     authSource: authSource,
                     sourceLabels: [claudeSourceLabel(for: .opencodeAuth)],
                     source: .opencodeAuth
@@ -1871,8 +2107,12 @@ final class TokenManager: @unchecked Sendable {
             )
         }
 
-        accounts.append(contentsOf: readClaudeCodeKeychainAccounts())
-        accounts.append(contentsOf: readClaudeCodeAuthFiles())
+        let keychainAccounts = readClaudeCodeKeychainAccounts()
+        accounts.append(contentsOf: keychainAccounts)
+        if keychainAccounts.isEmpty {
+            logger.info("Claude keychain credentials unavailable; using Claude Code auth file fallback")
+            accounts.append(contentsOf: readClaudeCodeAuthFiles())
+        }
 
         let deduped = dedupeClaudeAccounts(accounts)
         logger.info("Claude accounts discovered: \(deduped.count)")
@@ -1881,6 +2121,57 @@ final class TokenManager: @unchecked Sendable {
             claudeAccountsCacheTimestamp = Date()
         }
         return deduped
+    }
+
+    func invalidateClaudeAccountCache() {
+        queue.sync {
+            cachedClaudeAccounts = nil
+            claudeAccountsCacheTimestamp = nil
+        }
+    }
+
+    func persistClaudeOAuthRefresh(
+        accessToken: String,
+        refreshToken: String?,
+        expiresAt: Date?
+    ) {
+        let sanitizedAccessToken = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitizedAccessToken.isEmpty else { return }
+
+        let sanitizedRefreshToken = normalizedNonEmpty(refreshToken)
+        let expiresAtEpochMillis = expiresAt.map { Int64($0.timeIntervalSince1970 * 1000) }
+
+        let keychainServices = ["Claude Code-credentials", "Claude Code"]
+        var persisted = false
+
+        for service in keychainServices {
+            guard var root = readKeychainJSON(service: service) else {
+                continue
+            }
+            let oauthContainerKey = root.keys.first { normalizedKey($0) == "claudeaioauth" } ?? "claudeAiOauth"
+            var oauthContainer = root[oauthContainerKey] as? [String: Any] ?? [:]
+
+            oauthContainer["accessToken"] = sanitizedAccessToken
+            if let sanitizedRefreshToken {
+                oauthContainer["refreshToken"] = sanitizedRefreshToken
+            }
+            if let expiresAtEpochMillis {
+                oauthContainer["expiresAt"] = expiresAtEpochMillis
+            }
+            root[oauthContainerKey] = oauthContainer
+
+            if writeKeychainJSON(service: service, payload: root) {
+                logger.info("Persisted refreshed Claude OAuth credentials to keychain service \(service)")
+                persisted = true
+                break
+            }
+        }
+
+        if !persisted {
+            logger.warning("Failed to persist refreshed Claude OAuth credentials to keychain")
+        }
+
+        invalidateClaudeAccountCache()
     }
 
     private func dedupeClaudeAccounts(_ accounts: [ClaudeAuthAccount]) -> [ClaudeAuthAccount] {
@@ -1922,11 +2213,24 @@ final class TokenManager: @unchecked Sendable {
         let fallbackEmail = fallback.email?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let mergedSourceLabels = mergeSourceLabels(primary.sourceLabels, fallback.sourceLabels)
+        let primaryRefreshToken = normalizedNonEmpty(primary.refreshToken)
+        let fallbackRefreshToken = normalizedNonEmpty(fallback.refreshToken)
+        let mergedRefreshToken = primaryRefreshToken ?? fallbackRefreshToken
+
+        let mergedExpiresAt: Date?
+        if let primaryExpires = primary.expiresAt,
+           let fallbackExpires = fallback.expiresAt {
+            mergedExpiresAt = max(primaryExpires, fallbackExpires)
+        } else {
+            mergedExpiresAt = primary.expiresAt ?? fallback.expiresAt
+        }
 
         return ClaudeAuthAccount(
             accessToken: primary.accessToken,
             accountId: (primaryAccountId?.isEmpty == false) ? primaryAccountId : fallbackAccountId,
             email: (primaryEmail?.isEmpty == false) ? primaryEmail : fallbackEmail,
+            refreshToken: mergedRefreshToken,
+            expiresAt: mergedExpiresAt,
             authSource: primary.authSource,
             sourceLabels: mergedSourceLabels,
             source: primary.source
@@ -2943,10 +3247,6 @@ final class TokenManager: @unchecked Sendable {
         let claudePaths = claudeCodeAuthPaths()
         if let configPath = claudePaths.first {
             lines.append("  Claude Code auth.json (\(shortPath(configPath.path))): \(fileStatus(path: configPath, tokenKeys: claudeTokenKeys))")
-        }
-        if claudePaths.count > 1 {
-            let legacyPath = claudePaths[1]
-            lines.append("  Claude Legacy credentials (\(shortPath(legacyPath.path))): \(fileStatus(path: legacyPath, tokenKeys: claudeTokenKeys))")
         }
 
         lines.append("")

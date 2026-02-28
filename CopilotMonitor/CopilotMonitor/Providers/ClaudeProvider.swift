@@ -78,6 +78,14 @@ private struct ClaudeAccountIdentityResponse: Decodable {
     }
 }
 
+private struct ClaudeOAuthRefreshResponse: Decodable {
+    let access_token: String
+    let refresh_token: String?
+    let expires_in: Int?
+    let token_type: String?
+    let scope: String?
+}
+
 // MARK: - ClaudeProvider Implementation
 
 /// Provider for Anthropic Claude API usage tracking
@@ -88,6 +96,10 @@ final class ClaudeProvider: ProviderProtocol {
 
     private let tokenManager: TokenManager
     private let session: URLSession
+    private let claudeUsageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")
+    private let claudeOAuthRefreshEndpoint = URL(string: "https://platform.claude.com/v1/oauth/token")
+    private let claudeOAuthClientID = ProcessInfo.processInfo.environment["CLAUDE_CODE_OAUTH_CLIENT_ID"]
+        ?? "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
     init(tokenManager: TokenManager = .shared, session: URLSession = .shared) {
         self.tokenManager = tokenManager
@@ -142,7 +154,21 @@ final class ClaudeProvider: ProviderProtocol {
             return sourcePriority(lhs.source) > sourcePriority(rhs.source)
         }
 
-        let accountResults: [ProviderAccountResult] = sorted.enumerated().map { index, candidate in
+        let hasUsageCandidate = sorted.contains { $0.hasUsageData }
+        let displayCandidates = sorted.filter { candidate in
+            guard hasUsageCandidate, !candidate.hasUsageData else { return true }
+            guard let authError = candidate.details.authErrorMessage?.lowercased(),
+                  authError.contains("token expired"),
+                  let accountId = candidate.accountId?.lowercased(),
+                  accountId.hasPrefix("token:") else {
+                return true
+            }
+
+            logger.info("Suppressing unresolved expired Claude candidate because active account is available")
+            return false
+        }
+
+        let accountResults: [ProviderAccountResult] = displayCandidates.enumerated().map { index, candidate in
             ProviderAccountResult(
                 accountIndex: index,
                 accountId: candidate.accountId,
@@ -237,6 +263,9 @@ final class ClaudeProvider: ProviderProtocol {
         mergedDetails.authUsageSummary = sourceSummary(mergedLabels, fallback: "Unknown")
         if mergedDetails.email == nil || mergedDetails.email?.isEmpty == true {
             mergedDetails.email = secondary.details.email
+        }
+        if mergedDetails.authErrorMessage == nil || mergedDetails.authErrorMessage?.isEmpty == true {
+            mergedDetails.authErrorMessage = secondary.details.authErrorMessage
         }
 
         let mergedAccountId: String?
@@ -366,41 +395,122 @@ final class ClaudeProvider: ProviderProtocol {
         )
     }
 
-    private func unavailableCandidate(for account: ClaudeAuthAccount, error: Error) async -> ClaudeAccountCandidate {
-        let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
-        let authUsageSummary = sourceSummary(sourceLabels, fallback: "Unknown")
-        let identity = await resolveAccountIdentity(account)
-
-        logger.info(
-            "Claude account fallback (\(authUsageSummary)): reason=\(error.localizedDescription)"
-        )
-
-        let details = DetailedUsage(
-            email: identity.email,
-            authSource: account.authSource,
-            authUsageSummary: authUsageSummary
-        )
-
-        return ClaudeAccountCandidate(
-            dedupeKey: identity.dedupeKey,
-            accountId: identity.displayAccountId,
-            usage: ProviderUsage.quotaBased(remaining: 0, entitlement: 0, overagePermitted: false),
-            details: details,
-            sourceLabels: sourceLabels,
-            source: account.source,
-            hasUsageData: false
-        )
+    private func isAccessTokenExpired(_ account: ClaudeAuthAccount) -> Bool {
+        guard let expiresAt = account.expiresAt else { return false }
+        // Treat tokens expiring in under 60 seconds as expired to avoid race conditions.
+        return expiresAt <= Date().addingTimeInterval(60)
     }
 
-    private func fetchUsageForAccount(_ account: ClaudeAuthAccount) async throws -> ClaudeAccountCandidate {
-        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
+    private func isTokenExpiredError(_ error: Error) -> Bool {
+        guard let providerError = error as? ProviderError else {
+            return error.localizedDescription.lowercased().contains("token expired")
+                || error.localizedDescription.lowercased().contains("invalid token")
+        }
+
+        switch providerError {
+        case .authenticationFailed(let message):
+            let lowered = message.lowercased()
+            return lowered.contains("token expired")
+                || lowered.contains("expired")
+                || lowered.contains("invalid")
+        default:
+            return false
+        }
+    }
+
+    private func authErrorMessage(for account: ClaudeAuthAccount, error: Error) -> String {
+        if isAccessTokenExpired(account) || isTokenExpiredError(error) {
+            return "Token expired"
+        }
+        return "Authentication failed"
+    }
+
+    private func refreshClaudeAccessToken(for account: ClaudeAuthAccount) async -> ClaudeAuthAccount? {
+        let refreshToken = account.refreshToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !refreshToken.isEmpty else {
+            logger.info("Claude token refresh skipped: refresh token unavailable (\(account.authSource))")
+            return nil
+        }
+
+        guard let refreshURL = claudeOAuthRefreshEndpoint else {
+            logger.error("Claude OAuth refresh URL is invalid")
+            return nil
+        }
+
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "grant_type", value: "refresh_token"),
+            URLQueryItem(name: "refresh_token", value: refreshToken),
+            URLQueryItem(name: "client_id", value: claudeOAuthClientID)
+        ]
+
+        guard let body = components.query?.data(using: .utf8) else {
+            logger.error("Claude OAuth refresh payload construction failed")
+            return nil
+        }
+
+        var request = URLRequest(url: refreshURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = body
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                logger.warning("Claude token refresh failed: invalid response type")
+                return nil
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                logger.warning("Claude token refresh failed (\(httpResponse.statusCode))")
+                return nil
+            }
+
+            let refreshResponse = try JSONDecoder().decode(ClaudeOAuthRefreshResponse.self, from: data)
+            let refreshedAccessToken = refreshResponse.access_token.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !refreshedAccessToken.isEmpty else {
+                logger.warning("Claude token refresh returned empty access token")
+                return nil
+            }
+
+            let refreshedRefreshToken = normalizedNonEmpty(refreshResponse.refresh_token) ?? account.refreshToken
+            let refreshedExpiresAt = refreshResponse.expires_in.map {
+                Date().addingTimeInterval(TimeInterval(max(0, $0 - 60)))
+            }
+
+            tokenManager.persistClaudeOAuthRefresh(
+                accessToken: refreshedAccessToken,
+                refreshToken: refreshedRefreshToken,
+                expiresAt: refreshedExpiresAt
+            )
+
+            logger.info("Claude token refreshed successfully (\(account.authSource))")
+            return ClaudeAuthAccount(
+                accessToken: refreshedAccessToken,
+                accountId: account.accountId,
+                email: account.email,
+                refreshToken: refreshedRefreshToken,
+                expiresAt: refreshedExpiresAt ?? account.expiresAt,
+                authSource: account.authSource,
+                sourceLabels: account.sourceLabels,
+                source: account.source
+            )
+        } catch {
+            logger.warning("Claude token refresh failed with error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func requestClaudeUsageData(accessToken: String) async throws -> Data {
+        guard let url = claudeUsageEndpoint else {
             logger.error("Invalid Claude API URL")
             throw ProviderError.networkError("Invalid API endpoint")
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
 
         let (data, response) = try await session.data(for: request)
@@ -418,6 +528,59 @@ final class ClaudeProvider: ProviderProtocol {
         guard (200...299).contains(httpResponse.statusCode) else {
             logger.error("Claude API returned status \(httpResponse.statusCode)")
             throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
+        }
+
+        return data
+    }
+
+    private func unavailableCandidate(for account: ClaudeAuthAccount, error: Error) async -> ClaudeAccountCandidate {
+        let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
+        let authUsageSummary = sourceSummary(sourceLabels, fallback: "Unknown")
+        let identity = await resolveAccountIdentity(account)
+
+        logger.info(
+            "Claude account fallback (\(authUsageSummary)): reason=\(error.localizedDescription)"
+        )
+
+        let details = DetailedUsage(
+            email: identity.email,
+            authSource: account.authSource,
+            authUsageSummary: authUsageSummary,
+            authErrorMessage: authErrorMessage(for: account, error: error)
+        )
+
+        return ClaudeAccountCandidate(
+            dedupeKey: identity.dedupeKey,
+            accountId: identity.displayAccountId,
+            usage: ProviderUsage.quotaBased(remaining: 0, entitlement: 0, overagePermitted: false),
+            details: details,
+            sourceLabels: sourceLabels,
+            source: account.source,
+            hasUsageData: false
+        )
+    }
+
+    private func fetchUsageForAccount(_ account: ClaudeAuthAccount) async throws -> ClaudeAccountCandidate {
+        var workingAccount = account
+        var data: Data
+
+        if isAccessTokenExpired(workingAccount),
+           let refreshedAccount = await refreshClaudeAccessToken(for: workingAccount) {
+            logger.info("Claude access token refreshed before usage request (\(account.authSource))")
+            workingAccount = refreshedAccount
+        }
+
+        do {
+            data = try await requestClaudeUsageData(accessToken: workingAccount.accessToken)
+        } catch {
+            if isTokenExpiredError(error),
+               let refreshedAccount = await refreshClaudeAccessToken(for: workingAccount) {
+                logger.info("Retrying Claude usage request with refreshed token (\(account.authSource))")
+                workingAccount = refreshedAccount
+                data = try await requestClaudeUsageData(accessToken: workingAccount.accessToken)
+            } else {
+                throw error
+            }
         }
 
         do {
@@ -460,7 +623,7 @@ final class ClaudeProvider: ProviderProtocol {
 
             let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
             let authUsageSummary = sourceSummary(sourceLabels, fallback: "Unknown")
-            let identity = await resolveAccountIdentity(account)
+            let identity = await resolveAccountIdentity(workingAccount)
 
             logger.info("Claude usage fetched (\(authUsageSummary)): 7d=\(utilization)%, 5h=\(fiveHourUsage?.description ?? "N/A")%")
             logger.debug("Claude account identity (\(authUsageSummary)): dedupeKey=\(identity.dedupeKey), accountId=\(identity.accountId ?? "nil"), email=\(identity.email ?? "nil")")
@@ -493,7 +656,7 @@ final class ClaudeProvider: ProviderProtocol {
                 extraUsageUsedUSD: extraUsageUsedCredits.map { $0 / 100.0 },
                 extraUsageUtilizationPercent: extraUsageUtilizationPercent,
                 email: identity.email,
-                authSource: account.authSource,
+                authSource: workingAccount.authSource,
                 authUsageSummary: authUsageSummary
             )
 

@@ -127,6 +127,8 @@ struct DetailedUsage {
     var authSource: String?
     // Human-friendly source labels (displayed as "Using in:")
     var authUsageSummary: String?
+    // Authentication failure hint for account-level fallback rows.
+    var authErrorMessage: String?
 
     // Multiple Gemini accounts support
     let geminiAccounts: [GeminiAccountQuota]?
@@ -196,6 +198,7 @@ struct DetailedUsage {
         creditsTotal: Double? = nil,
         authSource: String? = nil,
         authUsageSummary: String? = nil,
+        authErrorMessage: String? = nil,
         geminiAccounts: [GeminiAccountQuota]? = nil,
         tokenUsagePercent: Double? = nil,
         tokenUsageReset: Date? = nil,
@@ -258,6 +261,7 @@ struct DetailedUsage {
         self.creditsTotal = creditsTotal
         self.authSource = authSource
         self.authUsageSummary = authUsageSummary
+        self.authErrorMessage = authErrorMessage
         self.geminiAccounts = geminiAccounts
         self.tokenUsagePercent = tokenUsagePercent
         self.tokenUsageReset = tokenUsageReset
@@ -292,7 +296,7 @@ extension DetailedUsage: Codable {
         case extraUsageMonthlyLimitUSD, extraUsageUsedUSD, extraUsageUtilizationPercent
         case sessions, messages, avgCostPerDay, email
         case dailyHistory, monthlyCost, creditsRemaining, creditsTotal
-        case authSource, authUsageSummary, geminiAccounts
+        case authSource, authUsageSummary, authErrorMessage, geminiAccounts
         case tokenUsagePercent, tokenUsageReset, tokenUsageUsed, tokenUsageTotal
         case mcpUsagePercent, mcpUsageReset, mcpUsageUsed, mcpUsageTotal
         case modelUsageTokens, modelUsageCalls
@@ -344,6 +348,7 @@ extension DetailedUsage: Codable {
         creditsTotal = try container.decodeIfPresent(Double.self, forKey: .creditsTotal)
         authSource = try container.decodeIfPresent(String.self, forKey: .authSource)
         authUsageSummary = try container.decodeIfPresent(String.self, forKey: .authUsageSummary)
+        authErrorMessage = try container.decodeIfPresent(String.self, forKey: .authErrorMessage)
         geminiAccounts = try container.decodeIfPresent([GeminiAccountQuota].self, forKey: .geminiAccounts)
         tokenUsagePercent = try container.decodeIfPresent(Double.self, forKey: .tokenUsagePercent)
         tokenUsageReset = try container.decodeIfPresent(Date.self, forKey: .tokenUsageReset)
@@ -409,6 +414,7 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(creditsTotal, forKey: .creditsTotal)
         try container.encodeIfPresent(authSource, forKey: .authSource)
         try container.encodeIfPresent(authUsageSummary, forKey: .authUsageSummary)
+        try container.encodeIfPresent(authErrorMessage, forKey: .authErrorMessage)
         try container.encodeIfPresent(geminiAccounts, forKey: .geminiAccounts)
         try container.encodeIfPresent(tokenUsagePercent, forKey: .tokenUsagePercent)
         try container.encodeIfPresent(tokenUsageReset, forKey: .tokenUsageReset)
@@ -760,7 +766,7 @@ extension DetailedUsage {
             || email != nil
             || dailyHistory != nil || monthlyCost != nil
             || creditsRemaining != nil || creditsTotal != nil
-            || authSource != nil || authUsageSummary != nil || geminiAccounts != nil
+            || authSource != nil || authUsageSummary != nil || authErrorMessage != nil || geminiAccounts != nil
             || tokenUsagePercent != nil || tokenUsageReset != nil
             || tokenUsageUsed != nil || tokenUsageTotal != nil
             || mcpUsagePercent != nil || mcpUsageReset != nil
