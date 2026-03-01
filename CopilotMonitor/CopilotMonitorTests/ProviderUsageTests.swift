@@ -110,7 +110,7 @@ final class ProviderUsageTests: XCTestCase {
         XCTAssertTrue(output.contains("55%"))
     }
 
-    func testTableFormatterShowsDualPercentForAntigravityGeminiAccounts() {
+    func testTableFormatterShowsGeminiPercentOnlyForGeminiAccounts() {
         let geminiAccounts = [
             GeminiAccountQuota(
                 accountIndex: 0,
@@ -144,7 +144,9 @@ final class ProviderUsageTests: XCTestCase {
             .antigravity: antigravityResult
         ])
 
-        XCTAssertTrue(output.contains("70%,60%"))
+        XCTAssertTrue(output.contains("Gemini (#1)"))
+        XCTAssertTrue(output.contains("70%"))
+        XCTAssertFalse(output.contains("70%,60%"))
     }
     
     // MARK: - Helper Methods
