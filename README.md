@@ -1,18 +1,58 @@
-## Weekly Changelog (Feb 10-16, 2026)
+## Monthly Changelog (February 2026)
 
 ### Highlights
-- Added Nano-GPT provider support across the menu app and CLI ([#76](https://github.com/opgginc/opencode-bar/pull/76)).
-- Added Codex LB account discovery and improved Codex Spark usage parsing ([#74](https://github.com/opgginc/opencode-bar/pull/74), [#77](https://github.com/opgginc/opencode-bar/pull/77)).
-- Added Gemini CLI auto-detection with account-aware labeling and metadata support ([#75](https://github.com/opgginc/opencode-bar/pull/75)).
-- Improved menu/status panel presentation and compact menu bar icon width behavior ([#79](https://github.com/opgginc/opencode-bar/pull/79), [#80](https://github.com/opgginc/opencode-bar/pull/80)).
+- Released **OpenCode Bar v2.0.0** with multi-provider monitoring and the modernized menu bar architecture ([#12](https://github.com/opgginc/opencode-bar/pull/12)).
+- Added major provider coverage across app and CLI: **Kimi for Coding**, **Z.AI Coding Plan**, **Chutes AI**, **Synthetic**, **Nano-GPT**, **Brave Search**, and **Tavily** ([#34](https://github.com/opgginc/opencode-bar/pull/34), [#43](https://github.com/opgginc/opencode-bar/pull/43), [#51](https://github.com/opgginc/opencode-bar/pull/51), [#65](https://github.com/opgginc/opencode-bar/pull/65), [#66](https://github.com/opgginc/opencode-bar/pull/66), [#76](https://github.com/opgginc/opencode-bar/pull/76), [#85](https://github.com/opgginc/opencode-bar/pull/85)).
+- Expanded **Codex** and **Gemini CLI** support with Codex LB account discovery, Spark window grouping/fallback parsing, auto-detection, per-model windows, and account-aware labels ([#74](https://github.com/opgginc/opencode-bar/pull/74), [#75](https://github.com/opgginc/opencode-bar/pull/75), [#77](https://github.com/opgginc/opencode-bar/pull/77), [#63](https://github.com/opgginc/opencode-bar/pull/63)).
+- Improved **Claude** quota clarity with extra usage breakdowns, reset fixes, and account separation by email while excluding unavailable OpenCode sources ([#72](https://github.com/opgginc/opencode-bar/pull/72), [#89](https://github.com/opgginc/opencode-bar/pull/89), [#95](https://github.com/opgginc/opencode-bar/pull/95)).
+- Added the `opencodebar` CLI with provider status/list/detail commands, JSON output support, and improved dual-percentage formatting ([#32](https://github.com/opgginc/opencode-bar/pull/32), [#92](https://github.com/opgginc/opencode-bar/pull/92)).
+- Added subscription-aware billing controls and safer cleanup behavior with per-provider plan settings and orphaned plan handling ([#68](https://github.com/opgginc/opencode-bar/pull/68)).
+- Improved auth and reliability: cookie-based Copilot authentication, auth source labels, dynamic OpenCode binary/auth path discovery, mixed-schema auth decoding, and stronger fallback handling ([#31](https://github.com/opgginc/opencode-bar/pull/31), [#55](https://github.com/opgginc/opencode-bar/pull/55), [#30](https://github.com/opgginc/opencode-bar/pull/30), [#26](https://github.com/opgginc/opencode-bar/pull/26), [#69](https://github.com/opgginc/opencode-bar/pull/69)).
+- Polished menu bar UX with status bar provider icons, compact icon width, aligned panel styling, clearer pace/wait messaging, and improved over-quota alert behavior ([#87](https://github.com/opgginc/opencode-bar/pull/87), [#80](https://github.com/opgginc/opencode-bar/pull/80), [#79](https://github.com/opgginc/opencode-bar/pull/79), [#54](https://github.com/opgginc/opencode-bar/pull/54), [#96](https://github.com/opgginc/opencode-bar/pull/96)).
+- Hardened update/release operations with Sparkle migration and relaunch fixes, x86 support, and repo-level pre-commit quality checks ([#21](https://github.com/opgginc/opencode-bar/pull/21), [#24](https://github.com/opgginc/opencode-bar/pull/24), [#39](https://github.com/opgginc/opencode-bar/pull/39), [#61](https://github.com/opgginc/opencode-bar/pull/61)).
 
-### Key PRs
-- [#80](https://github.com/opgginc/opencode-bar/pull/80) Reduce status bar icon width on the Mac Menu Bar
-- [#79](https://github.com/opgginc/opencode-bar/pull/79) Align status panel styling
-- [#77](https://github.com/opgginc/opencode-bar/pull/77) Add Codex Spark window grouping and fallback parsing
-- [#76](https://github.com/opgginc/opencode-bar/pull/76) Add Nano-GPT provider across app and CLI
-- [#75](https://github.com/opgginc/opencode-bar/pull/75) Add Gemini CLI auto-detection
-- [#74](https://github.com/opgginc/opencode-bar/pull/74) Add Codex LB account discovery to status bar menu
+### Key Feature PRs
+- [#96](https://github.com/opgginc/opencode-bar/pull/96) Adjust overquota alert behavior (by [@kargnas](https://github.com/kargnas))
+- [#95](https://github.com/opgginc/opencode-bar/pull/95) Separate Claude accounts by email and disable unavailable OpenCode source (by [@kargnas](https://github.com/kargnas))
+- [#92](https://github.com/opgginc/opencode-bar/pull/92) Implement CLI formatter dual percentage display (by [@kargnas](https://github.com/kargnas))
+- [#91](https://github.com/opgginc/opencode-bar/pull/91) Fix Codex usage prediction percentage (by [@kargnas](https://github.com/kargnas))
+- [#89](https://github.com/opgginc/opencode-bar/pull/89) Fix Claude Sonnet usage reset (by [@kargnas](https://github.com/kargnas))
+- [#88](https://github.com/opgginc/opencode-bar/pull/88) Support Nano-GPT 60M monthly plan weekly token window (by [@Daltonganger](https://github.com/Daltonganger))
+- [#87](https://github.com/opgginc/opencode-bar/pull/87) Display provider icons in status bar text (by [@kargnas](https://github.com/kargnas))
+- [#85](https://github.com/opgginc/opencode-bar/pull/85) Add Brave/Tavily search quota tracking and refresh modes (by [@Daltonganger](https://github.com/Daltonganger))
+- [#83](https://github.com/opgginc/opencode-bar/pull/83) Replace hardcoded OpenCode path with dynamic binary discovery (by [@Shaglock](https://github.com/Shaglock))
+- [#81](https://github.com/opgginc/opencode-bar/pull/81) Align menu bar usage metrics with weekly priority (by [@kargnas](https://github.com/kargnas))
+- [#80](https://github.com/opgginc/opencode-bar/pull/80) Reduce status bar icon width on macOS menu bar (by [@kargnas](https://github.com/kargnas))
+- [#79](https://github.com/opgginc/opencode-bar/pull/79) Align status panel styling (by [@kargnas](https://github.com/kargnas))
+- [#77](https://github.com/opgginc/opencode-bar/pull/77) Add Codex Spark window grouping and fallback parsing (by [@kargnas](https://github.com/kargnas))
+- [#76](https://github.com/opgginc/opencode-bar/pull/76) Add Nano-GPT provider across app and CLI (by [@Daltonganger](https://github.com/Daltonganger))
+- [#75](https://github.com/opgginc/opencode-bar/pull/75) Add Gemini CLI auto-detection (by [@kargnas](https://github.com/kargnas))
+- [#74](https://github.com/opgginc/opencode-bar/pull/74) Add Codex LB account discovery to status bar menu (by [@kargnas](https://github.com/kargnas))
+- [#72](https://github.com/opgginc/opencode-bar/pull/72) Add Claude extra usage breakdown in UI and models (by [@kargnas](https://github.com/kargnas))
+- [#69](https://github.com/opgginc/opencode-bar/pull/69) Fix auth.json decoding for mixed provider schemas (by [@kargnas](https://github.com/kargnas))
+- [#68](https://github.com/opgginc/opencode-bar/pull/68) Fix orphaned subscription cleanup (by [@kargnas](https://github.com/kargnas))
+- [#67](https://github.com/opgginc/opencode-bar/pull/67) Group model quotas by reset window and add dividers (by [@kargnas](https://github.com/kargnas))
+- [#66](https://github.com/opgginc/opencode-bar/pull/66) Register Z.AI and Chutes providers in CLI (by [@kargnas](https://github.com/kargnas))
+- [#65](https://github.com/opgginc/opencode-bar/pull/65) Show Z.AI 5h and MCP quotas (by [@kargnas](https://github.com/kargnas))
+- [#63](https://github.com/opgginc/opencode-bar/pull/63) Render Gemini grouped models on separate rows (by [@kargnas](https://github.com/kargnas))
+- [#61](https://github.com/opgginc/opencode-bar/pull/61) Add x86 support (by [@kargnas](https://github.com/kargnas))
+- [#56](https://github.com/opgginc/opencode-bar/pull/56) Add opencode-gemini-auth support (by [@kargnas](https://github.com/kargnas))
+- [#55](https://github.com/opgginc/opencode-bar/pull/55) Add auth source labels and debug summary (by [@kargnas](https://github.com/kargnas))
+- [#54](https://github.com/opgginc/opencode-bar/pull/54) Fix used-up pace messaging and wait time formatting (by [@kargnas](https://github.com/kargnas))
+- [#51](https://github.com/opgginc/opencode-bar/pull/51) Add Synthetic quota provider (by [@ch1y1z1](https://github.com/ch1y1z1))
+- [#43](https://github.com/opgginc/opencode-bar/pull/43) Add Chutes AI provider support (by [@Daltonganger](https://github.com/Daltonganger))
+- [#49](https://github.com/opgginc/opencode-bar/pull/49) Add `~/.codex/auth.json` fallback for Codex native client (by [@kargnas](https://github.com/kargnas))
+- [#39](https://github.com/opgginc/opencode-bar/pull/39) Add pre-commit hooks (SwiftLint + action-validator) (by [@kargnas](https://github.com/kargnas))
+- [#34](https://github.com/opgginc/opencode-bar/pull/34) Add Z.AI Coding Plan provider support (by [@hellokiseokopgg](https://github.com/hellokiseokopgg))
+- [#32](https://github.com/opgginc/opencode-bar/pull/32) Add `opencodebar` CLI for provider usage queries (by [@kargnas](https://github.com/kargnas))
+- [#31](https://github.com/opgginc/opencode-bar/pull/31) Implement cookie-based Copilot authentication (by [@kargnas](https://github.com/kargnas))
+- [#30](https://github.com/opgginc/opencode-bar/pull/30) Fix dynamic OpenCode CLI binary search (by [@kargnas](https://github.com/kargnas))
+- [#26](https://github.com/opgginc/opencode-bar/pull/26) Add fallback paths for auth.json discovery (by [@kargnas](https://github.com/kargnas))
+- [#24](https://github.com/opgginc/opencode-bar/pull/24) Ensure Sparkle relaunches app after update (by [@kargnas](https://github.com/kargnas))
+- [#21](https://github.com/opgginc/opencode-bar/pull/21) Add app bundle migration for Sparkle updates (by [@kargnas](https://github.com/kargnas))
+- [#17](https://github.com/opgginc/opencode-bar/pull/17) Add error reporting UI for provider failures (by [@kargnas](https://github.com/kargnas))
+- [#16](https://github.com/opgginc/opencode-bar/pull/16) Rename app bundle from CopilotMonitor to OpenCode Bar (by [@kargnas](https://github.com/kargnas))
+- [#12](https://github.com/opgginc/opencode-bar/pull/12) OpenCode Bar v2.0.0 multi-provider monitoring release (by [@kargnas](https://github.com/kargnas))
 
 ---
 
