@@ -1053,7 +1053,31 @@ extension StatusBarController {
         }
 
         var predictText: String {
+            if let predictRange = predictRangeText {
+                return predictRange
+            }
             return String(format: "%.0f%%", predictedFinalUsage)
+        }
+
+        private var predictRangeText: String? {
+            if isExhausted {
+                return nil
+            }
+
+            let boundedElapsedRatio = max(0.0, min(1.0, elapsedRatio))
+            guard boundedElapsedRatio < 0.5 else {
+                return nil
+            }
+
+            let uncertaintyMargin = (0.30 * (1.0 - boundedElapsedRatio)) + 0.05
+            let lowerBound = max(0.0, predictedFinalUsage * (1.0 - uncertaintyMargin))
+            let upperBound = min(999.0, predictedFinalUsage * (1.0 + uncertaintyMargin))
+
+            guard upperBound - lowerBound >= 2.0 else {
+                return nil
+            }
+
+            return String(format: "~%.0f-%.0f%%", lowerBound, upperBound)
         }
     }
 
@@ -1084,29 +1108,12 @@ extension StatusBarController {
         let rawElapsedSeconds = windowSeconds - remainingSeconds
         let boundedElapsedSeconds = max(0, min(windowSeconds, rawElapsedSeconds))
 
-        // Rolling windows (especially weekly) can show extreme spikes right after usage starts.
-        // Use a stability floor so Speed/Predict are less noisy in very early phases.
-        let minElapsedRatioForForecast: Double
-        if windowHours >= 168 {
-            minElapsedRatioForForecast = 0.5
-        } else if windowHours >= 24 {
-            minElapsedRatioForForecast = 0.25
-        } else {
-            minElapsedRatioForForecast = 0.05
-        }
-
-        let minElapsedSeconds = windowSeconds * minElapsedRatioForForecast
-        let elapsedSeconds = max(boundedElapsedSeconds, minElapsedSeconds)
+        let elapsedSeconds = boundedElapsedSeconds
         let elapsedRatio = max(0, min(1, elapsedSeconds / windowSeconds))
         let usageRatio = usage / 100.0
         let isExhausted = usage >= 100 && remainingSeconds > 0
 
-        let predictedFinalUsage: Double
-        if elapsedRatio > 0.01 {
-            predictedFinalUsage = min(999, (usageRatio / elapsedRatio) * 100.0)
-        } else {
-            predictedFinalUsage = usage
-        }
+        let predictedFinalUsage = calculatePredictedFinalUsage(usagePercent: usage, elapsedRatio: elapsedRatio)
 
         return PaceInfo(
             elapsedRatio: elapsedRatio,
@@ -1159,12 +1166,7 @@ extension StatusBarController {
         let elapsedRatio = max(0, min(1, elapsedSeconds / totalSeconds))
         let usageRatio = usagePercent / 100.0
 
-        let predictedFinalUsage: Double
-        if elapsedRatio > 0.01 {
-            predictedFinalUsage = min(999, (usageRatio / elapsedRatio) * 100.0)
-        } else {
-            predictedFinalUsage = usagePercent
-        }
+        let predictedFinalUsage = calculatePredictedFinalUsage(usagePercent: usagePercent, elapsedRatio: elapsedRatio)
 
         return PaceInfo(
             elapsedRatio: elapsedRatio,
@@ -1175,6 +1177,22 @@ extension StatusBarController {
             elapsedSeconds: elapsedSeconds,
             totalSeconds: totalSeconds
         )
+    }
+
+    private func calculatePredictedFinalUsage(usagePercent: Double, elapsedRatio: Double) -> Double {
+        let boundedUsagePercent = min(999.0, max(0.0, usagePercent))
+        let boundedElapsedRatio = max(0.0, min(1.0, elapsedRatio))
+
+        guard boundedElapsedRatio > 0 else {
+            return boundedUsagePercent
+        }
+
+        let projected = boundedUsagePercent / boundedElapsedRatio
+        guard projected.isFinite else {
+            return boundedUsagePercent
+        }
+
+        return min(999.0, max(0.0, projected))
     }
 
     func createPaceView(paceInfo: PaceInfo) -> NSView {
@@ -1270,7 +1288,7 @@ extension StatusBarController {
             let predictValueColor: NSColor = isPredictWarning ? emphasisColor : .secondaryLabelColor
             debugLog("createPaceView: predict color mode = \(isPredictWarning ? "warning" : "default"), status = \(paceInfo.status)")
             rightAttributedString.append(NSAttributedString(
-                string: "Predict: ",
+                string: "Predicted Used: ",
                 attributes: [.font: NSFont.systemFont(ofSize: fontSize), .foregroundColor: NSColor.secondaryLabelColor]
             ))
             rightAttributedString.append(NSAttributedString(
