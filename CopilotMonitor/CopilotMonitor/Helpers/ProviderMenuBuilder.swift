@@ -1009,6 +1009,7 @@ extension StatusBarController {
         let predictedFinalUsage: Double
         let remainingSeconds: TimeInterval
         let isExhausted: Bool
+        let observedElapsedSeconds: TimeInterval
         let elapsedSeconds: TimeInterval
         let totalSeconds: TimeInterval
 
@@ -1064,12 +1065,16 @@ extension StatusBarController {
                 return nil
             }
 
-            let boundedElapsedRatio = max(0.0, min(1.0, elapsedRatio))
-            guard boundedElapsedRatio < 0.5 else {
+            guard totalSeconds > 0 else {
                 return nil
             }
 
-            let uncertaintyMargin = (0.30 * (1.0 - boundedElapsedRatio)) + 0.05
+            let observedElapsedRatio = max(0.0, min(1.0, observedElapsedSeconds / totalSeconds))
+            guard observedElapsedRatio < 0.5 else {
+                return nil
+            }
+
+            let uncertaintyMargin = (0.30 * (1.0 - observedElapsedRatio)) + 0.05
             let lowerBound = max(0.0, predictedFinalUsage * (1.0 - uncertaintyMargin))
             let upperBound = min(999.0, predictedFinalUsage * (1.0 + uncertaintyMargin))
 
@@ -1108,12 +1113,17 @@ extension StatusBarController {
         let rawElapsedSeconds = windowSeconds - remainingSeconds
         let boundedElapsedSeconds = max(0, min(windowSeconds, rawElapsedSeconds))
 
-        let elapsedSeconds = boundedElapsedSeconds
-        let elapsedRatio = max(0, min(1, elapsedSeconds / windowSeconds))
+        let minimumElapsedRatio = minimumElapsedRatioForForecast(windowHours: windowHours)
+        let elapsedRatio = max(minimumElapsedRatio, max(0, min(1, boundedElapsedSeconds / windowSeconds)))
+        let elapsedSeconds = elapsedRatio * windowSeconds
         let usageRatio = usage / 100.0
         let isExhausted = usage >= 100 && remainingSeconds > 0
 
-        let predictedFinalUsage = calculatePredictedFinalUsage(usagePercent: usage, elapsedRatio: elapsedRatio)
+        let predictedFinalUsage = calculatePredictedFinalUsage(
+            usagePercent: usage,
+            elapsedRatio: elapsedRatio,
+            minimumElapsedRatio: minimumElapsedRatio
+        )
 
         return PaceInfo(
             elapsedRatio: elapsedRatio,
@@ -1121,6 +1131,7 @@ extension StatusBarController {
             predictedFinalUsage: predictedFinalUsage,
             remainingSeconds: remainingSeconds,
             isExhausted: isExhausted,
+            observedElapsedSeconds: boundedElapsedSeconds,
             elapsedSeconds: elapsedSeconds,
             totalSeconds: windowSeconds
         )
@@ -1143,6 +1154,7 @@ extension StatusBarController {
                 predictedFinalUsage: usagePercent,
                 remainingSeconds: remainingSeconds,
                 isExhausted: isExhausted,
+                observedElapsedSeconds: 0,
                 elapsedSeconds: 0,
                 totalSeconds: 0
             )
@@ -1158,6 +1170,7 @@ extension StatusBarController {
                 predictedFinalUsage: usagePercent,
                 remainingSeconds: remainingSeconds,
                 isExhausted: isExhausted,
+                observedElapsedSeconds: elapsedSeconds,
                 elapsedSeconds: elapsedSeconds,
                 totalSeconds: totalSeconds
             )
@@ -1166,7 +1179,11 @@ extension StatusBarController {
         let elapsedRatio = max(0, min(1, elapsedSeconds / totalSeconds))
         let usageRatio = usagePercent / 100.0
 
-        let predictedFinalUsage = calculatePredictedFinalUsage(usagePercent: usagePercent, elapsedRatio: elapsedRatio)
+        let predictedFinalUsage = calculatePredictedFinalUsage(
+            usagePercent: usagePercent,
+            elapsedRatio: elapsedRatio,
+            minimumElapsedRatio: 0
+        )
 
         return PaceInfo(
             elapsedRatio: elapsedRatio,
@@ -1174,14 +1191,29 @@ extension StatusBarController {
             predictedFinalUsage: predictedFinalUsage,
             remainingSeconds: remainingSeconds,
             isExhausted: isExhausted,
+            observedElapsedSeconds: elapsedSeconds,
             elapsedSeconds: elapsedSeconds,
             totalSeconds: totalSeconds
         )
     }
 
-    private func calculatePredictedFinalUsage(usagePercent: Double, elapsedRatio: Double) -> Double {
+    private func minimumElapsedRatioForForecast(windowHours: Int) -> Double {
+        if windowHours >= 168 {
+            return 0.5
+        }
+        if windowHours >= 24 {
+            return 0.25
+        }
+        return 0.05
+    }
+
+    private func calculatePredictedFinalUsage(
+        usagePercent: Double,
+        elapsedRatio: Double,
+        minimumElapsedRatio: Double
+    ) -> Double {
         let boundedUsagePercent = min(999.0, max(0.0, usagePercent))
-        let boundedElapsedRatio = max(0.0, min(1.0, elapsedRatio))
+        let boundedElapsedRatio = max(minimumElapsedRatio, max(0.0, min(1.0, elapsedRatio)))
 
         guard boundedElapsedRatio > 0 else {
             return boundedUsagePercent
@@ -1288,7 +1320,7 @@ extension StatusBarController {
             let predictValueColor: NSColor = isPredictWarning ? emphasisColor : .secondaryLabelColor
             debugLog("createPaceView: predict color mode = \(isPredictWarning ? "warning" : "default"), status = \(paceInfo.status)")
             rightAttributedString.append(NSAttributedString(
-                string: "Predicted Used: ",
+                string: "Predict: ",
                 attributes: [.font: NSFont.systemFont(ofSize: fontSize), .foregroundColor: NSColor.secondaryLabelColor]
             ))
             rightAttributedString.append(NSAttributedString(
