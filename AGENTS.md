@@ -631,4 +631,20 @@ func buildProviderSubmenu() -> [NSMenuItem] {
   - Error Output: Write discovery errors to stderr so stdout remains clean for data consumers
   - Pattern: Wrap discovery in a find_opencode_bin() shell function; assign result to OPENCODE_BIN variable
 
+- **OAuth Token Expiration Field Interpretation**:
+  - Problem: `expires_in` values (e.g., 3600 seconds) incorrectly interpreted as epoch timestamps, resulting in 1970-01-01 dates
+  - Symptom: Tokens always appear expired, triggering unnecessary refresh attempts on every fetch
+  - Root Cause: OAuth providers may return either relative seconds (`expires_in`) or absolute timestamp (`expires_at`)
+  - Solution: Use threshold-based detection (1 billion) to distinguish:
+    - Values < 1B: relative seconds from now (treat as `expires_in`)
+    - Values >= 1B: epoch timestamp (treat as `expires_at`)
+  - Pattern: `if value < 1_000_000_000 { expiry = Date().addingTimeInterval(value) } else { expiry = Date(timeIntervalSince1970: value) }`
+  - Example Fix: TokenManager now correctly handles both field types for token expiration calculation
+- **Keychain-First OAuth Credential Parsing**:
+  - Problem: OAuth credentials stored in multiple locations (auth.json, system keychain) with different formats
+  - Priority Order: Check system Keychain first for OAuth tokens, then fall back to auth.json files
+  - Benefit: Captures tokens from GUI-based authentication flows that store to Keychain
+  - Pattern: `if let keychainToken = KeychainService.read(service: "provider") { use token } else { parseAuthJSON() }`
+  - Example: ClaudeProvider now reads OAuth tokens from macOS Keychain before checking auth.json
+
 <!-- opencode:reflection:end -->
