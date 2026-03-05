@@ -478,14 +478,7 @@ final class ClaudeProvider: ProviderProtocol {
             let refreshedExpiresAt = refreshResponse.expires_in.map {
                 Date().addingTimeInterval(TimeInterval(max(0, $0 - 60)))
             }
-
-            tokenManager.persistClaudeOAuthRefresh(
-                accessToken: refreshedAccessToken,
-                refreshToken: refreshedRefreshToken,
-                expiresAt: refreshedExpiresAt
-            )
-
-            logger.info("Claude token refreshed successfully (\(account.authSource))")
+            logger.info("Claude token refreshed successfully (\(account.authSource), in-memory only)")
             return ClaudeAuthAccount(
                 accessToken: refreshedAccessToken,
                 accountId: account.accountId,

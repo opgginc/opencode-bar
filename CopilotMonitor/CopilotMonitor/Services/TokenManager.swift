@@ -1932,46 +1932,6 @@ final class TokenManager: @unchecked Sendable {
         return nil
     }
 
-    private func writeKeychainJSON(service: String, payload: [String: Any]) -> Bool {
-        guard JSONSerialization.isValidJSONObject(payload) else {
-            logger.warning("Refused to write invalid keychain JSON payload for service \(service)")
-            return false
-        }
-
-        do {
-            let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service
-            ]
-            let attributes: [String: Any] = [
-                kSecValueData as String: data
-            ]
-
-            let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-            if updateStatus == errSecSuccess {
-                return true
-            }
-
-            if updateStatus == errSecItemNotFound {
-                var addQuery = query
-                addQuery[kSecValueData as String] = data
-                let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-                if addStatus == errSecSuccess {
-                    return true
-                }
-                logger.warning("Failed to add keychain item for service \(service), status: \(addStatus)")
-                return false
-            }
-
-            logger.warning("Failed to update keychain item for service \(service), status: \(updateStatus)")
-            return false
-        } catch {
-            logger.warning("Failed to encode keychain JSON payload for service \(service): \(error.localizedDescription)")
-            return false
-        }
-    }
-
     // MARK: - Antigravity Accounts File Reading
 
     private func antigravityAccountsPath() -> URL {
@@ -2126,57 +2086,6 @@ final class TokenManager: @unchecked Sendable {
             claudeAccountsCacheTimestamp = Date()
         }
         return deduped
-    }
-
-    func invalidateClaudeAccountCache() {
-        queue.sync {
-            cachedClaudeAccounts = nil
-            claudeAccountsCacheTimestamp = nil
-        }
-    }
-
-    func persistClaudeOAuthRefresh(
-        accessToken: String,
-        refreshToken: String?,
-        expiresAt: Date?
-    ) {
-        let sanitizedAccessToken = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !sanitizedAccessToken.isEmpty else { return }
-
-        let sanitizedRefreshToken = normalizedNonEmpty(refreshToken)
-        let expiresAtEpochMillis = expiresAt.map { Int64($0.timeIntervalSince1970 * 1000) }
-
-        let keychainServices = ["Claude Code-credentials", "Claude Code"]
-        var persisted = false
-
-        for service in keychainServices {
-            guard var root = readKeychainJSON(service: service) else {
-                continue
-            }
-            let oauthContainerKey = root.keys.first { normalizedKey($0) == "claudeaioauth" } ?? "claudeAiOauth"
-            var oauthContainer = root[oauthContainerKey] as? [String: Any] ?? [:]
-
-            oauthContainer["accessToken"] = sanitizedAccessToken
-            if let sanitizedRefreshToken {
-                oauthContainer["refreshToken"] = sanitizedRefreshToken
-            }
-            if let expiresAtEpochMillis {
-                oauthContainer["expiresAt"] = expiresAtEpochMillis
-            }
-            root[oauthContainerKey] = oauthContainer
-
-            if writeKeychainJSON(service: service, payload: root) {
-                logger.info("Persisted refreshed Claude OAuth credentials to keychain service \(service)")
-                persisted = true
-                break
-            }
-        }
-
-        if !persisted {
-            logger.warning("Failed to persist refreshed Claude OAuth credentials to keychain")
-        }
-
-        invalidateClaudeAccountCache()
     }
 
     private func dedupeClaudeAccounts(_ accounts: [ClaudeAuthAccount]) -> [ClaudeAuthAccount] {

@@ -107,63 +107,6 @@ extension StatusBarController {
                 }
             }
 
-            submenu.addItem(NSMenuItem.separator())
-            let historyItem = NSMenuItem(title: "Usage History", action: nil, keyEquivalent: "")
-            historyItem.image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Usage History")
-            let historySubmenu = NSMenu()
-
-            let loadingState = OpenCodeZenProvider.loadingState
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "MMM d"
-
-            let historyToDisplay: [DailyUsage]
-            if loadingState.isLoading || !loadingState.dailyHistory.isEmpty {
-                historyToDisplay = loadingState.dailyHistory
-            } else if let history = details.dailyHistory {
-                historyToDisplay = Array(history.prefix(30))
-            } else {
-                historyToDisplay = []
-            }
-
-            if historyToDisplay.isEmpty && !loadingState.isLoading {
-                let noDataItem = NSMenuItem()
-                noDataItem.view = createDisabledLabelView(text: "No history data")
-                historySubmenu.addItem(noDataItem)
-            } else {
-                for day in historyToDisplay.prefix(30) {
-                    let cost = day.billedAmount
-                    let title = String(format: "%@: $%.2f", dateFormatter.string(from: day.date), cost)
-                    let item = NSMenuItem()
-                    item.view = createDisabledLabelView(text: title, monospaced: true)
-                    historySubmenu.addItem(item)
-                }
-
-                if loadingState.isLoading {
-                    historySubmenu.addItem(NSMenuItem.separator())
-                    let loadingText = "Loading day \(loadingState.currentDay)/\(loadingState.totalDays)..."
-                    let loadingItem = NSMenuItem()
-                    loadingItem.view = createDisabledLabelView(
-                        text: loadingText,
-                        icon: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Loading"),
-                        font: NSFont.systemFont(ofSize: 11, weight: .medium)
-                    )
-                    historySubmenu.addItem(loadingItem)
-                }
-
-                if let error = loadingState.lastError, !loadingState.isLoading {
-                    historySubmenu.addItem(NSMenuItem.separator())
-                    let errorItem = NSMenuItem()
-                    errorItem.view = createDisabledLabelView(
-                        text: error,
-                        icon: NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Error")
-                    )
-                    historySubmenu.addItem(errorItem)
-                }
-            }
-
-            historyItem.submenu = historySubmenu
-            submenu.addItem(historyItem)
-
         case .copilot:
             // === Usage ===
             if let used = details.copilotUsedRequests, let limit = details.copilotLimitRequests, limit > 0 {

@@ -697,12 +697,7 @@ final class StatusBarController: NSObject {
     }
 
     private func setupNotificationObservers() {
-        NotificationCenter.default.addObserver(forName: .openCodeZenHistoryUpdated, object: nil, queue: .main) { [weak self] _ in
-            guard let self = self else { return }
-            Task { @MainActor [weak self] in
-                self?.updateMultiProviderMenu()
-            }
-        }
+        // Keep this for future provider-specific observers.
     }
 
     private func startRefreshTimer() {
