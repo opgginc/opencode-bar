@@ -86,6 +86,15 @@ private struct ClaudeOAuthRefreshResponse: Decodable {
     let scope: String?
 }
 
+private struct ClaudeAPIErrorResponse: Decodable {
+    struct ErrorPayload: Decodable {
+        let message: String?
+        let type: String?
+    }
+
+    let error: ErrorPayload?
+}
+
 // MARK: - ClaudeProvider Implementation
 
 /// Provider for Anthropic Claude API usage tracking
@@ -93,6 +102,7 @@ private struct ClaudeOAuthRefreshResponse: Decodable {
 final class ClaudeProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .claude
     let type: ProviderType = .quotaBased
+    let minimumFetchInterval: TimeInterval = 10 * 60
 
     private let tokenManager: TokenManager
     private let session: URLSession
@@ -120,11 +130,13 @@ final class ClaudeProvider: ProviderProtocol {
         }
 
         var candidates: [ClaudeAccountCandidate] = []
+        var fetchErrors: [Error] = []
         for account in accounts {
             do {
                 let candidate = try await fetchUsageForAccount(account)
                 candidates.append(candidate)
             } catch {
+                fetchErrors.append(error)
                 logger.warning("Claude account fetch failed (\(account.authSource)): \(error.localizedDescription)")
                 if account.source == .opencodeAuth {
                     logger.info("Skipping unavailable OpenCode Claude account")
@@ -137,6 +149,9 @@ final class ClaudeProvider: ProviderProtocol {
 
         guard !candidates.isEmpty else {
             logger.error("Failed to fetch Claude usage for any account")
+            if let surfacedError = surfacedFetchError(from: fetchErrors) {
+                throw surfacedError
+            }
             throw ProviderError.authenticationFailed("No active Claude accounts available")
         }
 
@@ -180,6 +195,9 @@ final class ClaudeProvider: ProviderProtocol {
         let usageAccountResults = accountResults.filter { ($0.usage.totalEntitlement ?? 0) > 0 }
         guard !usageAccountResults.isEmpty else {
             logger.error("Failed to fetch Claude usage for every discovered account")
+            if let surfacedError = surfacedFetchError(from: fetchErrors) {
+                throw surfacedError
+            }
             throw ProviderError.providerError("All Claude account fetches failed")
         }
 
@@ -418,11 +436,53 @@ final class ClaudeProvider: ProviderProtocol {
         }
     }
 
+    private func isRateLimitError(_ error: Error) -> Bool {
+        let message: String
+        if let providerError = error as? ProviderError {
+            message = providerError.localizedDescription
+        } else {
+            message = error.localizedDescription
+        }
+
+        let lowercased = message.lowercased()
+        return lowercased.contains("rate limited")
+            || lowercased.contains("rate_limit_error")
+            || lowercased.contains("too many requests")
+            || lowercased.contains("http 429")
+    }
+
     private func authErrorMessage(for account: ClaudeAuthAccount, error: Error) -> String {
         if isAccessTokenExpired(account) || isTokenExpiredError(error) {
             return "Token expired"
         }
+        if isRateLimitError(error) {
+            return "Rate limited"
+        }
         return "Authentication failed"
+    }
+
+    private func surfacedFetchError(from errors: [Error]) -> ProviderError? {
+        guard !errors.isEmpty else { return nil }
+
+        if errors.contains(where: isRateLimitError) {
+            return ProviderError.networkError("Rate limited. Please try again later.")
+        }
+
+        if let firstProviderError = errors.compactMap({ $0 as? ProviderError }).first {
+            return firstProviderError
+        }
+
+        return ProviderError.providerError(errors[0].localizedDescription)
+    }
+
+    private func parseClaudeAPIErrorMessage(from data: Data) -> String? {
+        guard let payload = try? JSONDecoder().decode(ClaudeAPIErrorResponse.self, from: data),
+              let message = payload.error?.message?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !message.isEmpty else {
+            return nil
+        }
+
+        return message
     }
 
     private func refreshClaudeAccessToken(for account: ClaudeAuthAccount) async -> ClaudeAuthAccount? {
@@ -518,9 +578,16 @@ final class ClaudeProvider: ProviderProtocol {
             throw ProviderError.authenticationFailed("Token expired or invalid")
         }
 
+        if httpResponse.statusCode == 429 {
+            let message = parseClaudeAPIErrorMessage(from: data) ?? "Rate limited. Please try again later."
+            logger.warning("Claude API returned 429 - \(message)")
+            throw ProviderError.networkError(message)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
-            logger.error("Claude API returned status \(httpResponse.statusCode)")
-            throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
+            let message = parseClaudeAPIErrorMessage(from: data) ?? "HTTP \(httpResponse.statusCode)"
+            logger.error("Claude API returned status \(httpResponse.statusCode): \(message)")
+            throw ProviderError.networkError(message)
         }
 
         return data
