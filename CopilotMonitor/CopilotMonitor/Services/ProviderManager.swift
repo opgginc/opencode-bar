@@ -49,12 +49,32 @@ actor ProviderManager {
     /// Last successful fetch results (used as fallback on errors)
     /// Access via updateCache/getCache methods for thread safety
     private var cachedResults: [ProviderIdentifier: ProviderResult] = [:]
+    private var lastNetworkFetchAt: [ProviderIdentifier: Date] = [:]
+    private var lastProviderErrors: [ProviderIdentifier: String] = [:]
+    private var inFlightFetches: [ProviderIdentifier: InFlightProviderFetch] = [:]
+
+    private struct InFlightProviderFetch {
+        let token: UUID
+        let task: Task<ProviderResult, Error>
+    }
+
+    private struct ThrottledFetchOutcome {
+        let result: ProviderResult?
+        let errorMessage: String?
+    }
 
     // MARK: - Initialization
 
     private init() {
         providers = Self.makeDefaultProviders()
-        logger.info("ProviderManager initialized with \(self.providers.count) providers")
+        let providerCount = providers.count
+        logger.info("ProviderManager initialized with \(providerCount) providers")
+    }
+
+    init(providers: [ProviderProtocol]) {
+        self.providers = providers
+        let providerCount = providers.count
+        logger.info("ProviderManager initialized with custom provider set (\(providerCount) providers)")
     }
 
     private nonisolated func debugLog(_ message: String) {
@@ -99,38 +119,7 @@ actor ProviderManager {
                         logger.warning("🔴 [ProviderManager] Self deallocated for \(provider.identifier.displayName)")
                         return (provider.identifier, nil, "Self deallocated")
                     }
-
-                    // Fetch with timeout
-                    do {
-                        logger.debug("🟡 [ProviderManager] Fetching \(provider.identifier.displayName)")
-                        let result = try await self.fetchWithTimeout(provider: provider)
-
-                        // Cache successful result (async-safe using Task)
-                        await self.updateCache(identifier: provider.identifier, result: result)
-
-                        logger.info("🟢 [ProviderManager] ✓ \(provider.identifier.displayName) fetch succeeded")
-                        self.debugLog("🟢 ✓ \(provider.identifier.displayName) fetch succeeded")
-
-                        return (provider.identifier, result, nil)
-                    } catch {
-                        let errorMessage = error.localizedDescription
-                        logger.error("🔴 [ProviderManager] ✗ \(provider.identifier.displayName) fetch failed: \(errorMessage)")
-                        self.debugLog("🔴 ✗ \(provider.identifier.displayName) fetch failed: \(errorMessage)")
-
-                        // Try to use cached value as fallback
-                        let cached = await self.getCache(identifier: provider.identifier)
-
-                        if cached != nil {
-                            logger.warning("🟡 [ProviderManager] Using cached value for \(provider.identifier.displayName)")
-                            self.debugLog("🟡 Using cached value for \(provider.identifier.displayName)")
-                        } else {
-                            logger.warning("🔴 [ProviderManager] No cached value available for \(provider.identifier.displayName)")
-                            self.debugLog("🔴 No cached value available for \(provider.identifier.displayName)")
-                        }
-
-                        // Return both cached result (if any) and error message
-                        return (provider.identifier, cached, errorMessage)
-                    }
+                    return await self.fetchProvider(provider)
                 }
             }
 
@@ -227,6 +216,145 @@ actor ProviderManager {
     /// - Parameter provider: The provider to fetch from
     /// - Returns: ProviderResult data
     /// - Throws: ProviderError or timeout error
+    private func fetchProvider(_ provider: ProviderProtocol) async -> (ProviderIdentifier, ProviderResult?, String?) {
+        let identifier = provider.identifier
+
+        if let inFlight = inFlightFetches[identifier] {
+            logger.info("🟡 [ProviderManager] Joining in-flight fetch for \(provider.identifier.displayName)")
+            debugLog("🟡 Joining in-flight fetch for \(provider.identifier.displayName)")
+            return await resolveFetch(provider: provider, inFlight: inFlight)
+        }
+
+        if let throttled = throttledFetchOutcome(for: provider) {
+            if throttled.result != nil {
+                logger.info("🟡 [ProviderManager] Skipping \(provider.identifier.displayName) network fetch due to minimum interval")
+                debugLog("🟡 Skipping \(provider.identifier.displayName) network fetch due to minimum interval")
+            } else if let errorMessage = throttled.errorMessage {
+                logger.warning("🟡 [ProviderManager] Returning throttled error for \(provider.identifier.displayName): \(errorMessage)")
+                debugLog("🟡 Returning throttled error for \(provider.identifier.displayName): \(errorMessage)")
+            }
+            return (identifier, throttled.result, throttled.errorMessage)
+        }
+
+        logger.debug("🟡 [ProviderManager] Fetching \(provider.identifier.displayName)")
+        debugLog("🟡 Fetching \(provider.identifier.displayName)")
+
+        lastNetworkFetchAt[identifier] = Date()
+        let token = UUID()
+        let task = Task<ProviderResult, Error> {
+            try await self.fetchWithTimeout(provider: provider)
+        }
+        let inFlight = InFlightProviderFetch(token: token, task: task)
+        inFlightFetches[identifier] = inFlight
+
+        return await resolveFetch(provider: provider, inFlight: inFlight)
+    }
+
+    private func resolveFetch(
+        provider: ProviderProtocol,
+        inFlight: InFlightProviderFetch
+    ) async -> (ProviderIdentifier, ProviderResult?, String?) {
+        let identifier = provider.identifier
+
+        do {
+            let result = try await inFlight.task.value
+            cachedResults[identifier] = result
+            lastProviderErrors[identifier] = nil
+            clearInFlightFetch(identifier: identifier, token: inFlight.token)
+
+            logger.info("🟢 [ProviderManager] ✓ \(provider.identifier.displayName) fetch succeeded")
+            debugLog("🟢 ✓ \(provider.identifier.displayName) fetch succeeded")
+
+            return (identifier, result, nil)
+        } catch {
+            let errorMessage = error.localizedDescription
+            lastProviderErrors[identifier] = errorMessage
+            clearInFlightFetch(identifier: identifier, token: inFlight.token)
+
+            logger.error("🔴 [ProviderManager] ✗ \(provider.identifier.displayName) fetch failed: \(errorMessage)")
+            debugLog("🔴 ✗ \(provider.identifier.displayName) fetch failed: \(errorMessage)")
+
+            let cached = cachedResults[identifier]
+            if cached != nil {
+                logger.warning("🟡 [ProviderManager] Using cached value for \(provider.identifier.displayName)")
+                debugLog("🟡 Using cached value for \(provider.identifier.displayName)")
+            } else {
+                logger.warning("🔴 [ProviderManager] No cached value available for \(provider.identifier.displayName)")
+                debugLog("🔴 No cached value available for \(provider.identifier.displayName)")
+            }
+
+            return (identifier, cached, errorMessage)
+        }
+    }
+
+    private func clearInFlightFetch(identifier: ProviderIdentifier, token: UUID) {
+        guard let current = inFlightFetches[identifier], current.token == token else {
+            return
+        }
+        inFlightFetches[identifier] = nil
+    }
+
+    private func throttledFetchOutcome(for provider: ProviderProtocol) -> ThrottledFetchOutcome? {
+        let minimumInterval = provider.minimumFetchInterval
+        guard minimumInterval > 0,
+              let lastFetchAt = lastNetworkFetchAt[provider.identifier] else {
+            return nil
+        }
+
+        let elapsed = Date().timeIntervalSince(lastFetchAt)
+        guard elapsed < minimumInterval else {
+            return nil
+        }
+
+        let remaining = minimumInterval - elapsed
+        let cached = cachedResults[provider.identifier]
+        let lastErrorMessage = lastProviderErrors[provider.identifier]
+
+        if let lastErrorMessage, isRateLimitedError(lastErrorMessage) {
+            let retryMessage = "Rate limited. Retrying in \(formatCooldownDuration(remaining))."
+            return ThrottledFetchOutcome(result: cached, errorMessage: retryMessage)
+        }
+
+        if let cached {
+            return ThrottledFetchOutcome(result: cached, errorMessage: nil)
+        }
+
+        if let lastErrorMessage {
+            return ThrottledFetchOutcome(
+                result: nil,
+                errorMessage: "\(lastErrorMessage) Retrying in \(formatCooldownDuration(remaining))."
+            )
+        }
+
+        return ThrottledFetchOutcome(
+            result: nil,
+            errorMessage: "Waiting \(formatCooldownDuration(remaining)) before the next refresh."
+        )
+    }
+
+    private func isRateLimitedError(_ errorMessage: String) -> Bool {
+        let lowercased = errorMessage.lowercased()
+        return lowercased.contains("rate limited")
+            || lowercased.contains("rate_limit_error")
+            || lowercased.contains("http 429")
+            || lowercased.contains("too many requests")
+    }
+
+    private func formatCooldownDuration(_ interval: TimeInterval) -> String {
+        let totalSeconds = max(0, Int(interval.rounded(.up)))
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+
+        if hours > 0 {
+            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        }
+        if minutes > 0 {
+            return "\(minutes)m"
+        }
+        return "\(seconds)s"
+    }
+
     private func fetchWithTimeout(provider: ProviderProtocol) async throws -> ProviderResult {
         let timeout = provider.fetchTimeout
         return try await withThrowingTaskGroup(of: ProviderResult.self) { group in
@@ -251,20 +379,5 @@ actor ProviderManager {
 
             return result
         }
-    }
-
-    /// Thread-safe cache update
-    /// - Parameters:
-    ///   - identifier: Provider identifier
-    ///   - result: Result data to cache
-    private func updateCache(identifier: ProviderIdentifier, result: ProviderResult) async {
-        cachedResults[identifier] = result
-    }
-
-    /// Thread-safe cache retrieval (async-safe using Task isolation)
-    /// - Parameter identifier: Provider identifier
-    /// - Returns: Cached result data or nil
-    private func getCache(identifier: ProviderIdentifier) async -> ProviderResult? {
-        return cachedResults[identifier]
     }
 }

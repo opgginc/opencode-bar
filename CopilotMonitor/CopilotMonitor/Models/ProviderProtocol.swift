@@ -143,6 +143,9 @@ protocol ProviderProtocol: AnyObject {
     /// Timeout for fetch operations (default: 10 seconds)
     var fetchTimeout: TimeInterval { get }
 
+    /// Minimum interval between network fetches for this provider (default: no throttling)
+    var minimumFetchInterval: TimeInterval { get }
+
     /// Fetches current usage data from the provider
     /// - Returns: ProviderResult containing usage and optional detailed information
     /// - Throws: ProviderError if fetch fails
@@ -151,6 +154,7 @@ protocol ProviderProtocol: AnyObject {
 
 extension ProviderProtocol {
     var fetchTimeout: TimeInterval { 10.0 }
+    var minimumFetchInterval: TimeInterval { 0 }
 }
 
 /// Errors that can occur during provider operations
