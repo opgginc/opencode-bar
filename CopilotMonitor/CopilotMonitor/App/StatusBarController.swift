@@ -1801,7 +1801,8 @@ final class StatusBarController: NSObject {
             let result = providerResults[identifier]
             let errorMessage = lastProviderErrors[identifier]
 
-            if let errorMessage, shouldDisplayErrorStateEvenWithResult(errorMessage) {
+            if let errorMessage,
+               shouldDisplayErrorStateEvenWithResult(errorMessage, identifier: identifier, result: result) {
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
                 item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
@@ -2010,7 +2011,8 @@ final class StatusBarController: NSObject {
             let geminiResult = providerResults[.geminiCLI]
             let geminiError = lastProviderErrors[.geminiCLI]
 
-            if let geminiError, shouldDisplayErrorStateEvenWithResult(geminiError) {
+            if let geminiError,
+               shouldDisplayErrorStateEvenWithResult(geminiError, identifier: .geminiCLI, result: geminiResult) {
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: geminiError)
                 item.submenu = createErrorSubmenu(identifier: .geminiCLI, result: geminiResult, errorMessage: geminiError)
@@ -2460,6 +2462,29 @@ final class StatusBarController: NSObject {
         case .noCredentials, .noSubscription, .error:
             return false
         }
+    }
+
+    private func shouldDisplayErrorStateEvenWithResult(
+        _ errorMessage: String,
+        identifier: ProviderIdentifier,
+        result: ProviderResult?
+    ) -> Bool {
+        guard shouldDisplayErrorStateEvenWithResult(errorMessage) else { return false }
+
+        if ProviderDisplayPolicy.shouldShowRateLimitedErrorRow(
+            identifier: identifier,
+            errorMessage: errorMessage,
+            result: result
+        ) {
+            return true
+        }
+
+        if ProviderDisplayPolicy.hasDisplayableAccountRows(identifier: identifier, result: result) {
+            debugLog(
+                "Preserving account rows for \(identifier.displayName) despite rate limit cooldown because account data is available"
+            )
+        }
+        return false
     }
 
     private func createErrorMenuItem(identifier: ProviderIdentifier, errorMessage: String) -> NSMenuItem {

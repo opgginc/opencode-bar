@@ -149,6 +149,51 @@ final class ProviderUsageTests: XCTestCase {
         XCTAssertFalse(output.contains("70%,60%"))
     }
 
+    func testProviderDisplayPolicyKeepsClaudeAccountRowsVisibleDuringRateLimitCooldown() {
+        let result = ProviderResult(
+            usage: .quotaBased(remaining: 20, entitlement: 100, overagePermitted: false),
+            details: DetailedUsage(email: "primary@example.com"),
+            accounts: [
+                ProviderAccountResult(
+                    accountIndex: 0,
+                    accountId: "primary@example.com",
+                    usage: .quotaBased(remaining: 20, entitlement: 100, overagePermitted: false),
+                    details: DetailedUsage(email: "primary@example.com")
+                ),
+                ProviderAccountResult(
+                    accountIndex: 1,
+                    accountId: "secondary@example.com",
+                    usage: .quotaBased(remaining: 0, entitlement: 0, overagePermitted: false),
+                    details: DetailedUsage(email: "secondary@example.com", authErrorMessage: "Rate limited")
+                )
+            ]
+        )
+
+        XCTAssertFalse(
+            ProviderDisplayPolicy.shouldShowRateLimitedErrorRow(
+                identifier: .claude,
+                errorMessage: "Rate limited. Retrying in 8m.",
+                result: result
+            )
+        )
+    }
+
+    func testProviderDisplayPolicyShowsRateLimitErrorRowWithoutAccountRows() {
+        let result = ProviderResult(
+            usage: .quotaBased(remaining: 40, entitlement: 100, overagePermitted: false),
+            details: DetailedUsage(tokenUsagePercent: 60),
+            accounts: nil
+        )
+
+        XCTAssertTrue(
+            ProviderDisplayPolicy.shouldShowRateLimitedErrorRow(
+                identifier: .zaiCodingPlan,
+                errorMessage: "Rate limited. Retrying in 8m.",
+                result: result
+            )
+        )
+    }
+
     func testProviderManagerUsesMinimumFetchIntervalForClaude() async {
         let provider = CountingStubProvider(
             identifier: .claude,
