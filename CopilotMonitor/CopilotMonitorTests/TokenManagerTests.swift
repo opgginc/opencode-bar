@@ -3,7 +3,7 @@ import XCTest
 
 final class TokenManagerTests: XCTestCase {
 
-    func testReadClaudeAnthropicAuthFilesParsesEnabledAccounts() throws {
+    func testReadClaudeAnthropicAuthFilesIncludesDisabledAccounts() throws {
         let fileManager = FileManager.default
         let tempDirectory = fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -44,17 +44,25 @@ final class TokenManagerTests: XCTestCase {
 
         let accounts = TokenManager.shared.readClaudeAnthropicAuthFiles(at: [accountsPath])
 
-        XCTAssertEqual(accounts.count, 1)
+        XCTAssertEqual(accounts.count, 2)
 
-        let account = try XCTUnwrap(accounts.first)
-        XCTAssertEqual(account.accessToken, "access-1")
-        XCTAssertEqual(account.accountId, "account-primary")
-        XCTAssertEqual(account.refreshToken, "refresh-1")
-        XCTAssertEqual(account.authSource, accountsPath.path)
-        XCTAssertEqual(account.source, .opencodeAuth)
-        XCTAssertEqual(account.sourceLabels, ["OpenCode"])
+        let primaryAccount = try XCTUnwrap(accounts.first)
+        XCTAssertEqual(primaryAccount.accessToken, "access-1")
+        XCTAssertEqual(primaryAccount.accountId, "account-primary")
+        XCTAssertEqual(primaryAccount.refreshToken, "refresh-1")
+        XCTAssertEqual(primaryAccount.authSource, accountsPath.path)
+        XCTAssertEqual(primaryAccount.source, .opencodeAuth)
+        XCTAssertEqual(primaryAccount.sourceLabels, ["OpenCode"])
 
-        let expiresAt = try XCTUnwrap(account.expiresAt)
+        let disabledAccount = try XCTUnwrap(accounts.last)
+        XCTAssertEqual(disabledAccount.accessToken, "access-2")
+        XCTAssertEqual(disabledAccount.accountId, "account-disabled")
+        XCTAssertEqual(disabledAccount.refreshToken, "refresh-2")
+        XCTAssertEqual(disabledAccount.authSource, accountsPath.path)
+        XCTAssertEqual(disabledAccount.source, .opencodeAuth)
+        XCTAssertEqual(disabledAccount.sourceLabels, ["OpenCode"])
+
+        let expiresAt = try XCTUnwrap(primaryAccount.expiresAt)
         XCTAssertEqual(expiresAt.timeIntervalSince1970, 1_770_563_557.15, accuracy: 0.01)
     }
 }

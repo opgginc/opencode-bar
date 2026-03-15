@@ -2015,7 +2015,7 @@ final class TokenManager: @unchecked Sendable {
                 guard let accountDict = rawAccount as? [String: Any] else { continue }
                 if let enabled = valueForNormalizedKey("enabled", in: accountDict) as? Bool,
                    enabled == false {
-                    continue
+                    logger.info("Including disabled Claude account from opencode-anthropic-auth")
                 }
                 guard let payload = extractClaudeOAuthPayload(from: accountDict) else { continue }
 
