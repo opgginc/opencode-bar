@@ -646,5 +646,11 @@ func buildProviderSubmenu() -> [NSMenuItem] {
   - Benefit: Captures tokens from GUI-based authentication flows that store to Keychain
   - Pattern: `if let keychainToken = KeychainService.read(service: "provider") { use token } else { parseAuthJSON() }`
   - Example: ClaudeProvider now reads OAuth tokens from macOS Keychain before checking auth.json
+- **Claude OAuth Refresh Token Must Not Be Consumed**:
+  - Problem: Claude's refresh tokens are single-use. Calling the token refresh endpoint invalidates the refresh token stored by OpenCode, causing OpenCode to lose authentication permanently.
+  - Decision: OpenCode Bar MUST NOT call the Claude OAuth token refresh endpoint (`https://platform.claude.com/v1/oauth/token`).
+  - Behavior: Use the access token from auth.json as-is. If it is expired (401), surface the error to the user without attempting a refresh.
+  - Removed: `ClaudeOAuthRefreshResponse`, `claudeOAuthRefreshEndpoint`, `claudeOAuthClientID`, `isAccessTokenExpired()`, `isTokenExpiredError()`, `refreshClaudeAccessToken()` were all removed from `ClaudeProvider.swift`.
+  - Anti-Pattern: NEVER add back token refresh logic for Claude OAuth — it breaks OpenCode authentication for the user.
 
 <!-- opencode:reflection:end -->
