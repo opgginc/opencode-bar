@@ -178,7 +178,7 @@ actor CopilotCLIProvider: ProviderProtocol {
             }
 
             if let login = info.login,
-               let index = results.firstIndex(where: { $0.login == login }) {
+               let index = results.firstIndex(where: { $0.login?.caseInsensitiveCompare(login) == .orderedSame }) {
                 if sourcePriority(info.source) > sourcePriority(results[index].source) {
                     results[index] = info
                 }

@@ -566,8 +566,6 @@ final class CopilotProvider: ProviderProtocol {
         )
     }
 
-
-
     // MARK: - Caching
 
     /// Save usage data to UserDefaults cache

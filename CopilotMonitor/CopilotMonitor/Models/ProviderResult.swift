@@ -479,7 +479,7 @@ struct JSONFormatter {
                     providerDict["entitlement"] = entitlement
                 }
                 providerDict["overagePermitted"] = overagePermitted
-                providerDict["usagePercentage"] = result.usage.usagePercentage
+                providerDict["usagePercentage"] = entitlement == Int.max ? 0.0 : result.usage.usagePercentage
             }
 
             // Z.AI: include both token and MCP usage percentages
