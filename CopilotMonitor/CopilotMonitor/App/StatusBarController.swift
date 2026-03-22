@@ -90,6 +90,7 @@ final class StatusBarController: NSObject {
     private var criticalBadgeMenuItem: NSMenuItem!
     private var showProviderNameMenuItem: NSMenuItem!
     private var refreshTimer: Timer?
+    private var initialRefreshTask: Task<Void, Never>?
     private var isMainMenuTracking = false
     private var hasDeferredMenuRebuild = false
     private var hasDeferredStatusBarRefresh = false
@@ -120,6 +121,7 @@ final class StatusBarController: NSObject {
     private var orphanedSubscriptionKeys: [String] = []
     private var orphanedSubscriptionTotal: Double = 0
     private let criticalUsageThreshold: Double = 90.0
+    private let alertFirstUsageThreshold: Double = 100.0
     private let recentChangeMaxAge: TimeInterval = 3 * 60 * 60
     private var previousProviderSnapshots: [ProviderIdentifier: StatusBarProviderSnapshot] = [:]
     private var recentChangeCandidate: RecentChangeCandidate?
@@ -156,6 +158,18 @@ final class StatusBarController: NSObject {
             UserDefaults.standard.set(newValue.rawValue, forKey: "refreshInterval")
             restartRefreshTimer()
             updateRefreshIntervalMenu()
+        }
+    }
+
+    private var braveRefreshMode: BraveSearchRefreshMode {
+        get {
+            let rawValue = UserDefaults.standard.integer(forKey: SearchEnginePreferences.braveRefreshModeKey)
+            return BraveSearchRefreshMode(rawValue: rawValue) ?? .defaultMode
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: SearchEnginePreferences.braveRefreshModeKey)
+            debugLog("braveRefreshMode updated: \(newValue.title)")
+            refreshClicked()
         }
     }
 
@@ -266,6 +280,8 @@ final class StatusBarController: NSObject {
         TokenManager.shared.logDebugEnvironmentInfo()
         debugLog("Environment debug info logged")
 
+        ensureBraveRefreshModeDefault()
+
         setupStatusItem()
         debugLog("setupStatusItem completed")
         setupMenu()
@@ -278,6 +294,11 @@ final class StatusBarController: NSObject {
         debugLog("checkAndPromptGitHubStar called")
         logger.info("Init completed")
         debugLog("Init completed")
+    }
+
+    deinit {
+        refreshTimer?.invalidate()
+        initialRefreshTask?.cancel()
     }
 
     func debugLog(_ message: String) {
@@ -455,7 +476,7 @@ final class StatusBarController: NSObject {
         criticalBadgeMenuItem.target = self
         statusBarOptionsMenu.addItem(criticalBadgeMenuItem)
 
-        showProviderNameMenuItem = NSMenuItem(title: "Show Provider Name", action: #selector(toggleShowProviderName(_:)), keyEquivalent: "")
+        showProviderNameMenuItem = NSMenuItem(title: "Show Provider Icon", action: #selector(toggleShowProviderName(_:)), keyEquivalent: "")
         showProviderNameMenuItem.target = self
         statusBarOptionsMenu.addItem(showProviderNameMenuItem)
 
@@ -539,9 +560,25 @@ final class StatusBarController: NSObject {
         }
     }
 
+    private func ensureBraveRefreshModeDefault() {
+        if UserDefaults.standard.object(forKey: SearchEnginePreferences.braveRefreshModeKey) == nil {
+            UserDefaults.standard.set(
+                BraveSearchRefreshMode.eventOnly.rawValue,
+                forKey: SearchEnginePreferences.braveRefreshModeKey
+            )
+            debugLog("braveRefreshMode default initialized: \(BraveSearchRefreshMode.eventOnly.title)")
+        }
+    }
+
     @objc private func refreshIntervalSelected(_ sender: NSMenuItem) {
         if let interval = RefreshInterval(rawValue: sender.tag) {
             refreshInterval = interval
+        }
+    }
+
+    @objc private func braveRefreshModeSelected(_ sender: NSMenuItem) {
+        if let mode = BraveSearchRefreshMode(rawValue: sender.tag) {
+            braveRefreshMode = mode
         }
     }
 
@@ -666,16 +703,12 @@ final class StatusBarController: NSObject {
     }
 
     private func setupNotificationObservers() {
-        NotificationCenter.default.addObserver(forName: .openCodeZenHistoryUpdated, object: nil, queue: .main) { [weak self] _ in
-            guard let self = self else { return }
-            Task { @MainActor [weak self] in
-                self?.updateMultiProviderMenu()
-            }
-        }
+        // Keep this for future provider-specific observers.
     }
 
     private func startRefreshTimer() {
         refreshTimer?.invalidate()
+        initialRefreshTask?.cancel()
 
         let interval = TimeInterval(refreshInterval.rawValue)
         let intervalTitle = refreshInterval.title
@@ -688,8 +721,11 @@ final class StatusBarController: NSObject {
         RunLoop.main.add(timer, forMode: .common)
         refreshTimer = timer
 
-        Task { @MainActor [weak self] in
+        initialRefreshTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else {
+                return
+            }
             self?.triggerRefresh()
         }
     }
@@ -916,12 +952,13 @@ final class StatusBarController: NSObject {
             add(details?.mcpUsagePercent, priority: .monthly)
             add(details?.tokenUsagePercent, priority: .hourly)
         case .nanoGpt:
-            add(details?.mcpUsagePercent, priority: .monthly)
-            add(details?.tokenUsagePercent, priority: .daily)
+            add(details?.sevenDayUsage, priority: .weekly)
         case .chutes:
             add(dailyPercentFromDetails(details), priority: .daily)
         case .synthetic:
             add(details?.fiveHourUsage, priority: .hourly)
+        case .tavilySearch, .braveSearch:
+            add(details?.mcpUsagePercent, priority: .monthly)
         case .antigravity, .geminiCLI, .openRouter, .openCode, .openCodeZen:
             break
         }
@@ -990,15 +1027,6 @@ final class StatusBarController: NSObject {
             .filter { $0.priority.rawValue == selectedPriority }
             .map(\.percent)
             .max()
-    }
-
-    private func usagePercentsForMostUsed(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
-        // Use the global priority-aware selection, then clamp to 100% for critical badge detection.
-        // Over-quota values (e.g. 120%) must still participate in mostCriticalProvider().
-        if let percent = preferredUsedPercentForStatusBar(identifier: identifier, result: result) {
-            return [min(percent, 100.0)]
-        }
-        return []
     }
 
     private func usedPercentsForChangeDetection(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
@@ -1134,60 +1162,82 @@ final class StatusBarController: NSObject {
         }
     }
 
-    private func mostCriticalProvider() -> AlertProviderCandidate? {
-        var best: AlertProviderCandidate?
+    private func quotaAlertCandidates() -> [AlertProviderCandidate] {
+        var candidates: [AlertProviderCandidate] = []
         for (identifier, result) in providerResults {
             guard isProviderEnabled(identifier) else { continue }
-
-            let percents = usagePercentsForMostUsed(identifier: identifier, result: result)
-            guard let maxPercent = percents.max(), maxPercent >= criticalUsageThreshold else {
-                continue
-            }
-
-            if best == nil || maxPercent > best!.usedPercent {
-                best = AlertProviderCandidate(identifier: identifier, usedPercent: maxPercent)
-            }
+            guard case .quotaBased = result.usage else { continue }
+            guard let usedPercent = preferredUsedPercentForStatusBar(identifier: identifier, result: result) else { continue }
+            candidates.append(AlertProviderCandidate(identifier: identifier, usedPercent: usedPercent))
         }
-        return best
+        return candidates
+    }
+
+    private func mostCriticalProvider(minUsagePercent: Double) -> AlertProviderCandidate? {
+        quotaAlertCandidates()
+            .filter { $0.usedPercent >= minUsagePercent }
+            .max(by: { $0.usedPercent < $1.usedPercent })
+    }
+
+    private func singleEnabledQuotaProvider(atOrAbove threshold: Double) -> AlertProviderCandidate? {
+        let candidates = quotaAlertCandidates()
+        guard candidates.count == 1, let candidate = candidates.first, candidate.usedPercent >= threshold else {
+            return nil
+        }
+        return candidate
+    }
+
+    private func mostCriticalProvider() -> AlertProviderCandidate? {
+        mostCriticalProvider(minUsagePercent: criticalUsageThreshold)
     }
 
     private func formatRecentChangeText(_ candidate: RecentChangeCandidate) -> String {
-        let provider = candidate.identifier.shortDisplayName
         guard let result = providerResults[candidate.identifier] else {
-            return provider
+            return "--"
         }
 
         switch result.usage {
         case .payAsYouGo(_, let cost, _):
-            return "\(provider) \(formatCostForStatusBar(cost ?? 0.0))"
+            return formatCostForStatusBar(cost ?? 0.0)
         case .quotaBased:
-            let percent = preferredUsedPercent(
-                identifier: candidate.identifier,
-                usage: result.usage,
-                details: result.details
-            ) ?? min(max(result.usage.usagePercentage, 0.0), 999.0)
-            return "\(provider) \(String(format: "%.0f%%", percent))"
+            let percent = preferredUsedPercentForStatusBar(identifier: candidate.identifier, result: result)
+                ?? preferredUsedPercent(
+                    identifier: candidate.identifier,
+                    usage: result.usage,
+                    details: result.details
+                )
+                ?? min(max(result.usage.usagePercentage, 0.0), 999.0)
+            logger.debug(
+                "Recent change percent resolved: provider=\(candidate.identifier.displayName), percent=\(String(format: "%.2f", percent))"
+            )
+            return String(format: "%.0f%%", percent)
         }
     }
 
-    private func formatAlertText(identifier: ProviderIdentifier, usedPercent: Double) -> String {
-        let usageText = String(format: "%.0f%%", usedPercent)
-        if showProviderName {
-            return "\(identifier.shortDisplayName) \(usageText)"
-        }
-        return usageText
+    private func formatAlertText(identifier _: ProviderIdentifier, usedPercent: Double) -> String {
+        return String(format: "%.0f%%", usedPercent)
     }
 
     private func formatProviderForStatusBar(identifier: ProviderIdentifier, result: ProviderResult) -> String {
         switch result.usage {
         case .payAsYouGo(_, let cost, _):
             let costText = formatCostForStatusBar(cost ?? 0)
-            return showProviderName ? "\(identifier.shortDisplayName) \(costText)" : costText
+            return costText
         case .quotaBased:
             let maxPercent = preferredUsedPercentForStatusBar(identifier: identifier, result: result) ?? result.usage.usagePercentage
             let usageText = String(format: "%.0f%%", maxPercent)
-            return showProviderName ? "\(identifier.shortDisplayName) \(usageText)" : usageText
+            return usageText
         }
+    }
+
+    private func updateStatusBarDisplay(text: String, provider: ProviderIdentifier? = nil) {
+        let providerIcon = showProviderName ? provider.flatMap { iconForProvider($0) } : nil
+        if let provider, providerIcon != nil {
+            debugLog("updateStatusBarDisplay: providerIcon=\(provider.displayName), text=\(text)")
+        } else {
+            debugLog("updateStatusBarDisplay: providerIcon=default, text=\(text)")
+        }
+        statusBarIconView?.update(displayText: text, providerIcon: providerIcon)
     }
 
     private func updateStatusBarText() {
@@ -1209,47 +1259,49 @@ final class StatusBarController: NSObject {
         case .totalCost:
             let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
             debugLog("updateStatusBarText: mode=Total Cost, value=\(String(format: "$%.2f", totalCost))")
-            statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
+            updateStatusBarDisplay(text: formatCostOrStatusBarBrand(totalCost))
         case .onlyShow:
             switch onlyShowMode {
             case .alertFirst:
-                if let criticalCandidate {
+                let alertFirstCandidate = singleEnabledQuotaProvider(atOrAbove: alertFirstUsageThreshold)
+                    ?? mostCriticalProvider(minUsagePercent: alertFirstUsageThreshold)
+                if let alertFirstCandidate {
                     let alertText = formatAlertText(
-                        identifier: criticalCandidate.identifier,
-                        usedPercent: criticalCandidate.usedPercent
+                        identifier: alertFirstCandidate.identifier,
+                        usedPercent: alertFirstCandidate.usedPercent
                     )
                     debugLog(
-                        "updateStatusBarText: mode=Only Show(Alert First), provider=\(criticalCandidate.identifier.displayName), used=\(Int(criticalCandidate.usedPercent.rounded()))%"
+                        "updateStatusBarText: mode=Only Show(Alert First), provider=\(alertFirstCandidate.identifier.displayName), used=\(Int(alertFirstCandidate.usedPercent.rounded()))%"
                     )
-                    statusBarIconView?.update(displayText: alertText)
+                    updateStatusBarDisplay(text: alertText, provider: alertFirstCandidate.identifier)
                 } else {
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
                     debugLog("updateStatusBarText: mode=Only Show(Alert First), no critical provider, fallback total=\(String(format: "$%.2f", totalCost))")
-                    statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
+                    updateStatusBarDisplay(text: formatCostOrStatusBarBrand(totalCost))
                 }
             case .pinnedProvider:
                 guard let provider = selectedPinnedProvider() else {
                     debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), no provider available, fallback to total")
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
-                    statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
+                    updateStatusBarDisplay(text: formatCostOrStatusBarBrand(totalCost))
                     return
                 }
 
                 if let result = providerResults[provider] {
                     let text = formatProviderForStatusBar(identifier: provider, result: result)
                     debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), provider=\(provider.displayName), text=\(text)")
-                    statusBarIconView?.update(displayText: text)
+                    updateStatusBarDisplay(text: text, provider: provider)
                 } else {
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
                     let fallback = formatCostOrStatusBarBrand(totalCost)
                     debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), missing result for \(provider.displayName), fallback total=\(String(format: "$%.2f", totalCost))")
-                    statusBarIconView?.update(displayText: fallback)
+                    updateStatusBarDisplay(text: fallback)
                 }
             case .recentChange:
                 if let recentChangeCandidate, Date().timeIntervalSince(recentChangeCandidate.observedAt) <= recentChangeMaxAge {
                     let text = formatRecentChangeText(recentChangeCandidate)
                     debugLog("updateStatusBarText: mode=Only Show(Recent Quota Change Only), text=\(text)")
-                    statusBarIconView?.update(displayText: text)
+                    updateStatusBarDisplay(text: text, provider: recentChangeCandidate.identifier)
                 } else {
                     if let recentChangeCandidate {
                         let staleMinutes = Int(Date().timeIntervalSince(recentChangeCandidate.observedAt) / 60.0)
@@ -1262,7 +1314,7 @@ final class StatusBarController: NSObject {
                     }
 
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
-                    statusBarIconView?.update(displayText: formatCostOrStatusBarBrand(totalCost))
+                    updateStatusBarDisplay(text: formatCostOrStatusBarBrand(totalCost))
                 }
             }
         }
@@ -1468,7 +1520,16 @@ final class StatusBarController: NSObject {
             for identifier in payAsYouGoOrder {
                 guard isProviderEnabled(identifier) else { continue }
 
-                if let result = providerResults[identifier] {
+                let result = providerResults[identifier]
+                let errorMessage = lastProviderErrors[identifier]
+
+                if let errorMessage, shouldDisplayErrorStateEvenWithResult(errorMessage) {
+                    hasPayAsYouGo = true
+                    let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
+                    item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
+                    menu.insertItem(item, at: insertIndex)
+                    insertIndex += 1
+                } else if let result {
                     if case .payAsYouGo(_, let cost, _) = result.usage {
                         hasPayAsYouGo = true
                         let costValue = cost ?? 0.0
@@ -1486,9 +1547,10 @@ final class StatusBarController: NSObject {
                        menu.insertItem(item, at: insertIndex)
                        insertIndex += 1
                    }
-                } else if let errorMessage = lastProviderErrors[identifier] {
+                } else if let errorMessage {
                     hasPayAsYouGo = true
                     let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
+                    item.submenu = createErrorSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage)
                     menu.insertItem(item, at: insertIndex)
                     insertIndex += 1
                 } else if loadingProviders.contains(identifier) {
@@ -1620,8 +1682,8 @@ final class StatusBarController: NSObject {
                         let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: .copilot) ?? "Unknown"
                         displayName += " - \(sourceLabel)"
                     }
-                    if (account.usage.totalEntitlement ?? 0) == 0 {
-                        displayName += " (No usage data)"
+                    if let unavailableLabel = unavailableUsageSuffix(for: account, identifier: .copilot) {
+                        displayName += " (\(unavailableLabel))"
                     }
                     let usedPercent = account.usage.usagePercentage
                     let quotaItem = createNativeQuotaMenuItem(
@@ -1743,7 +1805,17 @@ final class StatusBarController: NSObject {
         for identifier in quotaOrder {
             guard isProviderEnabled(identifier) else { continue }
 
-            if let result = providerResults[identifier] {
+            let result = providerResults[identifier]
+            let errorMessage = lastProviderErrors[identifier]
+
+            if let errorMessage,
+               shouldDisplayErrorStateEvenWithResult(errorMessage, identifier: identifier, result: result) {
+                hasQuota = true
+                let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
+                item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
+                menu.insertItem(item, at: insertIndex)
+                insertIndex += 1
+            } else if let result {
                 if let accounts = result.accounts, !accounts.isEmpty {
                     let authLabels = Set(
                         accounts.map { account in
@@ -1774,40 +1846,45 @@ final class StatusBarController: NSObject {
                         hasQuota = true
                         var displayName = accounts.count > 1 ? "\(baseName) #\(account.accountIndex + 1)" : baseName
 
-                        let codexEmail: String?
-                        if identifier == .codex,
-                           let detailsEmail = account.details?.email?
-                            .trimmingCharacters(in: .whitespacesAndNewlines),
+                        let detailsEmail = account.details?.email?
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let accountEmail: String?
+                        if identifier == .claude,
+                           let detailsEmail,
                            !detailsEmail.isEmpty {
-                            codexEmail = detailsEmail
+                            accountEmail = detailsEmail
+                        } else if identifier == .codex,
+                                  let detailsEmail,
+                                  !detailsEmail.isEmpty {
+                            accountEmail = detailsEmail
                         } else if identifier == .codex,
                                   let accountId = account.accountId?
                             .trimmingCharacters(in: .whitespacesAndNewlines),
                                   !accountId.isEmpty,
                                   let mappedEmail = codexEmailByAccountId[accountId],
                                   !mappedEmail.isEmpty {
-                            codexEmail = mappedEmail
+                            accountEmail = mappedEmail
                         } else if identifier == .codex,
                                   let fallbackEmail = codexEmailByAccountId.values.first,
                                   accounts.count == 1 {
                             // Single-account fallback for legacy cached results that may miss accountId.
-                            codexEmail = fallbackEmail
+                            accountEmail = fallbackEmail
                         } else {
-                            codexEmail = nil
+                            accountEmail = nil
                         }
 
-                        if let codexEmail {
+                        if let accountEmail {
                             if accounts.count > 1 {
-                                displayName += " (\(codexEmail))"
+                                displayName += " (\(accountEmail))"
                             } else {
-                                displayName = "\(baseName) (\(codexEmail))"
+                                displayName = "\(baseName) (\(accountEmail))"
                             }
                         } else if accounts.count > 1, showAuthLabel {
                             let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: identifier) ?? "Unknown"
                             displayName += " (\(sourceLabel))"
                         }
-                        if (account.usage.totalEntitlement ?? 0) == 0 {
-                            displayName += " (No usage data)"
+                        if let unavailableLabel = unavailableUsageSuffix(for: account, identifier: identifier) {
+                            displayName += " (\(unavailableLabel))"
                         }
 
                         // Keep menu list rows in multi-window format (e.g., 5h, weekly, monthly together).
@@ -1841,7 +1918,11 @@ final class StatusBarController: NSObject {
                             let percents = [account.details?.tokenUsagePercent, account.details?.mcpUsagePercent].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else if identifier == .nanoGpt {
-                            let percents = [account.details?.tokenUsagePercent, account.details?.mcpUsagePercent].compactMap { $0 }
+                            let percents = [
+                                account.details?.sevenDayUsage,
+                                account.details?.tokenUsagePercent,
+                                account.details?.mcpUsagePercent
+                            ].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else {
                             usedPercents = [account.usage.usagePercentage]
@@ -1890,7 +1971,11 @@ final class StatusBarController: NSObject {
                         let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else if identifier == .nanoGpt {
-                        let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
+                        let percents = [
+                            result.details?.sevenDayUsage,
+                            result.details?.tokenUsagePercent,
+                            result.details?.mcpUsagePercent
+                        ].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else {
                         usedPercents = [singlePercent]
@@ -1905,9 +1990,10 @@ final class StatusBarController: NSObject {
                     menu.insertItem(item, at: insertIndex)
                     insertIndex += 1
                 }
-            } else if let errorMessage = lastProviderErrors[identifier] {
+            } else if let errorMessage {
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
+                item.submenu = createErrorSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage)
                 let status = errorMenuStatus(for: errorMessage)
                 if status.shouldDeferToBottom {
                     deferredUnavailableItems.append(item)
@@ -1929,7 +2015,17 @@ final class StatusBarController: NSObject {
         }
 
         if isProviderEnabled(.geminiCLI) {
-            if let result = providerResults[.geminiCLI],
+            let geminiResult = providerResults[.geminiCLI]
+            let geminiError = lastProviderErrors[.geminiCLI]
+
+            if let geminiError,
+               shouldDisplayErrorStateEvenWithResult(geminiError, identifier: .geminiCLI, result: geminiResult) {
+                hasQuota = true
+                let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: geminiError)
+                item.submenu = createErrorSubmenu(identifier: .geminiCLI, result: geminiResult, errorMessage: geminiError)
+                menu.insertItem(item, at: insertIndex)
+                insertIndex += 1
+            } else if let result = geminiResult,
                let details = result.details,
                let geminiAccounts = details.geminiAccounts,
                !geminiAccounts.isEmpty {
@@ -1944,6 +2040,10 @@ final class StatusBarController: NSObject {
                     hasQuota = true
                     let accountNumber = account.accountIndex + 1
                     let usedPercent = normalizedUsagePercent(100.0 - account.remainingPercentage) ?? 0.0
+                    // Gemini account rows should represent Gemini quota only.
+                    // Antigravity has its own provider row and should not be duplicated here.
+                    let usedPercents: [Double] = [usedPercent]
+
                     let normalizedEmail = account.email.trimmingCharacters(in: .whitespacesAndNewlines)
                     var displayName = "Gemini CLI"
 
@@ -1958,7 +2058,7 @@ final class StatusBarController: NSObject {
                     }
                     let item = createNativeQuotaMenuItem(
                         name: displayName,
-                        usedPercent: usedPercent,
+                        usedPercents: usedPercents,
                         icon: iconForProvider(.geminiCLI)
                     )
                     item.tag = 999
@@ -1968,9 +2068,10 @@ final class StatusBarController: NSObject {
                     menu.insertItem(item, at: insertIndex)
                     insertIndex += 1
                 }
-            } else if let errorMessage = lastProviderErrors[.geminiCLI] {
+            } else if let errorMessage = geminiError {
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: errorMessage)
+                item.submenu = createErrorSubmenu(identifier: .geminiCLI, result: nil, errorMessage: errorMessage)
                 let status = errorMenuStatus(for: errorMessage)
                 if status.shouldDeferToBottom {
                     deferredUnavailableItems.append(item)
@@ -2000,6 +2101,18 @@ final class StatusBarController: NSObject {
                 menu.insertItem(item, at: insertIndex)
                 insertIndex += 1
             }
+        }
+
+        if let searchEnginesItem = createSearchEnginesQuotaMenuItem() {
+            hasQuota = true
+            let separator = NSMenuItem.separator()
+            separator.tag = 999
+            menu.insertItem(separator, at: insertIndex)
+            insertIndex += 1
+
+            searchEnginesItem.tag = 999
+            menu.insertItem(searchEnginesItem, at: insertIndex)
+            insertIndex += 1
         }
 
         if !hasQuota {
@@ -2259,6 +2372,28 @@ final class StatusBarController: NSObject {
         return createNativeQuotaMenuItem(name: name, usedPercents: [usedPercent], icon: icon)
     }
 
+    private func unavailableUsageSuffix(for account: ProviderAccountResult, identifier: ProviderIdentifier) -> String? {
+        guard (account.usage.totalEntitlement ?? 0) == 0 else { return nil }
+
+        if identifier == .claude,
+           let authErrorMessage = account.details?.authErrorMessage?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !authErrorMessage.isEmpty,
+           authErrorMessage.lowercased().contains("token expired") {
+            return "Token expired"
+        }
+
+        if identifier == .claude,
+           let authErrorMessage = account.details?.authErrorMessage?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !authErrorMessage.isEmpty,
+           authErrorMessage.lowercased().contains("rate limited") {
+            return "Rate limited"
+        }
+
+        return "No usage data"
+    }
+
     // MARK: - Error State Helpers
 
     /// Checks for keywords like "Authentication failed", "not found", "API key", etc.
@@ -2276,13 +2411,24 @@ final class StatusBarController: NSObject {
         return authPatterns.contains { lowercased.contains($0.lowercased()) }
     }
 
+    private func isRateLimitError(_ errorMessage: String) -> Bool {
+        let lowercased = errorMessage.lowercased()
+        return lowercased.contains("rate limited")
+            || lowercased.contains("rate_limit_error")
+            || lowercased.contains("http 429")
+            || lowercased.contains("too many requests")
+    }
+
     private enum ErrorMenuStatus {
+        case rateLimited
         case noCredentials
         case noSubscription
         case error
 
         var title: String {
             switch self {
+            case .rateLimited:
+                return "Rate limited"
             case .noCredentials:
                 return "No Credentials"
             case .noSubscription:
@@ -2294,16 +2440,19 @@ final class StatusBarController: NSObject {
 
         var shouldDeferToBottom: Bool {
             switch self {
+            case .rateLimited, .error:
+                return false
             case .noCredentials, .noSubscription:
                 return true
-            case .error:
-                return false
             }
         }
     }
 
     private func errorMenuStatus(for errorMessage: String) -> ErrorMenuStatus {
         let lowercased = errorMessage.lowercased()
+        if isRateLimitError(errorMessage) {
+            return .rateLimited
+        }
         if lowercased.contains("subscription") {
             return .noSubscription
         }
@@ -2313,17 +2462,237 @@ final class StatusBarController: NSObject {
         return .error
     }
 
+    private func shouldDisplayErrorStateEvenWithResult(_ errorMessage: String) -> Bool {
+        switch errorMenuStatus(for: errorMessage) {
+        case .rateLimited:
+            return true
+        case .noCredentials, .noSubscription, .error:
+            return false
+        }
+    }
+
+    private func shouldDisplayErrorStateEvenWithResult(
+        _ errorMessage: String,
+        identifier: ProviderIdentifier,
+        result: ProviderResult?
+    ) -> Bool {
+        guard shouldDisplayErrorStateEvenWithResult(errorMessage) else { return false }
+
+        if ProviderDisplayPolicy.shouldShowRateLimitedErrorRow(
+            identifier: identifier,
+            errorMessage: errorMessage,
+            result: result
+        ) {
+            return true
+        }
+
+        if ProviderDisplayPolicy.hasDisplayableAccountRows(identifier: identifier, result: result) {
+            debugLog(
+                "Preserving account rows for \(identifier.displayName) despite rate limit cooldown because account data is available"
+            )
+        }
+        return false
+    }
+
     private func createErrorMenuItem(identifier: ProviderIdentifier, errorMessage: String) -> NSMenuItem {
         let statusText = errorMenuStatus(for: errorMessage).title
         let title = "\(identifier.displayName) (\(statusText))"
 
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.image = tintedImage(iconForProvider(identifier), color: .systemOrange)
-        item.isEnabled = false
+        item.isEnabled = true
         item.tag = 999
         item.toolTip = errorMessage
 
         return item
+    }
+
+    private func createErrorSubmenu(
+        identifier: ProviderIdentifier,
+        result: ProviderResult?,
+        errorMessage: String
+    ) -> NSMenu {
+        let submenu = NSMenu()
+
+        let statusItem = NSMenuItem()
+        statusItem.view = createDisabledLabelView(text: "Status: \(errorMenuStatus(for: errorMessage).title)")
+        submenu.addItem(statusItem)
+
+        let errorItem = NSMenuItem()
+        errorItem.view = createDisabledLabelView(text: "Error: \(errorMessage)", multiline: true)
+        submenu.addItem(errorItem)
+
+        if let result,
+           let details = result.details,
+           details.hasAnyValue {
+            submenu.addItem(NSMenuItem.separator())
+
+            let cachedItem = NSMenuItem(title: "Cached Details", action: nil, keyEquivalent: "")
+            cachedItem.image = NSImage(
+                systemSymbolName: "clock.arrow.circlepath",
+                accessibilityDescription: "Cached Details"
+            )
+            cachedItem.submenu = createDetailSubmenu(details, identifier: identifier)
+            submenu.addItem(cachedItem)
+        }
+
+        return submenu
+    }
+
+    private func createSearchEnginesQuotaMenuItem() -> NSMenuItem? {
+        let enabledSearchProviders: [ProviderIdentifier] = [.braveSearch, .tavilySearch].filter { isProviderEnabled($0) }
+        guard !enabledSearchProviders.isEmpty else { return nil }
+
+        let searchEnginesItem = NSMenuItem(title: "Search Engines", action: nil, keyEquivalent: "")
+        searchEnginesItem.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Search Engines")
+
+        let submenu = NSMenu()
+        for identifier in enabledSearchProviders {
+            let rowTitle = identifier.displayName
+            let rowItem = createSearchEngineRow(identifier: identifier, title: rowTitle)
+            submenu.addItem(rowItem)
+        }
+
+        searchEnginesItem.submenu = submenu
+        return searchEnginesItem
+    }
+
+    private func createSearchEngineRow(identifier: ProviderIdentifier, title: String) -> NSMenuItem {
+        let result = providerResults[identifier]
+        let errorMessage = lastProviderErrors[identifier]
+
+        if let errorMessage, shouldDisplayErrorStateEvenWithResult(errorMessage) {
+            let rowItem = NSMenuItem(title: "\(title) (Rate limited)", action: nil, keyEquivalent: "")
+            rowItem.image = tintedImage(iconForProvider(identifier), color: .systemOrange)
+            rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: result, errorMessage: errorMessage, isLoading: false)
+            return rowItem
+        }
+
+        if let result {
+            let rowItem = createNativeQuotaMenuItem(name: title, usedPercent: result.usage.usagePercentage, icon: iconForProvider(identifier))
+            rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: result, errorMessage: nil, isLoading: false)
+            return rowItem
+        }
+
+        if let errorMessage {
+            let rowItem = NSMenuItem(title: "\(title) (Error)", action: nil, keyEquivalent: "")
+            rowItem.image = tintedImage(iconForProvider(identifier), color: .systemOrange)
+            rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage, isLoading: false)
+            return rowItem
+        }
+
+        if loadingProviders.contains(identifier) {
+            let rowItem = NSMenuItem(title: "\(title) (Loading...)", action: nil, keyEquivalent: "")
+            rowItem.image = iconForProvider(identifier)
+            rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: nil, errorMessage: nil, isLoading: true)
+            return rowItem
+        }
+
+        let rowItem = NSMenuItem(title: "\(title) (No data)", action: nil, keyEquivalent: "")
+        rowItem.image = iconForProvider(identifier)
+        rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: nil, errorMessage: "No data", isLoading: false)
+        return rowItem
+    }
+
+    private func createSearchEngineDetailSubmenu(
+        identifier: ProviderIdentifier,
+        result: ProviderResult?,
+        errorMessage: String?,
+        isLoading: Bool
+    ) -> NSMenu {
+        let submenu = NSMenu()
+
+        if isLoading {
+            let loadingItem = NSMenuItem(title: "Loading...", action: nil, keyEquivalent: "")
+            loadingItem.isEnabled = false
+            submenu.addItem(loadingItem)
+            return submenu
+        }
+
+        if let errorMessage {
+            let errorItem = NSMenuItem()
+            errorItem.view = createDisabledLabelView(text: "Error: \(errorMessage)", multiline: true)
+            submenu.addItem(errorItem)
+            return submenu
+        }
+
+        guard let result,
+              case .quotaBased(let remaining, let entitlement, _) = result.usage,
+              entitlement > 0 else {
+            let emptyItem = NSMenuItem()
+            emptyItem.view = createDisabledLabelView(text: "Usage data unavailable")
+            submenu.addItem(emptyItem)
+            return submenu
+        }
+
+        let used = max(0, entitlement - remaining)
+        let usagePercent = (Double(used) / Double(entitlement)) * 100.0
+        let filledBlocks = min(10, Int((Double(used) / Double(max(entitlement, 1))) * 10))
+        let emptyBlocks = max(0, 10 - filledBlocks)
+        let progressBar = String(repeating: "═", count: filledBlocks) + String(repeating: "░", count: emptyBlocks)
+
+        let progressItem = NSMenuItem()
+        progressItem.view = createDisabledLabelView(text: "[\(progressBar)] \(used)/\(entitlement)")
+        submenu.addItem(progressItem)
+
+        let usedItem = NSMenuItem()
+        usedItem.view = createDisabledLabelView(text: String(format: "Used: %.0f%% used", usagePercent))
+        submenu.addItem(usedItem)
+
+        let remainingItem = NSMenuItem()
+        remainingItem.view = createDisabledLabelView(text: "Remaining: \(remaining)")
+        submenu.addItem(remainingItem)
+
+        if let resetPeriod = result.details?.resetPeriod, !resetPeriod.isEmpty {
+            let resetItem = NSMenuItem()
+            resetItem.view = createDisabledLabelView(text: resetPeriod)
+            submenu.addItem(resetItem)
+        }
+
+        if let planType = result.details?.planType, !planType.isEmpty {
+            let planItem = NSMenuItem()
+            planItem.view = createDisabledLabelView(text: "Plan: \(planType)")
+            submenu.addItem(planItem)
+        }
+
+        if let authSource = result.details?.authSource, !authSource.isEmpty {
+            submenu.addItem(NSMenuItem.separator())
+            let authItem = NSMenuItem()
+            authItem.view = createDisabledLabelView(
+                text: "Token From: \(authSource)",
+                icon: NSImage(systemSymbolName: "key", accessibilityDescription: "Auth Source"),
+                multiline: true
+            )
+            submenu.addItem(authItem)
+        }
+
+        if identifier == .braveSearch {
+            let lastSyncEpoch = UserDefaults.standard.double(forKey: SearchEnginePreferences.braveLastAPISyncAtKey)
+            if lastSyncEpoch > 0 {
+                let date = Date(timeIntervalSince1970: lastSyncEpoch)
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM-dd HH:mm z"
+                formatter.timeZone = TimeZone.current
+                let syncItem = NSMenuItem()
+                syncItem.view = createDisabledLabelView(text: "Last API Sync: \(formatter.string(from: date))")
+                submenu.addItem(syncItem)
+            }
+
+            submenu.addItem(NSMenuItem.separator())
+            let modeItem = NSMenuItem(title: "Refresh Mode", action: nil, keyEquivalent: "")
+            let modeMenu = NSMenu()
+            for mode in BraveSearchRefreshMode.allCases {
+                let item = NSMenuItem(title: mode.title, action: #selector(braveRefreshModeSelected(_:)), keyEquivalent: "")
+                item.target = self
+                item.tag = mode.rawValue
+                item.state = (mode == braveRefreshMode) ? .on : .off
+                modeMenu.addItem(item)
+            }
+            modeItem.submenu = modeMenu
+            submenu.addItem(modeItem)
+        }
+
+        return submenu
     }
 
     private func iconForProvider(_ identifier: ProviderIdentifier) -> NSImage? {
@@ -2356,11 +2725,18 @@ final class StatusBarController: NSObject {
             image = NSImage(named: "SyntheticIcon")
         case .chutes:
             image = NSImage(named: "ChutesIcon")
+        case .tavilySearch:
+            image = NSImage(named: "TavilyIcon")
+        case .braveSearch:
+            image = NSImage(named: "BraveSearchIcon")
         }
 
-         // Resize icons to 16x16 for consistent menu appearance
+         // Keep consistent icon sizing and make Gemini slightly larger.
          if let image = image {
-             image.size = NSSize(width: 16, height: 16)
+             let iconSize = identifier == .geminiCLI
+                 ? MenuDesignToken.Dimension.geminiIconSize
+                 : MenuDesignToken.Dimension.iconSize
+             image.size = NSSize(width: iconSize, height: iconSize)
          }
          return image
      }
@@ -3412,5 +3788,157 @@ final class StatusBarController: NSObject {
         predictionPeriodItem.submenu = freshPeriodSubmenu
         historySubmenu.addItem(predictionPeriodItem)
         debugLog("updateHistorySubmenu: completed successfully")
+    }
+}
+
+// MARK: - Demo Mode (for marketing screenshots)
+extension StatusBarController {
+    /// Populates providerResults with rich fake data for marketing screenshots.
+    /// Launch with --demo-mode to activate.
+    func loadDemoData() {
+        debugLog("[🎬 DemoMode] Loading demo data for marketing screenshots")
+        
+        let now = Date()
+        let fiveHoursFromNow = now.addingTimeInterval(5 * 3600)
+        let sevenDaysFromNow = now.addingTimeInterval(7 * 24 * 3600)
+        let oneDayFromNow = now.addingTimeInterval(24 * 3600)
+        let twoDaysFromNow = now.addingTimeInterval(2 * 24 * 3600)
+        
+        providerResults = [
+            // --- Pay-as-you-go ---
+            .openRouter: ProviderResult(
+                usage: .payAsYouGo(utilization: 0, cost: 37.42, resetsAt: nil),
+                details: DetailedUsage(
+                    creditsRemaining: 62.58,
+                    creditsTotal: 100.0,
+                    authSource: "OpenCode"
+                )
+            ),
+            .openCodeZen: ProviderResult(
+                usage: .payAsYouGo(utilization: 0, cost: 12.50, resetsAt: nil),
+                details: DetailedUsage(
+                    sessions: 47,
+                    messages: 312,
+                    avgCostPerDay: 0.42,
+                    authSource: "OpenCode"
+                )
+            ),
+            
+            // --- Quota-based ---
+            .claude: ProviderResult(
+                usage: .quotaBased(remaining: 23, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    fiveHourUsage: 52.0,
+                    fiveHourReset: fiveHoursFromNow,
+                    sevenDayUsage: 82.0,
+                    sevenDayReset: sevenDaysFromNow,
+                    sonnetUsage: 38.0,
+                    sonnetReset: sevenDaysFromNow,
+                    opusUsage: 95.0,
+                    opusReset: sevenDaysFromNow,
+                    extraUsageEnabled: false,
+                    authSource: "OpenCode"
+                )
+            ),
+            .codex: ProviderResult(
+                usage: .quotaBased(remaining: 1, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    secondaryUsage: 45.0,
+                    secondaryReset: sevenDaysFromNow,
+                    primaryReset: fiveHoursFromNow,
+                    creditsBalance: 180.0,
+                    planType: "pro",
+                    authSource: "Codex CLI"
+                )
+            ),
+            .copilot: ProviderResult(
+                usage: .quotaBased(remaining: 1200, entitlement: 1500, overagePermitted: true),
+                details: DetailedUsage(
+                    copilotOverageCost: 2.40,
+                    copilotOverageRequests: 12,
+                    copilotUsedRequests: 300,
+                    copilotLimitRequests: 1500,
+                    copilotQuotaResetDateUTC: oneDayFromNow
+                )
+            ),
+            .kimi: ProviderResult(
+                usage: .quotaBased(remaining: 74, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    fiveHourUsage: 26.0,
+                    fiveHourReset: fiveHoursFromNow,
+                    authSource: "OpenCode"
+                )
+            ),
+            .zaiCodingPlan: ProviderResult(
+                usage: .quotaBased(remaining: 1, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    tokenUsagePercent: 99.0,
+                    tokenUsageReset: oneDayFromNow,
+                    tokenUsageUsed: 990_000,
+                    tokenUsageTotal: 1_000_000,
+                    mcpUsagePercent: 45.0,
+                    mcpUsageReset: oneDayFromNow,
+                    mcpUsageUsed: 45,
+                    mcpUsageTotal: 100,
+                    modelUsageTokens: 500_000,
+                    modelUsageCalls: 128,
+                    toolNetworkSearchCount: 42,
+                    toolWebReadCount: 15,
+                    toolZreadCount: 8
+                )
+            ),
+            .geminiCLI: ProviderResult(
+                usage: .quotaBased(remaining: 85, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    authSource: "OpenCode",
+                    geminiAccounts: [
+                        GeminiAccountQuota(
+                            accountIndex: 0,
+                            email: "user@gmail.com",
+                            accountId: "100663739661147150906",
+                            remainingPercentage: 100.0,
+                            modelBreakdown: [
+                                "gemini-2.5-pro": 100.0,
+                                "gemini-2.5-flash": 100.0
+                            ],
+                            authSource: "Gemini CLI",
+                            earliestReset: sevenDaysFromNow,
+                            modelResetTimes: [
+                                "gemini-2.5-pro": sevenDaysFromNow,
+                                "gemini-2.5-flash": sevenDaysFromNow
+                            ]
+                        ),
+                        GeminiAccountQuota(
+                            accountIndex: 1,
+                            email: "work@company.com",
+                            accountId: "109876543210987654321",
+                            remainingPercentage: 70.0,
+                            modelBreakdown: [
+                                "gemini-2.5-pro": 70.0,
+                                "gemini-2.5-flash": 85.0
+                            ],
+                            authSource: "Antigravity",
+                            earliestReset: twoDaysFromNow,
+                            modelResetTimes: [
+                                "gemini-2.5-pro": twoDaysFromNow,
+                                "gemini-2.5-flash": twoDaysFromNow
+                            ]
+                        )
+                    ]
+                )
+            )
+        ]
+        
+        // Clear any loading states
+        loadingProviders.removeAll()
+        lastProviderErrors.removeAll()
+        
+        debugLog("[🎬 DemoMode] Demo data loaded: \(providerResults.count) providers")
+        
+        // Rebuild the entire menu with demo data
+        updateMultiProviderMenu()
+        updateStatusBarText()
+        
+        debugLog("[🎬 DemoMode] Menu rebuilt with demo data")
     }
 }

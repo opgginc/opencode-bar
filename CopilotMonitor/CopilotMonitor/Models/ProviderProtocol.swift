@@ -23,6 +23,8 @@ enum ProviderIdentifier: String, CaseIterable {
     case nanoGpt = "nano_gpt"
     case synthetic
     case chutes
+    case tavilySearch = "tavily_search"
+    case braveSearch = "brave_search"
 
     var displayName: String {
         switch self {
@@ -52,6 +54,10 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Synthetic"
         case .chutes:
             return "Chutes AI"
+        case .tavilySearch:
+            return "Tavily"
+        case .braveSearch:
+            return "Brave Search"
         }
     }
 
@@ -83,6 +89,10 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Synth"
         case .chutes:
             return "Chutes"
+        case .tavilySearch:
+            return "Tavily"
+        case .braveSearch:
+            return "Brave"
         }
     }
 
@@ -114,6 +124,10 @@ enum ProviderIdentifier: String, CaseIterable {
             return "SyntheticIcon"
         case .chutes:
             return "c.circle"
+        case .tavilySearch:
+            return "TavilyIcon"
+        case .braveSearch:
+            return "BraveSearchIcon"
         }
     }
 }
@@ -129,6 +143,9 @@ protocol ProviderProtocol: AnyObject {
     /// Timeout for fetch operations (default: 10 seconds)
     var fetchTimeout: TimeInterval { get }
 
+    /// Minimum interval between network fetches for this provider (default: no throttling)
+    var minimumFetchInterval: TimeInterval { get }
+
     /// Fetches current usage data from the provider
     /// - Returns: ProviderResult containing usage and optional detailed information
     /// - Throws: ProviderError if fetch fails
@@ -137,6 +154,7 @@ protocol ProviderProtocol: AnyObject {
 
 extension ProviderProtocol {
     var fetchTimeout: TimeInterval { 10.0 }
+    var minimumFetchInterval: TimeInterval { 0 }
 }
 
 /// Errors that can occur during provider operations

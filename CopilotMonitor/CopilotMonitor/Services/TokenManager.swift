@@ -339,9 +339,31 @@ struct ClaudeAuthAccount {
     let accessToken: String
     let accountId: String?
     let email: String?
+    let refreshToken: String?
+    let expiresAt: Date?
     let authSource: String
     let sourceLabels: [String]
     let source: ClaudeAuthSource
+
+    init(
+        accessToken: String,
+        accountId: String?,
+        email: String?,
+        refreshToken: String? = nil,
+        expiresAt: Date? = nil,
+        authSource: String,
+        sourceLabels: [String],
+        source: ClaudeAuthSource
+    ) {
+        self.accessToken = accessToken
+        self.accountId = accountId
+        self.email = email
+        self.refreshToken = refreshToken
+        self.expiresAt = expiresAt
+        self.authSource = authSource
+        self.sourceLabels = sourceLabels
+        self.source = source
+    }
 }
 
 /// Auth source types for GitHub Copilot token discovery
@@ -587,46 +609,163 @@ final class TokenManager: @unchecked Sendable {
     private var cachedCopilotAccounts: [CopilotAuthAccount]?
     private var copilotAccountsCacheTimestamp: Date?
 
+    /// Cached OpenCode config JSON (opencode.json)
+    private var cachedOpenCodeConfigJSON: [String: Any]?
+    private var openCodeConfigCacheTimestamp: Date?
+
+    /// Path where opencode.json was found
+    private(set) var lastFoundOpenCodeConfigPath: URL?
+
     private init() {
         logger.info("TokenManager initialized")
     }
 
     // MARK: - OpenCode Auth File Reading
 
+    private func buildOpenCodeFilePaths(
+        envVarName: String,
+        envRelativePathComponents: [String],
+        fallbackRelativePathComponents: [[String]]
+    ) -> [URL] {
+        let fileManager = FileManager.default
+        let homeDir = fileManager.homeDirectoryForCurrentUser
+        var candidates: [URL] = []
+
+        if let envBasePath = ProcessInfo.processInfo.environment[envVarName],
+           !envBasePath.isEmpty {
+            let envURL = envRelativePathComponents.reduce(URL(fileURLWithPath: envBasePath)) { partial, component in
+                partial.appendingPathComponent(component)
+            }
+            candidates.append(envURL)
+        }
+
+        for relativeComponents in fallbackRelativePathComponents {
+            let fallbackURL = relativeComponents.reduce(homeDir) { partial, component in
+                partial.appendingPathComponent(component)
+            }
+            candidates.append(fallbackURL)
+        }
+
+        var deduped: [URL] = []
+        var visited = Set<String>()
+        for candidate in candidates {
+            let normalizedPath = candidate.standardizedFileURL.path
+            if visited.insert(normalizedPath).inserted {
+                deduped.append(candidate)
+            }
+        }
+        return deduped
+    }
+
     /// Possible auth.json locations in priority order:
     /// 1. $XDG_DATA_HOME/opencode/auth.json (if XDG_DATA_HOME is set)
     /// 2. ~/.local/share/opencode/auth.json (XDG default, used by OpenCode)
     /// 3. ~/Library/Application Support/opencode/auth.json (macOS convention fallback)
     func getAuthFilePaths() -> [URL] {
-        let fileManager = FileManager.default
-        let homeDir = fileManager.homeDirectoryForCurrentUser
-        var paths: [URL] = []
+        return buildOpenCodeFilePaths(
+            envVarName: "XDG_DATA_HOME",
+            envRelativePathComponents: ["opencode", "auth.json"],
+            fallbackRelativePathComponents: [
+                [".local", "share", "opencode", "auth.json"],
+                ["Library", "Application Support", "opencode", "auth.json"]
+            ]
+        )
+    }
 
-        // 1. XDG_DATA_HOME (highest priority if set)
-        if let xdgDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"], !xdgDataHome.isEmpty {
-            let xdgPath = URL(fileURLWithPath: xdgDataHome)
-                .appendingPathComponent("opencode")
-                .appendingPathComponent("auth.json")
-            paths.append(xdgPath)
+    /// Possible opencode.json locations in priority order:
+    /// 1. $XDG_CONFIG_HOME/opencode/opencode.json (if XDG_CONFIG_HOME is set)
+    /// 2. ~/.config/opencode/opencode.json (XDG default on macOS/Linux)
+    /// 3. ~/.local/share/opencode/opencode.json (fallback)
+    /// 4. ~/Library/Application Support/opencode/opencode.json (macOS fallback)
+    func getOpenCodeConfigFilePaths() -> [URL] {
+        return buildOpenCodeFilePaths(
+            envVarName: "XDG_CONFIG_HOME",
+            envRelativePathComponents: ["opencode", "opencode.json"],
+            fallbackRelativePathComponents: [
+                [".config", "opencode", "opencode.json"],
+                [".local", "share", "opencode", "opencode.json"],
+                ["Library", "Application Support", "opencode", "opencode.json"]
+            ]
+        )
+    }
+
+    private func readOpenCodeConfigJSON() -> [String: Any]? {
+        return queue.sync {
+            if let cached = cachedOpenCodeConfigJSON,
+               let timestamp = openCodeConfigCacheTimestamp,
+               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+                return cached
+            }
+
+            let fileManager = FileManager.default
+            let paths = getOpenCodeConfigFilePaths()
+            for configPath in paths {
+                guard fileManager.fileExists(atPath: configPath.path) else {
+                    continue
+                }
+                guard fileManager.isReadableFile(atPath: configPath.path) else {
+                    logger.warning("OpenCode config file not readable at \(configPath.path)")
+                    continue
+                }
+
+                do {
+                    let data = try Data(contentsOf: configPath)
+                    let jsonObject = try JSONSerialization.jsonObject(with: data)
+                    guard let dict = jsonObject as? [String: Any] else {
+                        logger.warning("OpenCode config is not a JSON object at \(configPath.path)")
+                        continue
+                    }
+
+                    lastFoundOpenCodeConfigPath = configPath
+                    cachedOpenCodeConfigJSON = dict
+                    openCodeConfigCacheTimestamp = Date()
+                    return dict
+                } catch {
+                    logger.warning("Failed to parse OpenCode config at \(configPath.path): \(error.localizedDescription)")
+                }
+            }
+
+            lastFoundOpenCodeConfigPath = nil
+            cachedOpenCodeConfigJSON = nil
+            openCodeConfigCacheTimestamp = nil
+            return nil
+        }
+    }
+
+    private func resolveConfigValue(_ rawValue: String?) -> String? {
+        guard var value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
         }
 
-        // 2. ~/.local/share/opencode/auth.json (XDG default - OpenCode's primary location)
-        let xdgDefaultPath = homeDir
-            .appendingPathComponent(".local")
-            .appendingPathComponent("share")
-            .appendingPathComponent("opencode")
-            .appendingPathComponent("auth.json")
-        paths.append(xdgDefaultPath)
+        if value.hasPrefix("Bearer ") {
+            value = String(value.dropFirst("Bearer ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
 
-        // 3. ~/Library/Application Support/opencode/auth.json (macOS convention fallback)
-        let macOSPath = homeDir
-            .appendingPathComponent("Library")
-            .appendingPathComponent("Application Support")
-            .appendingPathComponent("opencode")
-            .appendingPathComponent("auth.json")
-        paths.append(macOSPath)
+        if value.hasPrefix("{env:"), value.hasSuffix("}") {
+            let start = value.index(value.startIndex, offsetBy: 5)
+            let end = value.index(before: value.endIndex)
+            let envName = String(value[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !envName.isEmpty else { return nil }
+            let envValue = ProcessInfo.processInfo.environment[envName]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (envValue?.isEmpty == false) ? envValue : nil
+        }
 
-        return paths
+        return value.isEmpty ? nil : value
+    }
+
+    private func nestedString(
+        in dictionary: [String: Any],
+        path: [String]
+    ) -> String? {
+        guard !path.isEmpty else { return nil }
+        var current: Any = dictionary
+        for key in path {
+            guard let nested = current as? [String: Any], let next = nested[key] else {
+                return nil
+            }
+            current = next
+        }
+        return current as? String
     }
 
     /// Returns the path where auth.json was found, or nil if not found
@@ -1380,6 +1519,377 @@ final class TokenManager: @unchecked Sendable {
         return nil
     }
 
+    private func findInt64Value(in object: Any?, matching keys: Set<String>) -> Int64? {
+        if let dict = object as? [String: Any] {
+            for (key, value) in dict {
+                let normalized = normalizedKey(key)
+                if keys.contains(normalized) {
+                    if let intValue = value as? Int64 {
+                        return intValue
+                    }
+                    if let intValue = value as? Int {
+                        return Int64(intValue)
+                    }
+                    if let numberValue = value as? NSNumber {
+                        return numberValue.int64Value
+                    }
+                    if let stringValue = value as? String,
+                       let intValue = Int64(stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                        return intValue
+                    }
+                }
+                if let nested = findInt64Value(in: value, matching: keys) {
+                    return nested
+                }
+            }
+        } else if let array = object as? [Any] {
+            for item in array {
+                if let nested = findInt64Value(in: item, matching: keys) {
+                    return nested
+                }
+            }
+        }
+        return nil
+    }
+
+    private func findDirectStringValue(in dict: [String: Any], matching keys: Set<String>) -> String? {
+        for (key, value) in dict {
+            let normalized = normalizedKey(key)
+            guard keys.contains(normalized),
+                  let stringValue = value as? String else {
+                continue
+            }
+            let trimmed = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
+    }
+
+    private func findDirectInt64Value(in dict: [String: Any], matching keys: Set<String>) -> Int64? {
+        for (key, value) in dict {
+            let normalized = normalizedKey(key)
+            guard keys.contains(normalized) else { continue }
+            if let intValue = value as? Int64 {
+                return intValue
+            }
+            if let intValue = value as? Int {
+                return Int64(intValue)
+            }
+            if let numberValue = value as? NSNumber {
+                return numberValue.int64Value
+            }
+            if let stringValue = value as? String,
+               let intValue = Int64(stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return intValue
+            }
+        }
+        return nil
+    }
+
+    private func dateFromEpoch(_ rawValue: Int64?) -> Date? {
+        guard let rawValue else { return nil }
+        let seconds: Double
+        // Heuristic: values with 13+ digits are milliseconds.
+        if rawValue > 9_999_999_999 {
+            seconds = Double(rawValue) / 1000.0
+        } else {
+            seconds = Double(rawValue)
+        }
+        return Date(timeIntervalSince1970: seconds)
+    }
+
+    private func parseISO8601Date(_ value: String?) -> Date? {
+        guard let value = normalizedNonEmpty(value) else { return nil }
+
+        let formatterWithFrac = ISO8601DateFormatter()
+        formatterWithFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatterWithFrac.date(from: value) {
+            return date
+        }
+
+        let formatterWithoutFrac = ISO8601DateFormatter()
+        formatterWithoutFrac.formatOptions = [.withInternetDateTime]
+        return formatterWithoutFrac.date(from: value)
+    }
+
+    private struct ClaudeOAuthPayload {
+        let accessToken: String
+        let refreshToken: String?
+        let expiresAt: Date?
+        let accountId: String?
+        let email: String?
+    }
+
+    private func valueForNormalizedKey(_ normalizedKeyName: String, in dict: [String: Any]) -> Any? {
+        for (key, value) in dict where normalizedKey(key) == normalizedKeyName {
+            return value
+        }
+        return nil
+    }
+
+    private func extractClaudeOAuthPayload(from dict: [String: Any]) -> ClaudeOAuthPayload? {
+        let accessKeys: Set<String> = ["accesstoken", "access", "oauthtoken", "token"]
+        let refreshKeys: Set<String> = ["refreshtoken", "oauthrefreshtoken", "refresh"]
+        let expiresKeys: Set<String> = ["expiresat", "expires", "expiration", "expiresin"]
+        let accountKeys: Set<String> = ["accountid", "userid", "id"]
+        let emailKeys: Set<String> = ["email", "useremail", "login", "username"]
+
+        var candidates: [(object: Any, allowRecursive: Bool)] = []
+        if let claudeAiOAuth = valueForNormalizedKey("claudeaioauth", in: dict) {
+            candidates.append((claudeAiOAuth, true))
+        }
+        if let claudeOAuth = valueForNormalizedKey("claudeoauth", in: dict) {
+            candidates.append((claudeOAuth, true))
+        }
+        if let oauth = valueForNormalizedKey("oauth", in: dict) {
+            candidates.append((oauth, true))
+        }
+        // Last resort: only direct key lookup on the top-level object to avoid
+        // accidentally picking unrelated nested MCP tokens.
+        candidates.append((dict, false))
+
+        for candidate in candidates {
+            let accessToken: String?
+            let refreshToken: String?
+            let expiresRaw: Int64?
+            let accountIdString: String?
+            let accountIdNumeric: Int64?
+            let email: String?
+
+            if let candidateDict = candidate.object as? [String: Any] {
+                accessToken = findDirectStringValue(in: candidateDict, matching: accessKeys)
+                    ?? (candidate.allowRecursive ? findStringValue(in: candidateDict, matching: accessKeys) : nil)
+                refreshToken = findDirectStringValue(in: candidateDict, matching: refreshKeys)
+                    ?? (candidate.allowRecursive ? findStringValue(in: candidateDict, matching: refreshKeys) : nil)
+                expiresRaw = findDirectInt64Value(in: candidateDict, matching: expiresKeys)
+                    ?? (candidate.allowRecursive ? findInt64Value(in: candidateDict, matching: expiresKeys) : nil)
+                accountIdString = findDirectStringValue(in: candidateDict, matching: accountKeys)
+                    ?? (candidate.allowRecursive ? findStringValue(in: candidateDict, matching: accountKeys) : nil)
+                accountIdNumeric = findDirectInt64Value(in: candidateDict, matching: accountKeys)
+                    ?? (candidate.allowRecursive ? findInt64Value(in: candidateDict, matching: accountKeys) : nil)
+                email = findDirectStringValue(in: candidateDict, matching: emailKeys)
+                    ?? (candidate.allowRecursive ? findStringValue(in: candidateDict, matching: emailKeys) : nil)
+            } else {
+                accessToken = candidate.allowRecursive ? findStringValue(in: candidate.object, matching: accessKeys) : nil
+                refreshToken = candidate.allowRecursive ? findStringValue(in: candidate.object, matching: refreshKeys) : nil
+                expiresRaw = candidate.allowRecursive ? findInt64Value(in: candidate.object, matching: expiresKeys) : nil
+                accountIdString = candidate.allowRecursive ? findStringValue(in: candidate.object, matching: accountKeys) : nil
+                accountIdNumeric = candidate.allowRecursive ? findInt64Value(in: candidate.object, matching: accountKeys) : nil
+                email = candidate.allowRecursive ? findStringValue(in: candidate.object, matching: emailKeys) : nil
+            }
+
+            guard let accessToken = normalizedNonEmpty(accessToken) else { continue }
+            let accountId = normalizedNonEmpty(accountIdString) ?? accountIdNumeric.map { String($0) }
+            let normalizedRefreshToken = normalizedNonEmpty(refreshToken)
+            let expiresAt = expiresRaw.flatMap { rawValue -> Date? in
+                if rawValue < 1_000_000_000 {
+                    return Date().addingTimeInterval(TimeInterval(max(0, rawValue - 60)))
+                }
+                return dateFromEpoch(rawValue)
+            } ?? parseISO8601Date(
+                (candidate.object as? [String: Any]).flatMap { findDirectStringValue(in: $0, matching: expiresKeys) }
+            )
+
+            return ClaudeOAuthPayload(
+                accessToken: accessToken,
+                refreshToken: normalizedRefreshToken,
+                expiresAt: expiresAt,
+                accountId: accountId,
+                email: normalizedNonEmpty(email)
+            )
+        }
+
+        return nil
+    }
+
+    private func parseJSONDictionary(from data: Data) -> [String: Any]? {
+        guard let json = try? JSONSerialization.jsonObject(with: data, options: []),
+              let dict = json as? [String: Any] else {
+            return nil
+        }
+        return dict
+    }
+
+    private func parseJSONDictionary(from string: String) -> [String: Any]? {
+        guard let data = string.data(using: .utf8) else {
+            return nil
+        }
+        return parseJSONDictionary(from: data)
+    }
+
+    private func parseJSONStringCandidates(_ value: String) -> [String: Any]? {
+        let trimmed = sanitizeJSONString(value).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        var candidates: [String] = [trimmed]
+        if let fragmentStartIndex = trimmed.firstIndex(where: { char in
+            char == "{" || char == "\"" || char == "["
+        }) {
+            let fragment = String(trimmed[fragmentStartIndex...])
+            candidates.append(fragment)
+        }
+
+        for candidate in candidates {
+            if let dict = parseJSONDictionary(from: candidate) {
+                return dict
+            }
+
+            if !candidate.hasPrefix("{"),
+               !candidate.hasSuffix("}"),
+               candidate.contains(":"),
+               let dict = parseJSONDictionary(from: "{\(candidate)}") {
+                logger.info("Decoded wrapped keychain JSON payload")
+                return dict
+            }
+        }
+
+        return nil
+    }
+
+    private func extractQuotedValue(in payload: String, keys: [String]) -> String? {
+        guard !keys.isEmpty else {
+            return nil
+        }
+
+        let escapedKeys = keys.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
+        let pattern = "\"(?:\(escapedKeys))\"\\s*:\\s*\"([^\"]+)\""
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(payload.startIndex..<payload.endIndex, in: payload)
+        guard let match = regex.firstMatch(in: payload, options: [], range: range),
+              match.numberOfRanges > 1,
+              let captureRange = Range(match.range(at: 1), in: payload) else {
+            return nil
+        }
+        let value = payload[captureRange].trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private func extractNumericValue(in payload: String, keys: [String]) -> String? {
+        guard !keys.isEmpty else {
+            return nil
+        }
+
+        let escapedKeys = keys.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
+        let pattern = "\"(?:\(escapedKeys))\"\\s*:\\s*([0-9]+)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(payload.startIndex..<payload.endIndex, in: payload)
+        guard let match = regex.firstMatch(in: payload, options: [], range: range),
+              match.numberOfRanges > 1,
+              let captureRange = Range(match.range(at: 1), in: payload) else {
+            return nil
+        }
+        let value = payload[captureRange].trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private func extractKeychainFieldsFromLoosePayload(_ payload: String) -> [String: Any]? {
+        let sanitized = sanitizeJSONString(payload).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitized.isEmpty else {
+            return nil
+        }
+
+        let tokenKeys = [
+            "accessToken", "access_token",
+            "oauthToken", "oauth_token",
+            "token"
+        ]
+        let emailKeys = [
+            "email", "userEmail", "user_email",
+            "login", "username"
+        ]
+        let accountKeys = ["accountId", "account_id", "userId", "user_id", "id"]
+        let refreshKeys = ["refreshToken", "refresh_token", "oauthRefreshToken", "oauth_refresh_token", "refresh"]
+        let expiresKeys = ["expiresAt", "expires_at", "expires", "expiration", "expiry"]
+
+        var recovered: [String: Any] = [:]
+        if let token = extractQuotedValue(in: sanitized, keys: tokenKeys) {
+            recovered["accessToken"] = token
+        }
+        if let email = extractQuotedValue(in: sanitized, keys: emailKeys) {
+            recovered["email"] = email
+        }
+
+        let accountId = extractQuotedValue(in: sanitized, keys: accountKeys)
+            ?? extractNumericValue(in: sanitized, keys: accountKeys)
+        if let accountId {
+            recovered["accountId"] = accountId
+        }
+
+        if let refreshToken = extractQuotedValue(in: sanitized, keys: refreshKeys) {
+            recovered["refreshToken"] = refreshToken
+        }
+
+        if let expiresAt = extractNumericValue(in: sanitized, keys: expiresKeys) {
+            recovered["expiresAt"] = expiresAt
+        }
+
+        if recovered["accessToken"] == nil {
+            let plainToken = sanitized.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if plainToken.hasPrefix("sk-ant-") || plainToken.hasPrefix("sk-") {
+                recovered["accessToken"] = plainToken
+            }
+        }
+
+        return recovered.isEmpty ? nil : recovered
+    }
+
+    private func sanitizeJSONString(_ value: String) -> String {
+        let scalars = value.unicodeScalars.filter { scalar in
+            if scalar.value == 9 || scalar.value == 10 || scalar.value == 13 {
+                return true
+            }
+            return scalar.value >= 32
+        }
+        return String(String.UnicodeScalarView(scalars))
+    }
+
+    private func decodeHexString(_ value: String) -> Data? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        let compact = trimmed.replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\t", with: "")
+        var hexPayload = compact
+
+        let isStrictHex = hexPayload.allSatisfy { $0.isHexDigit }
+        if !isStrictHex {
+            let filtered = String(hexPayload.filter { $0.isHexDigit })
+            let minStrictMatch = Int(Double(hexPayload.count) * 0.9)
+            guard filtered.count >= minStrictMatch else {
+                return nil
+            }
+            hexPayload = filtered
+        }
+
+        guard hexPayload.count.isMultiple(of: 2) else {
+            return nil
+        }
+
+        var bytes = Data(capacity: hexPayload.count / 2)
+        var index = hexPayload.startIndex
+        while index < hexPayload.endIndex {
+            let nextIndex = hexPayload.index(index, offsetBy: 2)
+            let byteString = hexPayload[index..<nextIndex]
+            guard let byte = UInt8(byteString, radix: 16) else {
+                return nil
+            }
+            bytes.append(byte)
+            index = nextIndex
+        }
+        return bytes
+    }
+
     private func readKeychainJSON(service: String) -> [String: Any]? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -1398,14 +1908,51 @@ final class TokenManager: @unchecked Sendable {
             return nil
         }
 
-        guard let data = result as? Data,
-              let json = try? JSONSerialization.jsonObject(with: data, options: []),
-              let dict = json as? [String: Any] else {
+        guard let data = result as? Data else {
             logger.warning("Keychain payload for service \(service) is not valid JSON")
             return nil
         }
 
-        return dict
+        if let dict = parseJSONDictionary(from: data) {
+            return dict
+        }
+
+        if let rawString = String(data: data, encoding: .utf8) {
+            let sanitized = sanitizeJSONString(rawString).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if let dict = parseJSONStringCandidates(sanitized) {
+                logger.info("Decoded sanitized keychain JSON payload for service \(service)")
+                return dict
+            }
+
+            if let decodedHexData = decodeHexString(sanitized),
+               !decodedHexData.isEmpty {
+                if let dict = parseJSONDictionary(from: decodedHexData) {
+                    logger.info("Decoded hex-encoded keychain JSON payload for service \(service)")
+                    return dict
+                }
+
+                if let decodedHexString = String(data: decodedHexData, encoding: .utf8) {
+                    if let dict = parseJSONStringCandidates(decodedHexString) {
+                        logger.info("Decoded hex-encoded keychain JSON string payload for service \(service)")
+                        return dict
+                    }
+
+                    if let recovered = extractKeychainFieldsFromLoosePayload(decodedHexString) {
+                        logger.info("Recovered keychain auth fields from hex-encoded loose payload for service \(service)")
+                        return recovered
+                    }
+                }
+            }
+
+            if let recovered = extractKeychainFieldsFromLoosePayload(sanitized) {
+                logger.info("Recovered keychain auth fields from loose payload for service \(service)")
+                return recovered
+            }
+        }
+
+        logger.warning("Keychain payload for service \(service) is not valid JSON")
+        return nil
     }
 
     // MARK: - Antigravity Accounts File Reading
@@ -1462,37 +2009,82 @@ final class TokenManager: @unchecked Sendable {
             homeDir
                 .appendingPathComponent(".config")
                 .appendingPathComponent("claude-code")
-                .appendingPathComponent("auth.json"),
-            homeDir
-                .appendingPathComponent(".claude")
-                .appendingPathComponent(".credentials.json")
+                .appendingPathComponent("auth.json")
         ]
     }
 
-    private func readClaudeCodeAuthFiles() -> [ClaudeAuthAccount] {
-        let accessKeys: Set<String> = ["accesstoken", "oauthtoken", "token"]
-        let accountKeys: Set<String> = ["accountid", "userid", "id"]
-        let emailKeys: Set<String> = ["email", "useremail", "login", "username"]
+    /// Possible opencode-anthropic-auth accounts.json locations in priority order:
+    /// 1. $XDG_CONFIG_HOME/opencode/opencode-anthropic-auth/accounts.json (if XDG_CONFIG_HOME is set)
+    /// 2. ~/.config/opencode/opencode-anthropic-auth/accounts.json (plugin default)
+    private func claudeAnthropicAuthPaths() -> [URL] {
+        buildOpenCodeFilePaths(
+            envVarName: "XDG_CONFIG_HOME",
+            envRelativePathComponents: ["opencode", "opencode-anthropic-auth", "accounts.json"],
+            fallbackRelativePathComponents: [
+                [".config", "opencode", "opencode-anthropic-auth", "accounts.json"]
+            ]
+        )
+    }
 
+    func readClaudeAnthropicAuthFiles(at paths: [URL]) -> [ClaudeAuthAccount] {
+        var accounts: [ClaudeAuthAccount] = []
+
+        for path in paths {
+            guard let dict = readJSONDictionary(at: path) else { continue }
+            let rawAccounts = valueForNormalizedKey("accounts", in: dict) as? [Any] ?? [dict]
+            var pathAccounts: [ClaudeAuthAccount] = []
+
+            for rawAccount in rawAccounts {
+                guard let accountDict = rawAccount as? [String: Any] else { continue }
+                if let enabled = valueForNormalizedKey("enabled", in: accountDict) as? Bool,
+                   enabled == false {
+                    logger.info("Including disabled Claude account from opencode-anthropic-auth")
+                }
+                guard let payload = extractClaudeOAuthPayload(from: accountDict) else { continue }
+
+                pathAccounts.append(
+                    ClaudeAuthAccount(
+                        accessToken: payload.accessToken,
+                        accountId: payload.accountId,
+                        email: payload.email,
+                        refreshToken: payload.refreshToken,
+                        expiresAt: payload.expiresAt,
+                        authSource: path.path,
+                        sourceLabels: [claudeSourceLabel(for: .opencodeAuth)],
+                        source: .opencodeAuth
+                    )
+                )
+            }
+
+            if !pathAccounts.isEmpty {
+                logger.info("Loaded \(pathAccounts.count) Claude account(s) from opencode-anthropic-auth at \(path.path)")
+                accounts.append(contentsOf: pathAccounts)
+            }
+        }
+
+        return accounts
+    }
+
+    private func readClaudeAnthropicAuthFiles() -> [ClaudeAuthAccount] {
+        readClaudeAnthropicAuthFiles(at: claudeAnthropicAuthPaths())
+    }
+
+    private func readClaudeCodeAuthFiles() -> [ClaudeAuthAccount] {
         var accounts: [ClaudeAuthAccount] = []
         for path in claudeCodeAuthPaths() {
             guard let dict = readJSONDictionary(at: path) else { continue }
-            guard let accessToken = findStringValue(in: dict, matching: accessKeys) else { continue }
+            guard let payload = extractClaudeOAuthPayload(from: dict) else { continue }
 
-            let accountIdString = findStringValue(in: dict, matching: accountKeys)
-            let accountIdInt = findIntValue(in: dict, matching: accountKeys)
-            let accountId = accountIdString ?? accountIdInt.map { String($0) }
-            let email = findStringValue(in: dict, matching: emailKeys)
-
-            let source: ClaudeAuthSource = path.path.contains(".credentials.json") ? .claudeLegacyCredentials : .claudeCodeConfig
             accounts.append(
                 ClaudeAuthAccount(
-                    accessToken: accessToken,
-                    accountId: accountId,
-                    email: email,
+                    accessToken: payload.accessToken,
+                    accountId: payload.accountId,
+                    email: payload.email,
+                    refreshToken: payload.refreshToken,
+                    expiresAt: payload.expiresAt,
                     authSource: path.path,
-                    sourceLabels: [claudeSourceLabel(for: source)],
-                    source: source
+                    sourceLabels: [claudeSourceLabel(for: .claudeCodeConfig)],
+                    source: .claudeCodeConfig
                 )
             )
         }
@@ -1500,10 +2092,6 @@ final class TokenManager: @unchecked Sendable {
     }
 
     private func readClaudeCodeKeychainAccounts() -> [ClaudeAuthAccount] {
-        let accessKeys: Set<String> = ["accesstoken", "oauthtoken", "token"]
-        let accountKeys: Set<String> = ["accountid", "userid", "id"]
-        let emailKeys: Set<String> = ["email", "useremail", "login", "username"]
-
         let services = [
             "Claude Code-credentials",
             "Claude Code"
@@ -1512,18 +2100,15 @@ final class TokenManager: @unchecked Sendable {
         var accounts: [ClaudeAuthAccount] = []
         for service in services {
             guard let dict = readKeychainJSON(service: service) else { continue }
-            guard let accessToken = findStringValue(in: dict, matching: accessKeys) else { continue }
-
-            let accountIdString = findStringValue(in: dict, matching: accountKeys)
-            let accountIdInt = findIntValue(in: dict, matching: accountKeys)
-            let accountId = accountIdString ?? accountIdInt.map { String($0) }
-            let email = findStringValue(in: dict, matching: emailKeys)
+            guard let payload = extractClaudeOAuthPayload(from: dict) else { continue }
 
             accounts.append(
                 ClaudeAuthAccount(
-                    accessToken: accessToken,
-                    accountId: accountId,
-                    email: email,
+                    accessToken: payload.accessToken,
+                    accountId: payload.accountId,
+                    email: payload.email,
+                    refreshToken: payload.refreshToken,
+                    expiresAt: payload.expiresAt,
                     authSource: "Keychain (\(service))",
                     sourceLabels: [claudeSourceLabel(for: .claudeCodeKeychain)],
                     source: .claudeCodeKeychain
@@ -1557,6 +2142,8 @@ final class TokenManager: @unchecked Sendable {
                     accessToken: access,
                     accountId: auth.anthropic?.accountId,
                     email: nil,
+                    refreshToken: normalizedNonEmpty(auth.anthropic?.refresh),
+                    expiresAt: dateFromEpoch(auth.anthropic?.expires),
                     authSource: authSource,
                     sourceLabels: [claudeSourceLabel(for: .opencodeAuth)],
                     source: .opencodeAuth
@@ -1564,8 +2151,14 @@ final class TokenManager: @unchecked Sendable {
             )
         }
 
-        accounts.append(contentsOf: readClaudeCodeKeychainAccounts())
-        accounts.append(contentsOf: readClaudeCodeAuthFiles())
+        accounts.append(contentsOf: readClaudeAnthropicAuthFiles())
+
+        let keychainAccounts = readClaudeCodeKeychainAccounts()
+        accounts.append(contentsOf: keychainAccounts)
+        if keychainAccounts.isEmpty {
+            logger.info("Claude keychain credentials unavailable; using Claude Code auth file fallback")
+            accounts.append(contentsOf: readClaudeCodeAuthFiles())
+        }
 
         let deduped = dedupeClaudeAccounts(accounts)
         logger.info("Claude accounts discovered: \(deduped.count)")
@@ -1615,11 +2208,24 @@ final class TokenManager: @unchecked Sendable {
         let fallbackEmail = fallback.email?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let mergedSourceLabels = mergeSourceLabels(primary.sourceLabels, fallback.sourceLabels)
+        let primaryRefreshToken = normalizedNonEmpty(primary.refreshToken)
+        let fallbackRefreshToken = normalizedNonEmpty(fallback.refreshToken)
+        let mergedRefreshToken = primaryRefreshToken ?? fallbackRefreshToken
+
+        let mergedExpiresAt: Date?
+        if let primaryExpires = primary.expiresAt,
+           let fallbackExpires = fallback.expiresAt {
+            mergedExpiresAt = max(primaryExpires, fallbackExpires)
+        } else {
+            mergedExpiresAt = primary.expiresAt ?? fallback.expiresAt
+        }
 
         return ClaudeAuthAccount(
             accessToken: primary.accessToken,
             accountId: (primaryAccountId?.isEmpty == false) ? primaryAccountId : fallbackAccountId,
             email: (primaryEmail?.isEmpty == false) ? primaryEmail : fallbackEmail,
+            refreshToken: mergedRefreshToken,
+            expiresAt: mergedExpiresAt,
             authSource: primary.authSource,
             sourceLabels: mergedSourceLabels,
             source: primary.source
@@ -2343,6 +2949,35 @@ final class TokenManager: @unchecked Sendable {
         return auth.chutes?.key
     }
 
+    func getTavilyAPIKey() -> String? {
+        guard let config = readOpenCodeConfigJSON() else { return nil }
+
+        let envKey = nestedString(in: config, path: ["mcp", "tavily", "environment", "TAVILY_API_KEY"])
+        if let resolved = resolveConfigValue(envKey) {
+            return resolved
+        }
+
+        let authorization = nestedString(in: config, path: ["mcp", "tavily", "headers", "Authorization"])
+        if let resolved = resolveConfigValue(authorization) {
+            return resolved
+        }
+
+        let headerKey = nestedString(in: config, path: ["mcp", "tavily", "headers", "X-API-Key"])
+        return resolveConfigValue(headerKey)
+    }
+
+    func getBraveSearchAPIKey() -> String? {
+        guard let config = readOpenCodeConfigJSON() else { return nil }
+
+        let envKey = nestedString(in: config, path: ["mcp", "brave-search", "environment", "BRAVE_API_KEY"])
+        if let resolved = resolveConfigValue(envKey) {
+            return resolved
+        }
+
+        let headerKey = nestedString(in: config, path: ["mcp", "brave-search", "headers", "X-Subscription-Token"])
+        return resolveConfigValue(headerKey)
+    }
+
     /// Gets Gemini refresh token from discovered Gemini account sources
     /// - Returns: Refresh token string if available, nil otherwise
     func getGeminiRefreshToken() -> String? {
@@ -2740,19 +3375,24 @@ final class TokenManager: @unchecked Sendable {
         lines.append("")
         lines.append("[Claude]")
         lines.append("  OpenCode auth.json (\(shortPath(openCodePath))): \(tokenStatus(hasAuth: openCodeAuth != nil, token: openCodeAuth?.anthropic?.access, accountId: openCodeAuth?.anthropic?.accountId))")
-        let claudeTokenKeys: Set<String> = ["accesstoken", "oauthtoken", "token"]
+        let claudeTokenKeys: Set<String> = ["accesstoken", "access", "oauthtoken", "token"]
         let claudeKeychainPrimary = "Claude Code-credentials"
         let claudeKeychainSecondary = "Claude Code"
         lines.append("  Claude Code Keychain (\(claudeKeychainPrimary)): \(keychainStatus(service: claudeKeychainPrimary, tokenKeys: claudeTokenKeys))")
         lines.append("  Claude Code Keychain (\(claudeKeychainSecondary)): \(keychainStatus(service: claudeKeychainSecondary, tokenKeys: claudeTokenKeys))")
 
+        if let anthropicAuthPath = claudeAnthropicAuthPaths().first {
+            let anthropicAccounts = readClaudeAnthropicAuthFiles(at: [anthropicAuthPath])
+            if anthropicAccounts.isEmpty {
+                lines.append("  opencode-anthropic-auth accounts.json (\(shortPath(anthropicAuthPath.path))): \(fileStatus(path: anthropicAuthPath, tokenKeys: claudeTokenKeys))")
+            } else {
+                lines.append("  opencode-anthropic-auth accounts.json (\(shortPath(anthropicAuthPath.path))): FOUND (\(anthropicAccounts.count) account(s))")
+            }
+        }
+
         let claudePaths = claudeCodeAuthPaths()
         if let configPath = claudePaths.first {
             lines.append("  Claude Code auth.json (\(shortPath(configPath.path))): \(fileStatus(path: configPath, tokenKeys: claudeTokenKeys))")
-        }
-        if claudePaths.count > 1 {
-            let legacyPath = claudePaths[1]
-            lines.append("  Claude Legacy credentials (\(shortPath(legacyPath.path))): \(fileStatus(path: legacyPath, tokenKeys: claudeTokenKeys))")
         }
 
         lines.append("")

@@ -107,63 +107,6 @@ extension StatusBarController {
                 }
             }
 
-            submenu.addItem(NSMenuItem.separator())
-            let historyItem = NSMenuItem(title: "Usage History", action: nil, keyEquivalent: "")
-            historyItem.image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Usage History")
-            let historySubmenu = NSMenu()
-
-            let loadingState = OpenCodeZenProvider.loadingState
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "MMM d"
-
-            let historyToDisplay: [DailyUsage]
-            if loadingState.isLoading || !loadingState.dailyHistory.isEmpty {
-                historyToDisplay = loadingState.dailyHistory
-            } else if let history = details.dailyHistory {
-                historyToDisplay = Array(history.prefix(30))
-            } else {
-                historyToDisplay = []
-            }
-
-            if historyToDisplay.isEmpty && !loadingState.isLoading {
-                let noDataItem = NSMenuItem()
-                noDataItem.view = createDisabledLabelView(text: "No history data")
-                historySubmenu.addItem(noDataItem)
-            } else {
-                for day in historyToDisplay.prefix(30) {
-                    let cost = day.billedAmount
-                    let title = String(format: "%@: $%.2f", dateFormatter.string(from: day.date), cost)
-                    let item = NSMenuItem()
-                    item.view = createDisabledLabelView(text: title, monospaced: true)
-                    historySubmenu.addItem(item)
-                }
-
-                if loadingState.isLoading {
-                    historySubmenu.addItem(NSMenuItem.separator())
-                    let loadingText = "Loading day \(loadingState.currentDay)/\(loadingState.totalDays)..."
-                    let loadingItem = NSMenuItem()
-                    loadingItem.view = createDisabledLabelView(
-                        text: loadingText,
-                        icon: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Loading"),
-                        font: NSFont.systemFont(ofSize: 11, weight: .medium)
-                    )
-                    historySubmenu.addItem(loadingItem)
-                }
-
-                if let error = loadingState.lastError, !loadingState.isLoading {
-                    historySubmenu.addItem(NSMenuItem.separator())
-                    let errorItem = NSMenuItem()
-                    errorItem.view = createDisabledLabelView(
-                        text: error,
-                        icon: NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Error")
-                    )
-                    historySubmenu.addItem(errorItem)
-                }
-            }
-
-            historyItem.submenu = historySubmenu
-            submenu.addItem(historyItem)
-
         case .copilot:
             // === Usage ===
             if let used = details.copilotUsedRequests, let limit = details.copilotLimitRequests, limit > 0 {
@@ -267,10 +210,14 @@ extension StatusBarController {
                 submenu.addItem(NSMenuItem.separator())
             }
             if let sonnet = details.sonnetUsage {
+                let sonnetReset = details.sonnetReset ?? details.sevenDayReset
+                if details.sonnetReset == nil, sonnetReset != nil {
+                    debugLog("createDetailSubmenu(claude): Sonnet reset missing, using Weekly reset fallback")
+                }
                 let items = createUsageWindowRow(
                     label: "Sonnet (Weekly)",
                     usagePercent: sonnet,
-                    resetDate: details.sonnetReset,
+                    resetDate: sonnetReset,
                     windowHours: 168
                 )
                 items.forEach { submenu.addItem($0) }
@@ -279,10 +226,14 @@ extension StatusBarController {
                 submenu.addItem(NSMenuItem.separator())
             }
             if let opus = details.opusUsage {
+                let opusReset = details.opusReset ?? details.sevenDayReset
+                if details.opusReset == nil, opusReset != nil {
+                    debugLog("createDetailSubmenu(claude): Opus reset missing, using Weekly reset fallback")
+                }
                 let items = createUsageWindowRow(
                     label: "Opus (Weekly)",
                     usagePercent: opus,
-                    resetDate: details.opusReset,
+                    resetDate: opusReset,
                     windowHours: 168
                 )
                 items.forEach { submenu.addItem($0) }
@@ -319,6 +270,17 @@ extension StatusBarController {
                     )
                     submenu.addItem(usedItem)
                 }
+            }
+
+            if let email = details.email?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !email.isEmpty {
+                submenu.addItem(NSMenuItem.separator())
+                let emailItem = NSMenuItem()
+                emailItem.view = createDisabledLabelView(
+                    text: "Email: \(email)",
+                    icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Email")
+                )
+                submenu.addItem(emailItem)
             }
 
             // === Subscription (includes separator internally) ===
@@ -582,38 +544,14 @@ extension StatusBarController {
             addSubscriptionItems(to: submenu, provider: .zaiCodingPlan, accountId: accountId)
 
         case .nanoGpt:
-            if let dailyUsage = details.tokenUsagePercent {
+            if let weeklyUsage = details.sevenDayUsage {
                 let rows = createUsageWindowRow(
-                    label: "Daily",
-                    usagePercent: dailyUsage,
-                    resetDate: details.tokenUsageReset,
-                    windowHours: 24
+                    label: "Weekly Input Tokens",
+                    usagePercent: weeklyUsage,
+                    resetDate: details.sevenDayReset,
+                    windowHours: 24 * 7
                 )
                 rows.forEach { submenu.addItem($0) }
-            }
-            if let dailyUsed = details.tokenUsageUsed,
-               let dailyTotal = details.tokenUsageTotal {
-                let item = createLimitRow(label: "Daily Units", used: Double(dailyUsed), total: Double(dailyTotal))
-                submenu.addItem(item)
-            }
-
-            if details.tokenUsagePercent != nil, details.mcpUsagePercent != nil {
-                submenu.addItem(NSMenuItem.separator())
-            }
-
-            if let monthlyUsage = details.mcpUsagePercent {
-                let rows = createUsageWindowRow(
-                    label: "Monthly",
-                    usagePercent: monthlyUsage,
-                    resetDate: details.mcpUsageReset,
-                    isMonthly: true
-                )
-                rows.forEach { submenu.addItem($0) }
-            }
-            if let monthlyUsed = details.mcpUsageUsed,
-               let monthlyTotal = details.mcpUsageTotal {
-                let item = createLimitRow(label: "Monthly Units", used: Double(monthlyUsed), total: Double(monthlyTotal))
-                submenu.addItem(item)
             }
 
             if details.creditsBalance != nil || details.totalCredits != nil {
@@ -1059,9 +997,6 @@ extension StatusBarController {
         }
 
         var predictText: String {
-            if predictedFinalUsage > 100 {
-                return String(format: "+%.0f%%", predictedFinalUsage)
-            }
             return String(format: "%.0f%%", predictedFinalUsage)
         }
     }
@@ -1091,8 +1026,21 @@ extension StatusBarController {
         let now = Date()
         let remainingSeconds = resetTime.timeIntervalSince(now)
         let rawElapsedSeconds = windowSeconds - remainingSeconds
-        let elapsedSeconds = max(0, min(windowSeconds, rawElapsedSeconds))
+        let boundedElapsedSeconds = max(0, min(windowSeconds, rawElapsedSeconds))
 
+        // Rolling windows (especially weekly) can show extreme spikes right after usage starts.
+        // Use a stability floor so Speed/Predict are less noisy in very early phases.
+        let minElapsedRatioForForecast: Double
+        if windowHours >= 168 {
+            minElapsedRatioForForecast = 0.5
+        } else if windowHours >= 24 {
+            minElapsedRatioForForecast = 0.25
+        } else {
+            minElapsedRatioForForecast = 0.05
+        }
+
+        let minElapsedSeconds = windowSeconds * minElapsedRatioForForecast
+        let elapsedSeconds = max(boundedElapsedSeconds, minElapsedSeconds)
         let elapsedRatio = max(0, min(1, elapsedSeconds / windowSeconds))
         let usageRatio = usage / 100.0
         let isExhausted = usage >= 100 && remainingSeconds > 0

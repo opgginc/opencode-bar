@@ -75,13 +75,34 @@ struct SwiftUIProviderAlertView: View {
     
     var body: some View {
         HStack(spacing: 2) {
-            Image(systemName: iconName(for: alert.identifier))
-                .font(.system(size: 12))
-                .foregroundColor(.red)
-            
+            iconView(for: alert.identifier)
+
             Text(String(format: "%.0f%%", alert.remainingPercent))
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundColor(.primary)
+        }
+    }
+
+    @ViewBuilder
+    private func iconView(for identifier: ProviderIdentifier) -> some View {
+        if identifier == .tavilySearch {
+            Image("TavilyIcon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 12, height: 12)
+                .foregroundColor(.red)
+        } else if identifier == .braveSearch {
+            Image("BraveSearchIcon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 12, height: 12)
+                .foregroundColor(.red)
+        } else {
+            Image(systemName: iconName(for: identifier))
+                .font(.system(size: 12))
+                .foregroundColor(.red)
         }
     }
     
@@ -99,6 +120,8 @@ struct SwiftUIProviderAlertView: View {
         case .nanoGpt: return "n.circle"
         case .synthetic: return "diamond"
         case .chutes: return "c.circle"
+        case .tavilySearch: return "magnifyingglass"
+        case .braveSearch: return "b.circle"
         }
     }
 }

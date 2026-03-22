@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import os.log
 
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "ClaudeProvider")
@@ -46,6 +47,46 @@ struct ClaudeUsageResponse: Codable {
     }
 }
 
+/// Response structure from Claude profile/account endpoints
+private struct ClaudeAccountIdentityResponse: Decodable {
+    struct Account: Decodable {
+        let uuid: String?
+        let taggedId: String?
+        let email: String?
+        let emailAddress: String?
+
+        enum CodingKeys: String, CodingKey {
+            case uuid
+            case taggedId = "tagged_id"
+            case email
+            case emailAddress = "email_address"
+        }
+    }
+
+    let account: Account?
+    let uuid: String?
+    let taggedId: String?
+    let email: String?
+    let emailAddress: String?
+
+    enum CodingKeys: String, CodingKey {
+        case account
+        case uuid
+        case taggedId = "tagged_id"
+        case email
+        case emailAddress = "email_address"
+    }
+}
+
+private struct ClaudeAPIErrorResponse: Decodable {
+    struct ErrorPayload: Decodable {
+        let message: String?
+        let type: String?
+    }
+
+    let error: ErrorPayload?
+}
+
 // MARK: - ClaudeProvider Implementation
 
 /// Provider for Anthropic Claude API usage tracking
@@ -53,9 +94,11 @@ struct ClaudeUsageResponse: Codable {
 final class ClaudeProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .claude
     let type: ProviderType = .quotaBased
+    let minimumFetchInterval: TimeInterval = 10 * 60
 
     private let tokenManager: TokenManager
     private let session: URLSession
+    private let claudeUsageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")
 
     init(tokenManager: TokenManager = .shared, session: URLSession = .shared) {
         self.tokenManager = tokenManager
@@ -76,32 +119,63 @@ final class ClaudeProvider: ProviderProtocol {
         }
 
         var candidates: [ClaudeAccountCandidate] = []
+        var fetchErrors: [Error] = []
         for account in accounts {
             do {
                 let candidate = try await fetchUsageForAccount(account)
                 candidates.append(candidate)
             } catch {
+                fetchErrors.append(error)
                 logger.warning("Claude account fetch failed (\(account.authSource)): \(error.localizedDescription)")
+                if account.source == .opencodeAuth {
+                    logger.info("Skipping unavailable OpenCode Claude account")
+                    continue
+                }
+                let fallback = await unavailableCandidate(for: account, error: error)
+                candidates.append(fallback)
             }
         }
 
         guard !candidates.isEmpty else {
             logger.error("Failed to fetch Claude usage for any account")
-            throw ProviderError.providerError("All Claude account fetches failed")
+            if let surfacedError = surfacedFetchError(from: fetchErrors) {
+                throw surfacedError
+            }
+            throw ProviderError.authenticationFailed("No active Claude accounts available")
         }
 
         let merged = CandidateDedupe.merge(
             candidates,
-            accountId: { $0.accountId },
-            isSameUsage: isSameUsage,
-            priority: { sourcePriority($0.source) },
+            accountId: { $0.dedupeKey },
+            // OpenCode and Claude/Anthropic can resolve the same account to different
+            // identifiers (for example tagged_id vs uuid). Bridge those sources by email
+            // so one human account still renders as one Claude row.
+            isSameUsage: shouldMergeByEmail,
+            priority: { ($0.hasUsageData ? 100 : 0) + sourcePriority($0.source) },
             mergeCandidates: mergeCandidates
         )
         let sorted = merged.sorted { lhs, rhs in
-            sourcePriority(lhs.source) > sourcePriority(rhs.source)
+            if lhs.hasUsageData != rhs.hasUsageData {
+                return lhs.hasUsageData
+            }
+            return sourcePriority(lhs.source) > sourcePriority(rhs.source)
         }
 
-        let accountResults: [ProviderAccountResult] = sorted.enumerated().map { index, candidate in
+        let hasUsageCandidate = sorted.contains { $0.hasUsageData }
+        let displayCandidates = sorted.filter { candidate in
+            guard hasUsageCandidate, !candidate.hasUsageData else { return true }
+            guard let authError = candidate.details.authErrorMessage?.lowercased(),
+                  authError.contains("token expired"),
+                  let accountId = candidate.accountId?.lowercased(),
+                  accountId.hasPrefix("token:") else {
+                return true
+            }
+
+            logger.info("Suppressing unresolved expired Claude candidate because active account is available")
+            return false
+        }
+
+        let accountResults: [ProviderAccountResult] = displayCandidates.enumerated().map { index, candidate in
             ProviderAccountResult(
                 accountIndex: index,
                 accountId: candidate.accountId,
@@ -110,7 +184,16 @@ final class ClaudeProvider: ProviderProtocol {
             )
         }
 
-        let minRemaining = accountResults.compactMap { $0.usage.remainingQuota }.min() ?? 0
+        let usageAccountResults = accountResults.filter { ($0.usage.totalEntitlement ?? 0) > 0 }
+        guard !usageAccountResults.isEmpty else {
+            logger.error("Failed to fetch Claude usage for every discovered account")
+            if let surfacedError = surfacedFetchError(from: fetchErrors) {
+                throw surfacedError
+            }
+            throw ProviderError.providerError("All Claude account fetches failed")
+        }
+
+        let minRemaining = usageAccountResults.compactMap { $0.usage.remainingQuota }.min() ?? 0
         let usage = ProviderUsage.quotaBased(remaining: minRemaining, entitlement: 100, overagePermitted: false)
 
         return ProviderResult(
@@ -121,11 +204,20 @@ final class ClaudeProvider: ProviderProtocol {
     }
 
     private struct ClaudeAccountCandidate {
+        let dedupeKey: String
         let accountId: String?
         let usage: ProviderUsage
         let details: DetailedUsage
         let sourceLabels: [String]
         let source: ClaudeAuthSource
+        let hasUsageData: Bool
+    }
+
+    private struct ClaudeResolvedIdentity {
+        let dedupeKey: String
+        let accountId: String?
+        let email: String?
+        let displayAccountId: String
     }
 
     private func sourcePriority(_ source: ClaudeAuthSource) -> Int {
@@ -179,25 +271,208 @@ final class ClaudeProvider: ProviderProtocol {
         let mergedLabels = mergeSourceLabels(primary.sourceLabels, secondary.sourceLabels)
         var mergedDetails = primary.details
         mergedDetails.authUsageSummary = sourceSummary(mergedLabels, fallback: "Unknown")
+        if mergedDetails.email == nil || mergedDetails.email?.isEmpty == true {
+            mergedDetails.email = secondary.details.email
+        }
+        if mergedDetails.authErrorMessage == nil || mergedDetails.authErrorMessage?.isEmpty == true {
+            mergedDetails.authErrorMessage = secondary.details.authErrorMessage
+        }
+
+        let mergedAccountId: String?
+        if let primaryId = normalizedNonEmpty(primary.accountId),
+           !primaryId.hasPrefix("token:") {
+            mergedAccountId = primaryId
+        } else if let secondaryId = normalizedNonEmpty(secondary.accountId) {
+            mergedAccountId = secondaryId
+        } else {
+            mergedAccountId = normalizedNonEmpty(primary.accountId)
+        }
 
         return ClaudeAccountCandidate(
-            accountId: primary.accountId,
+            dedupeKey: primary.dedupeKey,
+            accountId: mergedAccountId,
             usage: primary.usage,
             details: mergedDetails,
             sourceLabels: mergedLabels,
-            source: primary.source
+            source: primary.source,
+            hasUsageData: primary.hasUsageData || secondary.hasUsageData
         )
     }
 
-    private func fetchUsageForAccount(_ account: ClaudeAuthAccount) async throws -> ClaudeAccountCandidate {
-        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
+    private func shouldMergeByEmail(_ lhs: ClaudeAccountCandidate, _ rhs: ClaudeAccountCandidate) -> Bool {
+        guard let lhsEmail = normalizedNonEmpty(lhs.details.email, lowercase: true),
+              let rhsEmail = normalizedNonEmpty(rhs.details.email, lowercase: true),
+              lhsEmail == rhsEmail else {
+            return false
+        }
+
+        if lhs.dedupeKey != rhs.dedupeKey {
+            logger.info("Bridging Claude accounts by email across mixed identifiers: \(lhsEmail)")
+        }
+        return true
+    }
+
+    private func normalizedNonEmpty(_ value: String?, lowercase: Bool = false) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return lowercase ? trimmed.lowercased() : trimmed
+    }
+
+    private func tokenFingerprint(_ token: String) -> String {
+        let digest = SHA256.hash(data: Data(token.utf8))
+        let full = digest.map { String(format: "%02x", $0) }.joined()
+        return String(full.prefix(12))
+    }
+
+    private func fetchAccountIdentity(accessToken: String) async -> (accountId: String?, email: String?)? {
+        let endpoints = [
+            "/api/oauth/profile",
+            "/api/oauth/account"
+        ]
+
+        for endpoint in endpoints {
+            guard let url = URL(string: "https://api.anthropic.com\(endpoint)") else { continue }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+
+            do {
+                let (data, response) = try await session.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    logger.warning("Claude identity endpoint returned invalid response type: \(endpoint)")
+                    continue
+                }
+
+                if httpResponse.statusCode == 401 {
+                    logger.warning("Claude identity endpoint unauthorized: \(endpoint)")
+                    return nil
+                }
+
+                guard (200...299).contains(httpResponse.statusCode) else {
+                    logger.debug("Claude identity endpoint skipped: \(endpoint) status=\(httpResponse.statusCode)")
+                    continue
+                }
+
+                let payload = try JSONDecoder().decode(ClaudeAccountIdentityResponse.self, from: data)
+                let resolvedAccountId = normalizedNonEmpty(
+                    payload.account?.uuid
+                    ?? payload.account?.taggedId
+                    ?? payload.uuid
+                    ?? payload.taggedId
+                )
+                let resolvedEmail = normalizedNonEmpty(
+                    payload.account?.email
+                    ?? payload.account?.emailAddress
+                    ?? payload.email
+                    ?? payload.emailAddress,
+                    lowercase: true
+                )
+
+                if resolvedAccountId != nil || resolvedEmail != nil {
+                    logger.debug(
+                        "Claude identity resolved via \(endpoint): accountId=\(resolvedAccountId != nil), email=\(resolvedEmail != nil)"
+                    )
+                    return (accountId: resolvedAccountId, email: resolvedEmail)
+                }
+            } catch {
+                logger.debug("Claude identity endpoint failed (\(endpoint)): \(error.localizedDescription)")
+            }
+        }
+
+        return nil
+    }
+
+    private func resolveAccountIdentity(_ account: ClaudeAuthAccount) async -> ClaudeResolvedIdentity {
+        var resolvedAccountId = normalizedNonEmpty(account.accountId)
+        var resolvedEmail = normalizedNonEmpty(account.email, lowercase: true)
+
+        if resolvedAccountId == nil || resolvedEmail == nil,
+           let apiIdentity = await fetchAccountIdentity(accessToken: account.accessToken) {
+            if resolvedAccountId == nil {
+                resolvedAccountId = apiIdentity.accountId
+            }
+            if resolvedEmail == nil {
+                resolvedEmail = apiIdentity.email
+            }
+        }
+
+        let dedupeKey: String
+        if let resolvedAccountId {
+            dedupeKey = "id:\(resolvedAccountId)"
+        } else if let resolvedEmail {
+            dedupeKey = "email:\(resolvedEmail)"
+        } else {
+            dedupeKey = "token:\(tokenFingerprint(account.accessToken))"
+        }
+
+        let displayAccountId = resolvedAccountId ?? resolvedEmail ?? dedupeKey
+        return ClaudeResolvedIdentity(
+            dedupeKey: dedupeKey,
+            accountId: resolvedAccountId,
+            email: resolvedEmail,
+            displayAccountId: displayAccountId
+        )
+    }
+
+    private func isRateLimitError(_ error: Error) -> Bool {
+        let message: String
+        if let providerError = error as? ProviderError {
+            message = providerError.localizedDescription
+        } else {
+            message = error.localizedDescription
+        }
+
+        let lowercased = message.lowercased()
+        return lowercased.contains("rate limited")
+            || lowercased.contains("rate_limit_error")
+            || lowercased.contains("too many requests")
+            || lowercased.contains("http 429")
+    }
+
+    private func authErrorMessage(for account: ClaudeAuthAccount, error: Error) -> String {
+        if isRateLimitError(error) { return "Rate limited" }
+        if let p = error as? ProviderError, case .authenticationFailed(let m) = p,
+           m.lowercased().contains("token expired") { return "Token expired" }
+        return "Authentication failed"
+    }
+
+    private func surfacedFetchError(from errors: [Error]) -> ProviderError? {
+        guard !errors.isEmpty else { return nil }
+
+        if errors.contains(where: isRateLimitError) {
+            return ProviderError.networkError("Rate limited. Please try again later.")
+        }
+
+        if let firstProviderError = errors.compactMap({ $0 as? ProviderError }).first {
+            return firstProviderError
+        }
+
+        return ProviderError.providerError(errors[0].localizedDescription)
+    }
+
+    private func parseClaudeAPIErrorMessage(from data: Data) -> String? {
+        guard let payload = try? JSONDecoder().decode(ClaudeAPIErrorResponse.self, from: data),
+              let message = payload.error?.message?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !message.isEmpty else {
+            return nil
+        }
+
+        return message
+    }
+
+    private func requestClaudeUsageData(accessToken: String) async throws -> Data {
+        guard let url = claudeUsageEndpoint else {
             logger.error("Invalid Claude API URL")
             throw ProviderError.networkError("Invalid API endpoint")
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
 
         let (data, response) = try await session.data(for: request)
@@ -212,10 +487,52 @@ final class ClaudeProvider: ProviderProtocol {
             throw ProviderError.authenticationFailed("Token expired or invalid")
         }
 
-        guard (200...299).contains(httpResponse.statusCode) else {
-            logger.error("Claude API returned status \(httpResponse.statusCode)")
-            throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
+        if httpResponse.statusCode == 429 {
+            let message = parseClaudeAPIErrorMessage(from: data) ?? "Rate limited. Please try again later."
+            logger.warning("Claude API returned 429 - \(message)")
+            throw ProviderError.networkError(message)
         }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let message = parseClaudeAPIErrorMessage(from: data) ?? "HTTP \(httpResponse.statusCode)"
+            logger.error("Claude API returned status \(httpResponse.statusCode): \(message)")
+            throw ProviderError.networkError(message)
+        }
+
+        return data
+    }
+
+    private func unavailableCandidate(for account: ClaudeAuthAccount, error: Error) async -> ClaudeAccountCandidate {
+        let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
+        let authUsageSummary = sourceSummary(sourceLabels, fallback: "Unknown")
+        let identity = await resolveAccountIdentity(account)
+
+        logger.info(
+            "Claude account fallback (\(authUsageSummary)): reason=\(error.localizedDescription)"
+        )
+
+        let details = DetailedUsage(
+            email: identity.email,
+            authSource: account.authSource,
+            authUsageSummary: authUsageSummary,
+            authErrorMessage: authErrorMessage(for: account, error: error)
+        )
+
+        return ClaudeAccountCandidate(
+            dedupeKey: identity.dedupeKey,
+            accountId: identity.displayAccountId,
+            usage: ProviderUsage.quotaBased(remaining: 0, entitlement: 0, overagePermitted: false),
+            details: details,
+            sourceLabels: sourceLabels,
+            source: account.source,
+            hasUsageData: false
+        )
+    }
+
+    private func fetchUsageForAccount(_ account: ClaudeAuthAccount) async throws -> ClaudeAccountCandidate {
+        // No token refresh here — refresh tokens are single-use.
+        // If this app consumes the refresh token, OpenCode can no longer re-authenticate.
+        let data = try await requestClaudeUsageData(accessToken: account.accessToken)
 
         do {
             let decoder = JSONDecoder()
@@ -257,8 +574,10 @@ final class ClaudeProvider: ProviderProtocol {
 
             let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
             let authUsageSummary = sourceSummary(sourceLabels, fallback: "Unknown")
+            let identity = await resolveAccountIdentity(account)
 
             logger.info("Claude usage fetched (\(authUsageSummary)): 7d=\(utilization)%, 5h=\(fiveHourUsage?.description ?? "N/A")%")
+            logger.debug("Claude account identity (\(authUsageSummary)): dedupeKey=\(identity.dedupeKey), accountId=\(identity.accountId ?? "nil"), email=\(identity.email ?? "nil")")
 
             if let extraUsageEnabled {
                 let limitUSD = (extraUsageMonthlyLimitCredits ?? 0) / 100.0
@@ -287,16 +606,19 @@ final class ClaudeProvider: ProviderProtocol {
                 extraUsageMonthlyLimitUSD: extraUsageMonthlyLimitCredits.map { $0 / 100.0 },
                 extraUsageUsedUSD: extraUsageUsedCredits.map { $0 / 100.0 },
                 extraUsageUtilizationPercent: extraUsageUtilizationPercent,
+                email: identity.email,
                 authSource: account.authSource,
                 authUsageSummary: authUsageSummary
             )
 
             return ClaudeAccountCandidate(
-                accountId: account.accountId ?? account.email,
+                dedupeKey: identity.dedupeKey,
+                accountId: identity.displayAccountId,
                 usage: usage,
                 details: details,
                 sourceLabels: sourceLabels,
-                source: account.source
+                source: account.source,
+                hasUsageData: true
             )
         } catch let error as DecodingError {
             logger.error("Failed to decode Claude response: \(error.localizedDescription)")
@@ -307,22 +629,4 @@ final class ClaudeProvider: ProviderProtocol {
         }
     }
 
-    private func isSameUsage(_ lhs: ClaudeAccountCandidate, _ rhs: ClaudeAccountCandidate) -> Bool {
-        let weeklyMatch = lhs.details.sevenDayUsage == rhs.details.sevenDayUsage
-        let fiveHourMatch = lhs.details.fiveHourUsage == rhs.details.fiveHourUsage
-        let sevenDayResetMatch = sameDate(lhs.details.sevenDayReset, rhs.details.sevenDayReset)
-        let fiveHourResetMatch = sameDate(lhs.details.fiveHourReset, rhs.details.fiveHourReset)
-        return weeklyMatch && fiveHourMatch && sevenDayResetMatch && fiveHourResetMatch
-    }
-
-    private func sameDate(_ lhs: Date?, _ rhs: Date?) -> Bool {
-        switch (lhs, rhs) {
-        case (nil, nil):
-            return true
-        case let (left?, right?):
-            return Int(left.timeIntervalSince1970) == Int(right.timeIntervalSince1970)
-        default:
-            return false
-        }
-    }
 }

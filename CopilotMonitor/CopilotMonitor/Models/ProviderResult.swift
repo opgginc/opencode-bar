@@ -127,6 +127,8 @@ struct DetailedUsage {
     var authSource: String?
     // Human-friendly source labels (displayed as "Using in:")
     var authUsageSummary: String?
+    // Authentication failure hint for account-level fallback rows.
+    var authErrorMessage: String?
 
     // Multiple Gemini accounts support
     let geminiAccounts: [GeminiAccountQuota]?
@@ -196,6 +198,7 @@ struct DetailedUsage {
         creditsTotal: Double? = nil,
         authSource: String? = nil,
         authUsageSummary: String? = nil,
+        authErrorMessage: String? = nil,
         geminiAccounts: [GeminiAccountQuota]? = nil,
         tokenUsagePercent: Double? = nil,
         tokenUsageReset: Date? = nil,
@@ -258,6 +261,7 @@ struct DetailedUsage {
         self.creditsTotal = creditsTotal
         self.authSource = authSource
         self.authUsageSummary = authUsageSummary
+        self.authErrorMessage = authErrorMessage
         self.geminiAccounts = geminiAccounts
         self.tokenUsagePercent = tokenUsagePercent
         self.tokenUsageReset = tokenUsageReset
@@ -292,7 +296,7 @@ extension DetailedUsage: Codable {
         case extraUsageMonthlyLimitUSD, extraUsageUsedUSD, extraUsageUtilizationPercent
         case sessions, messages, avgCostPerDay, email
         case dailyHistory, monthlyCost, creditsRemaining, creditsTotal
-        case authSource, authUsageSummary, geminiAccounts
+        case authSource, authUsageSummary, authErrorMessage, geminiAccounts
         case tokenUsagePercent, tokenUsageReset, tokenUsageUsed, tokenUsageTotal
         case mcpUsagePercent, mcpUsageReset, mcpUsageUsed, mcpUsageTotal
         case modelUsageTokens, modelUsageCalls
@@ -344,6 +348,7 @@ extension DetailedUsage: Codable {
         creditsTotal = try container.decodeIfPresent(Double.self, forKey: .creditsTotal)
         authSource = try container.decodeIfPresent(String.self, forKey: .authSource)
         authUsageSummary = try container.decodeIfPresent(String.self, forKey: .authUsageSummary)
+        authErrorMessage = try container.decodeIfPresent(String.self, forKey: .authErrorMessage)
         geminiAccounts = try container.decodeIfPresent([GeminiAccountQuota].self, forKey: .geminiAccounts)
         tokenUsagePercent = try container.decodeIfPresent(Double.self, forKey: .tokenUsagePercent)
         tokenUsageReset = try container.decodeIfPresent(Date.self, forKey: .tokenUsageReset)
@@ -409,6 +414,7 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(creditsTotal, forKey: .creditsTotal)
         try container.encodeIfPresent(authSource, forKey: .authSource)
         try container.encodeIfPresent(authUsageSummary, forKey: .authUsageSummary)
+        try container.encodeIfPresent(authErrorMessage, forKey: .authErrorMessage)
         try container.encodeIfPresent(geminiAccounts, forKey: .geminiAccounts)
         try container.encodeIfPresent(tokenUsagePercent, forKey: .tokenUsagePercent)
         try container.encodeIfPresent(tokenUsageReset, forKey: .tokenUsageReset)
@@ -428,6 +434,391 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(copilotUsedRequests, forKey: .copilotUsedRequests)
         try container.encodeIfPresent(copilotLimitRequests, forKey: .copilotLimitRequests)
         try container.encodeIfPresent(copilotQuotaResetDateUTC, forKey: .copilotQuotaResetDateUTC)
+    }
+}
+
+enum FormatterError: LocalizedError {
+    case encodingFailed
+    case invalidData
+
+    var errorDescription: String? {
+        switch self {
+        case .encodingFailed:
+            return "Failed to encode data to JSON"
+        case .invalidData:
+            return "Invalid data format"
+        }
+    }
+}
+
+struct JSONFormatter {
+    static func format(_ results: [ProviderIdentifier: ProviderResult]) throws -> String {
+        var jsonDict: [String: [String: Any]] = [:]
+
+        for (identifier, result) in results {
+            var providerDict: [String: Any] = [:]
+
+            switch result.usage {
+            case .payAsYouGo(_, let cost, let resetsAt):
+                providerDict["type"] = "pay-as-you-go"
+                if let cost = cost {
+                    providerDict["cost"] = cost
+                }
+                if let resetsAt = resetsAt {
+                    let formatter = ISO8601DateFormatter()
+                    providerDict["resetsAt"] = formatter.string(from: resetsAt)
+                }
+
+            case .quotaBased(let remaining, let entitlement, let overagePermitted):
+                providerDict["type"] = "quota-based"
+                providerDict["remaining"] = remaining
+                providerDict["entitlement"] = entitlement
+                providerDict["overagePermitted"] = overagePermitted
+                providerDict["usagePercentage"] = result.usage.usagePercentage
+            }
+
+            // Z.AI: include both token and MCP usage percentages
+            if identifier == .zaiCodingPlan {
+                if let tokenPercent = result.details?.tokenUsagePercent {
+                    providerDict["tokenUsagePercent"] = tokenPercent
+                }
+                if let mcpPercent = result.details?.mcpUsagePercent {
+                    providerDict["mcpUsagePercent"] = mcpPercent
+                }
+            }
+
+            if identifier == .geminiCLI, let accounts = result.details?.geminiAccounts, !accounts.isEmpty {
+                var accountsArray: [[String: Any]] = []
+                for account in accounts {
+                    var accountDict: [String: Any] = [:]
+                    accountDict["index"] = account.accountIndex
+                    accountDict["email"] = account.email
+                    if let accountId = account.accountId, !accountId.isEmpty {
+                        accountDict["accountId"] = accountId
+                    }
+                    accountDict["remainingPercentage"] = account.remainingPercentage
+                    accountDict["modelBreakdown"] = account.modelBreakdown
+                    accountDict["authSource"] = account.authSource
+                    accountsArray.append(accountDict)
+                }
+                providerDict["accounts"] = accountsArray
+            }
+
+            if let accounts = result.accounts, accounts.count > 1 {
+                var accountsArray: [[String: Any]] = []
+                for account in accounts {
+                    var accountDict: [String: Any] = [:]
+                    accountDict["index"] = account.accountIndex
+                    if let accountId = account.accountId {
+                        accountDict["accountId"] = accountId
+                    }
+                    if let authSource = account.details?.authSource {
+                        accountDict["authSource"] = authSource
+                    }
+                    accountDict["usagePercentage"] = account.usage.usagePercentage
+
+                    switch account.usage {
+                    case .quotaBased(let remaining, let entitlement, let overagePermitted):
+                        accountDict["remaining"] = remaining
+                        accountDict["entitlement"] = entitlement
+                        accountDict["overagePermitted"] = overagePermitted
+                    case .payAsYouGo(_, let cost, _):
+                        if let cost = cost {
+                            accountDict["cost"] = cost
+                        }
+                    }
+
+                    accountsArray.append(accountDict)
+                }
+                providerDict["accounts"] = accountsArray
+            }
+
+            jsonDict[identifier.rawValue] = providerDict
+        }
+
+        let jsonData = try JSONSerialization.data(withJSONObject: jsonDict, options: [.prettyPrinted, .sortedKeys])
+        guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+            throw FormatterError.encodingFailed
+        }
+
+        return jsonString
+    }
+}
+
+struct TableFormatter {
+    private static let minProviderWidth = 20
+    private static let typeWidth = 15
+    private static let usageWidth = 10
+
+    private static func accountLabel(identifier: ProviderIdentifier, account: ProviderAccountResult) -> String {
+        if let accountId = account.accountId, !accountId.isEmpty {
+            return "\(identifier.displayName) (\(accountId))"
+        } else {
+            return "\(identifier.displayName) (#\(account.accountIndex + 1))"
+        }
+    }
+
+    private static func geminiLabel(account: GeminiAccountQuota) -> String {
+        return "Gemini (#\(account.accountIndex + 1))"
+    }
+
+    private static func shortenAuthSource(_ source: String) -> String {
+        if source.hasPrefix("/") || source.hasPrefix("~") {
+            return (source as NSString).lastPathComponent
+        }
+        return source
+    }
+
+    private static func computeMetricsWidth(
+        _ sortedResults: [(key: ProviderIdentifier, value: ProviderResult)]
+    ) -> Int {
+        let minMetricsWidth = 30
+        var maxWidth = minMetricsWidth
+        for (identifier, result) in sortedResults {
+            if identifier == .geminiCLI,
+               let accounts = result.details?.geminiAccounts,
+               accounts.count > 1 {
+                for account in accounts {
+                    let metricsStr: String
+                    if let accountId = account.accountId, !accountId.isEmpty {
+                        metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email), id: \(accountId))"
+                    } else {
+                        metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email))"
+                    }
+                    maxWidth = max(maxWidth, metricsStr.count)
+                }
+            } else if let accounts = result.accounts, accounts.count > 1 {
+                for account in accounts {
+                    let metricsStr: String
+                    switch account.usage {
+                    case .payAsYouGo(_, let cost, _):
+                        if let cost = cost {
+                            metricsStr = String(format: "$%.2f spent", cost)
+                        } else {
+                            metricsStr = "Cost unavailable"
+                        }
+                    case .quotaBased(let remaining, let entitlement, let overagePermitted):
+                        if remaining >= 0 {
+                            metricsStr = "\(remaining)/\(entitlement) remaining"
+                        } else {
+                            let overage = abs(remaining)
+                            metricsStr = overagePermitted ? "\(overage) overage (allowed)" : "\(overage) overage (not allowed)"
+                        }
+                    }
+                    let source = account.details?.authSource ?? ""
+                    let sourceLabel = source.isEmpty ? "" : " [\(shortenAuthSource(source))]"
+                    maxWidth = max(maxWidth, metricsStr.count + sourceLabel.count)
+                }
+            } else {
+                maxWidth = max(maxWidth, formatMetrics(result).count)
+            }
+        }
+        return maxWidth
+    }
+
+    private static func computeProviderWidth(
+        _ sortedResults: [(key: ProviderIdentifier, value: ProviderResult)]
+    ) -> Int {
+        var maxWidth = minProviderWidth
+        for (identifier, result) in sortedResults {
+            if identifier == .geminiCLI,
+               let accounts = result.details?.geminiAccounts,
+               accounts.count > 1 {
+                for account in accounts {
+                    maxWidth = max(maxWidth, geminiLabel(account: account).count)
+                }
+            } else if let accounts = result.accounts, accounts.count > 1 {
+                for account in accounts {
+                    maxWidth = max(maxWidth, accountLabel(identifier: identifier, account: account).count)
+                }
+            } else {
+                maxWidth = max(maxWidth, identifier.displayName.count)
+            }
+        }
+        return maxWidth
+    }
+
+    static func format(_ results: [ProviderIdentifier: ProviderResult]) -> String {
+        guard !results.isEmpty else {
+            return "No provider data available"
+        }
+
+        let sortedResults = results.sorted { $0.key.displayName < $1.key.displayName }
+        let providerWidth = computeProviderWidth(sortedResults)
+        let metricsWidth = computeMetricsWidth(sortedResults)
+
+        var output = ""
+
+        output += formatHeader(providerWidth: providerWidth)
+        output += "\n"
+        output += formatSeparator(providerWidth: providerWidth, metricsWidth: metricsWidth)
+        output += "\n"
+
+        for (identifier, result) in sortedResults {
+            if identifier == .geminiCLI,
+               let accounts = result.details?.geminiAccounts,
+               accounts.count > 1 {
+                for account in accounts {
+                    output += formatGeminiAccountRow(account: account, providerWidth: providerWidth)
+                    output += "\n"
+                }
+            } else if let accounts = result.accounts, accounts.count > 1 {
+                for account in accounts {
+                    output += formatAccountRow(identifier: identifier, account: account, providerWidth: providerWidth)
+                    output += "\n"
+                }
+            } else {
+                output += formatRow(identifier: identifier, result: result, providerWidth: providerWidth)
+                output += "\n"
+            }
+        }
+
+        return output
+    }
+
+    private static func formatHeader(providerWidth: Int) -> String {
+        let provider = "Provider".padding(toLength: providerWidth, withPad: " ", startingAt: 0)
+        let type = "Type".padding(toLength: typeWidth, withPad: " ", startingAt: 0)
+        let usage = "Usage".padding(toLength: usageWidth, withPad: " ", startingAt: 0)
+        let metrics = "Key Metrics"
+
+        return "\(provider)  \(type)  \(usage)  \(metrics)"
+    }
+
+    private static func formatSeparator(providerWidth: Int, metricsWidth: Int) -> String {
+        let totalWidth = providerWidth + typeWidth + usageWidth + metricsWidth + 6
+        return String(repeating: "─", count: totalWidth)
+    }
+
+    private static func formatRow(identifier: ProviderIdentifier, result: ProviderResult, providerWidth: Int) -> String {
+        let providerName = identifier.displayName
+        let providerPadded = providerName.padding(toLength: providerWidth, withPad: " ", startingAt: 0)
+
+        let typeStr = getProviderType(result)
+        let typePadded = typeStr.padding(toLength: typeWidth, withPad: " ", startingAt: 0)
+
+        let usageStr = formatUsagePercentage(identifier: identifier, result: result)
+        let usagePadded = usageStr.padding(toLength: usageWidth, withPad: " ", startingAt: 0)
+
+        let metricsStr = formatMetrics(result)
+
+        return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)"
+    }
+
+    private static func getProviderType(_ result: ProviderResult) -> String {
+        switch result.usage {
+        case .payAsYouGo:
+            return "Pay-as-you-go"
+        case .quotaBased:
+            return "Quota-based"
+        }
+    }
+
+    private static func formatUsagePercentage(identifier: ProviderIdentifier, result: ProviderResult) -> String {
+        switch result.usage {
+        case .payAsYouGo:
+            // Pay-as-you-go doesn't have meaningful usage percentage - show dash
+            return "-"
+        case .quotaBased:
+            // Z.AI: show both token and MCP percentages when both are available
+            if identifier == .zaiCodingPlan {
+                let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
+                if percents.count == 2 {
+                    return percents.map { String(format: "%.0f%%", $0) }.joined(separator: ",")
+                }
+            }
+            let percentage = result.usage.usagePercentage
+            return String(format: "%.0f%%", percentage)
+        }
+    }
+
+    private static func formatGeminiAccountRow(account: GeminiAccountQuota, providerWidth: Int) -> String {
+        let label = geminiLabel(account: account)
+        let providerPadded = label.padding(toLength: providerWidth, withPad: " ", startingAt: 0)
+        let typePadded = "Quota-based".padding(toLength: typeWidth, withPad: " ", startingAt: 0)
+        let usageStr = String(format: "%.0f%%", 100 - account.remainingPercentage)
+        let usagePadded = usageStr.padding(toLength: usageWidth, withPad: " ", startingAt: 0)
+
+        let metricsStr: String
+        if let accountId = account.accountId, !accountId.isEmpty {
+            metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email), id: \(accountId))"
+        } else {
+            metricsStr = "\(String(format: "%.0f", account.remainingPercentage))% remaining (\(account.email))"
+        }
+
+        return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)"
+    }
+
+    private static func formatAccountRow(identifier: ProviderIdentifier, account: ProviderAccountResult, providerWidth: Int) -> String {
+        let label = accountLabel(identifier: identifier, account: account)
+        let providerPadded = label.padding(toLength: providerWidth, withPad: " ", startingAt: 0)
+
+        let typeStr: String
+        let usageStr: String
+        let metricsStr: String
+
+        switch account.usage {
+        case .payAsYouGo(_, let cost, _):
+            typeStr = "Pay-as-you-go"
+            usageStr = "-"
+            if let cost = cost {
+                metricsStr = String(format: "$%.2f spent", cost)
+            } else {
+                metricsStr = "Cost unavailable"
+            }
+        case .quotaBased(let remaining, let entitlement, let overagePermitted):
+            typeStr = "Quota-based"
+            let percentage = account.usage.usagePercentage
+            usageStr = String(format: "%.0f%%", percentage)
+            if remaining >= 0 {
+                metricsStr = "\(remaining)/\(entitlement) remaining"
+            } else {
+                let overage = abs(remaining)
+                metricsStr = overagePermitted ? "\(overage) overage (allowed)" : "\(overage) overage (not allowed)"
+            }
+        }
+
+        let source = account.details?.authSource ?? ""
+        let sourceLabel = source.isEmpty ? "" : " [\(shortenAuthSource(source))]"
+
+        let typePadded = typeStr.padding(toLength: typeWidth, withPad: " ", startingAt: 0)
+        let usagePadded = usageStr.padding(toLength: usageWidth, withPad: " ", startingAt: 0)
+
+        return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)\(sourceLabel)"
+    }
+
+    private static func formatMetrics(_ result: ProviderResult) -> String {
+        switch result.usage {
+        case .payAsYouGo(_, let cost, let resetsAt):
+            var metrics = ""
+
+            if let cost = cost {
+                metrics += String(format: "$%.2f spent", cost)
+            } else {
+                metrics += "Cost unavailable"
+            }
+
+            if let resetsAt = resetsAt {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "MMM d"
+                let resetDate = formatter.string(from: resetsAt)
+                metrics += " (resets \(resetDate))"
+            }
+
+            return metrics
+
+        case .quotaBased(let remaining, let entitlement, let overagePermitted):
+            if remaining >= 0 {
+                return "\(remaining)/\(entitlement) remaining"
+            } else {
+                let overage = abs(remaining)
+                if overagePermitted {
+                    return "\(overage) overage (allowed)"
+                } else {
+                    return "\(overage) overage (not allowed)"
+                }
+            }
+        }
     }
 }
 
@@ -522,6 +913,43 @@ enum APIValueParser {
     }
 }
 
+enum ProviderDisplayPolicy {
+    static func shouldShowRateLimitedErrorRow(
+        identifier: ProviderIdentifier,
+        errorMessage: String,
+        result: ProviderResult?
+    ) -> Bool {
+        guard isRateLimitError(errorMessage) else { return false }
+        return !hasDisplayableAccountRows(identifier: identifier, result: result)
+    }
+
+    static func hasDisplayableAccountRows(
+        identifier: ProviderIdentifier,
+        result: ProviderResult?
+    ) -> Bool {
+        guard let result else { return false }
+
+        switch identifier {
+        case .claude, .codex, .copilot:
+            guard let accounts = result.accounts else { return false }
+            return !accounts.isEmpty
+        case .geminiCLI:
+            guard let accounts = result.details?.geminiAccounts else { return false }
+            return !accounts.isEmpty
+        default:
+            return false
+        }
+    }
+
+    private static func isRateLimitError(_ errorMessage: String) -> Bool {
+        let lowercased = errorMessage.lowercased()
+        return lowercased.contains("rate limited")
+            || lowercased.contains("rate_limit_error")
+            || lowercased.contains("http 429")
+            || lowercased.contains("too many requests")
+    }
+}
+
 extension DetailedUsage {
     var hasAnyValue: Bool {
         return dailyUsage != nil || weeklyUsage != nil || monthlyUsage != nil
@@ -541,7 +969,7 @@ extension DetailedUsage {
             || email != nil
             || dailyHistory != nil || monthlyCost != nil
             || creditsRemaining != nil || creditsTotal != nil
-            || authSource != nil || authUsageSummary != nil || geminiAccounts != nil
+            || authSource != nil || authUsageSummary != nil || authErrorMessage != nil || geminiAccounts != nil
             || tokenUsagePercent != nil || tokenUsageReset != nil
             || tokenUsageUsed != nil || tokenUsageTotal != nil
             || mcpUsagePercent != nil || mcpUsageReset != nil

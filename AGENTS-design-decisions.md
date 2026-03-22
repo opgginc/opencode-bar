@@ -129,6 +129,14 @@ Quit (⌘Q)
   - Example: `Codex: 0%, 100%, 3%, 50%` where 0% is 5h usage, 100% is 7d usage, 3% is 5h Spark usage, 50% is 7d Spark usage
   - Each percentage is individually colored based on thresholds  
 
+### Status Bar Icon Rules (IMMUTABLE)
+- **Primary Icon Must Stay Visible**: The original OpenCode Bar status icon is always rendered in the macOS status bar.
+- **Provider Icon Is Additive**: Provider identity is shown as an extra icon beside the primary icon, never as a replacement for the primary icon.
+- **Settings Label**: The status bar settings label must use `Show Provider Icon` (not provider-name text wording).
+- **Gemini Icon Scale**: Gemini icon should be slightly larger than default provider icons to match official visual balance.
+  - Menu/icon token reference: `MenuDesignToken.Dimension.geminiIconSize`
+  - Status bar rendering rule: apply the larger provider icon size for Gemini-class icon assets.
+
 ### Multi-Account Provider Rules (from PR #55)
 - **CandidateDedupe**: Use shared `CandidateDedupe.merge()` for deduplicating multi-account providers
 - **isReadableFile Check**: Always verify file readability before accessing auth files

@@ -6,16 +6,41 @@ private let logger = Logger(subsystem: "com.opencodeproviders", category: "NanoG
 private struct NanoGptSubscriptionUsageResponse: Decodable {
     struct Limits: Decodable {
         let daily: Int?
+        let weeklyInputTokens: Int?
         let monthly: Int?
 
         private enum CodingKeys: String, CodingKey {
             case daily
+            case dailyInputTokens
+            case dailyInputTokensSnake = "daily_input_tokens"
+            case weeklyInputTokens
+            case weeklyInputTokensSnake = "weekly_input_tokens"
+            case weekly
+            case weeklyInputToken
+            case weeklyInputTokenSnake = "weekly_input_token"
+            case weeklyInputTokensLimit
+            case weeklyInputTokensLimitSnake = "weekly_input_tokens_limit"
             case monthly
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            daily = NanoGptSubscriptionUsageResponse.decodeInt(container, forKey: .daily)
+            daily = NanoGptSubscriptionUsageResponse.decodeInt(
+                container,
+                forKeys: [.daily, .dailyInputTokens, .dailyInputTokensSnake]
+            )
+            weeklyInputTokens = NanoGptSubscriptionUsageResponse.decodeInt(
+                container,
+                forKeys: [
+                    .weeklyInputTokens,
+                    .weeklyInputTokensSnake,
+                    .weekly,
+                    .weeklyInputToken,
+                    .weeklyInputTokenSnake,
+                    .weeklyInputTokensLimit,
+                    .weeklyInputTokensLimitSnake
+                ]
+            )
             monthly = NanoGptSubscriptionUsageResponse.decodeInt(container, forKey: .monthly)
         }
     }
@@ -28,17 +53,45 @@ private struct NanoGptSubscriptionUsageResponse: Decodable {
 
         private enum CodingKeys: String, CodingKey {
             case used
+            case usage
+            case inputTokensUsed
+            case inputTokensUsedSnake = "input_tokens_used"
+            case usedTokens
+            case usedTokensSnake = "used_tokens"
             case remaining
+            case left
             case percentUsed
+            case percentUsedSnake = "percent_used"
+            case usagePercent
+            case usagePercentSnake = "usage_percent"
             case resetAt
+            case resetAtSnake = "reset_at"
+            case nextResetAt
+            case nextResetAtSnake = "next_reset_at"
+        }
+
+        init(used: Int?, remaining: Int?, percentUsed: Double?, resetAt: Int64?) {
+            self.used = used
+            self.remaining = remaining
+            self.percentUsed = percentUsed
+            self.resetAt = resetAt
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            used = NanoGptSubscriptionUsageResponse.decodeInt(container, forKey: .used)
-            remaining = NanoGptSubscriptionUsageResponse.decodeInt(container, forKey: .remaining)
-            percentUsed = NanoGptSubscriptionUsageResponse.decodeDouble(container, forKey: .percentUsed)
-            resetAt = NanoGptSubscriptionUsageResponse.decodeInt64(container, forKey: .resetAt)
+            used = NanoGptSubscriptionUsageResponse.decodeInt(
+                container,
+                forKeys: [.used, .usage, .inputTokensUsed, .inputTokensUsedSnake, .usedTokens, .usedTokensSnake]
+            )
+            remaining = NanoGptSubscriptionUsageResponse.decodeInt(container, forKeys: [.remaining, .left])
+            percentUsed = NanoGptSubscriptionUsageResponse.decodeDouble(
+                container,
+                forKeys: [.percentUsed, .percentUsedSnake, .usagePercent, .usagePercentSnake]
+            )
+            resetAt = NanoGptSubscriptionUsageResponse.decodeInt64(
+                container,
+                forKeys: [.resetAt, .resetAtSnake, .nextResetAt, .nextResetAtSnake]
+            )
         }
     }
 
@@ -49,10 +102,102 @@ private struct NanoGptSubscriptionUsageResponse: Decodable {
     let active: Bool?
     let limits: Limits?
     let daily: WindowUsage?
+    let weeklyInputTokens: WindowUsage?
     let monthly: WindowUsage?
     let period: Period?
     let state: String?
     let graceUntil: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case active
+        case limits
+        case daily
+        case dailyInputTokens
+        case dailyInputTokensSnake = "daily_input_tokens"
+        case weekly
+        case weeklyInputTokens
+        case weeklyInputTokensSnake = "weekly_input_tokens"
+        case weeklyInputToken
+        case weeklyInputTokenSnake = "weekly_input_token"
+        case monthly
+        case inputTokens
+        case inputTokensSnake = "input_tokens"
+        case weeklyInputTokensUsed
+        case weeklyInputTokensUsedSnake = "weekly_input_tokens_used"
+        case weeklyInputTokensRemaining
+        case weeklyInputTokensRemainingSnake = "weekly_input_tokens_remaining"
+        case weeklyInputTokensPercentUsed
+        case weeklyInputTokensPercentUsedSnake = "weekly_input_tokens_percent_used"
+        case weeklyInputTokensResetAt
+        case weeklyInputTokensResetAtSnake = "weekly_input_tokens_reset_at"
+        case period
+        case state
+        case graceUntil
+    }
+
+    private enum InputTokensCodingKeys: String, CodingKey {
+        case weekly
+        case weeklyInputTokens
+        case weeklyInputTokensSnake = "weekly_input_tokens"
+        case weeklyInputToken
+        case weeklyInputTokenSnake = "weekly_input_token"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        active = try container.decodeIfPresent(Bool.self, forKey: .active)
+        limits = try container.decodeIfPresent(Limits.self, forKey: .limits)
+        daily = NanoGptSubscriptionUsageResponse.decodeWindowUsage(
+            container,
+            forKeys: [.daily, .dailyInputTokens, .dailyInputTokensSnake]
+        )
+
+        let weeklyWindowFromRoot = NanoGptSubscriptionUsageResponse.decodeWindowUsage(
+            container,
+            forKeys: [.weeklyInputTokens, .weeklyInputTokensSnake, .weekly, .weeklyInputToken, .weeklyInputTokenSnake]
+        )
+
+        let weeklyWindowFromInputTokens = NanoGptSubscriptionUsageResponse.decodeWindowUsageFromInputTokens(
+            container,
+            inputTokensKey: .inputTokens
+        ) ?? NanoGptSubscriptionUsageResponse.decodeWindowUsageFromInputTokens(
+            container,
+            inputTokensKey: .inputTokensSnake
+        )
+
+        let weeklyWindowFromFlatFields = WindowUsage(
+            used: NanoGptSubscriptionUsageResponse.decodeInt(
+                container,
+                forKeys: [.weeklyInputTokensUsed, .weeklyInputTokensUsedSnake]
+            ),
+            remaining: NanoGptSubscriptionUsageResponse.decodeInt(
+                container,
+                forKeys: [.weeklyInputTokensRemaining, .weeklyInputTokensRemainingSnake]
+            ),
+            percentUsed: NanoGptSubscriptionUsageResponse.decodeDouble(
+                container,
+                forKeys: [.weeklyInputTokensPercentUsed, .weeklyInputTokensPercentUsedSnake]
+            ),
+            resetAt: NanoGptSubscriptionUsageResponse.decodeInt64(
+                container,
+                forKeys: [.weeklyInputTokensResetAt, .weeklyInputTokensResetAtSnake]
+            )
+        )
+
+        if weeklyWindowFromFlatFields.used != nil
+            || weeklyWindowFromFlatFields.remaining != nil
+            || weeklyWindowFromFlatFields.percentUsed != nil
+            || weeklyWindowFromFlatFields.resetAt != nil {
+            weeklyInputTokens = weeklyWindowFromRoot ?? weeklyWindowFromInputTokens ?? weeklyWindowFromFlatFields
+        } else {
+            weeklyInputTokens = weeklyWindowFromRoot ?? weeklyWindowFromInputTokens
+        }
+
+        monthly = try container.decodeIfPresent(WindowUsage.self, forKey: .monthly)
+        period = try container.decodeIfPresent(Period.self, forKey: .period)
+        state = try container.decodeIfPresent(String.self, forKey: .state)
+        graceUntil = try container.decodeIfPresent(String.self, forKey: .graceUntil)
+    }
 }
 
 private struct NanoGptBalanceResponse: Decodable {
@@ -79,6 +224,15 @@ private extension NanoGptSubscriptionUsageResponse {
         return nil
     }
 
+    static func decodeInt<Key: CodingKey>(_ container: KeyedDecodingContainer<Key>, forKeys keys: [Key]) -> Int? {
+        for key in keys {
+            if let value = decodeInt(container, forKey: key) {
+                return value
+            }
+        }
+        return nil
+    }
+
     static func decodeInt64<Key: CodingKey>(_ container: KeyedDecodingContainer<Key>, forKey key: Key) -> Int64? {
         if let value = try? container.decodeIfPresent(Int64.self, forKey: key) {
             return value
@@ -95,6 +249,15 @@ private extension NanoGptSubscriptionUsageResponse {
         return nil
     }
 
+    static func decodeInt64<Key: CodingKey>(_ container: KeyedDecodingContainer<Key>, forKeys keys: [Key]) -> Int64? {
+        for key in keys {
+            if let value = decodeInt64(container, forKey: key) {
+                return value
+            }
+        }
+        return nil
+    }
+
     static func decodeDouble<Key: CodingKey>(_ container: KeyedDecodingContainer<Key>, forKey key: Key) -> Double? {
         if let value = try? container.decodeIfPresent(Double.self, forKey: key) {
             return value
@@ -103,9 +266,53 @@ private extension NanoGptSubscriptionUsageResponse {
             return Double(value)
         }
         if let value = try? container.decodeIfPresent(String.self, forKey: key) {
-            return Double(value)
+            if let parsed = Double(value) {
+                return parsed
+            }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasSuffix("%") {
+                let percentless = String(trimmed.dropLast())
+                if let parsedPercent = Double(percentless) {
+                    return parsedPercent / 100.0
+                }
+            }
         }
         return nil
+    }
+
+    static func decodeDouble<Key: CodingKey>(_ container: KeyedDecodingContainer<Key>, forKeys keys: [Key]) -> Double? {
+        for key in keys {
+            if let value = decodeDouble(container, forKey: key) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    static func decodeWindowUsage<Key: CodingKey>(
+        _ container: KeyedDecodingContainer<Key>,
+        forKeys keys: [Key]
+    ) -> WindowUsage? {
+        for key in keys {
+            if let value = try? container.decode(WindowUsage.self, forKey: key) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func decodeWindowUsageFromInputTokens(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        inputTokensKey: CodingKeys
+    ) -> WindowUsage? {
+        guard let inputTokens = try? container.nestedContainer(keyedBy: InputTokensCodingKeys.self, forKey: inputTokensKey) else {
+            return nil
+        }
+
+        return decodeWindowUsage(
+            inputTokens,
+            forKeys: [.weeklyInputTokens, .weeklyInputTokensSnake, .weekly, .weeklyInputToken, .weeklyInputTokenSnake]
+        )
     }
 }
 
@@ -135,51 +342,37 @@ final class NanoGptProvider: ProviderProtocol {
         let usageResponse = try await usageResponseTask
         let balanceResponse = try? await balanceResponseTask
 
-        guard let monthlyLimit = usageResponse.limits?.monthly,
-              monthlyLimit > 0 else {
-            logger.error("Nano-GPT monthly limit missing")
-            throw ProviderError.decodingError("Missing Nano-GPT monthly limit")
+        guard let weeklyLimit = usageResponse.limits?.weeklyInputTokens,
+              weeklyLimit > 0 else {
+            logger.error("Nano-GPT weekly quota limit missing")
+            throw ProviderError.decodingError("Missing Nano-GPT weekly quota limit")
         }
 
-        let monthlyUsed = usageResponse.monthly?.used ?? 0
-        let monthlyRemaining = usageResponse.monthly?.remaining ?? max(0, monthlyLimit - monthlyUsed)
-        let monthlyPercentUsed = normalizedPercent(
-            usageResponse.monthly?.percentUsed,
-            used: monthlyUsed,
-            total: monthlyLimit
+        let weeklyUsed = usageResponse.weeklyInputTokens?.used ?? 0
+        let weeklyRemaining = usageResponse.weeklyInputTokens?.remaining ?? max(0, weeklyLimit - weeklyUsed)
+        let weeklyInputTokenPercentUsed = normalizedPercent(
+            usageResponse.weeklyInputTokens?.percentUsed,
+            used: weeklyUsed,
+            total: weeklyLimit
         )
 
         let usage = ProviderUsage.quotaBased(
-            remaining: max(0, monthlyRemaining),
-            entitlement: monthlyLimit,
+            remaining: max(0, weeklyRemaining),
+            entitlement: weeklyLimit,
             overagePermitted: false
-        )
-
-        let dailyLimit = usageResponse.limits?.daily
-        let dailyUsed = usageResponse.daily?.used
-        let dailyPercentUsed = normalizedPercent(
-            usageResponse.daily?.percentUsed,
-            used: dailyUsed,
-            total: dailyLimit
         )
 
         let details = DetailedUsage(
             totalCredits: parseDouble(balanceResponse?.nanoBalance),
             resetPeriod: formatISO8601(usageResponse.period?.currentPeriodEnd),
+            sevenDayUsage: weeklyInputTokenPercentUsed,
+            sevenDayReset: dateFromMilliseconds(usageResponse.weeklyInputTokens?.resetAt),
             creditsBalance: parseDouble(balanceResponse?.usdBalance),
-            authSource: tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json",
-            tokenUsagePercent: dailyPercentUsed,
-            tokenUsageReset: dateFromMilliseconds(usageResponse.daily?.resetAt),
-            tokenUsageUsed: dailyUsed,
-            tokenUsageTotal: dailyLimit,
-            mcpUsagePercent: monthlyPercentUsed,
-            mcpUsageReset: dateFromMilliseconds(usageResponse.monthly?.resetAt),
-            mcpUsageUsed: monthlyUsed,
-            mcpUsageTotal: monthlyLimit
+            authSource: tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
         )
 
         logger.info(
-            "Nano-GPT usage fetched: daily=\(dailyPercentUsed?.description ?? "n/a")% used, monthly=\(monthlyPercentUsed?.description ?? "n/a")% used"
+            "Nano-GPT usage fetched: weeklyInputTokens=\(weeklyInputTokenPercentUsed?.description ?? "n/a")% used, limit=\(weeklyLimit), used=\(weeklyUsed), remaining=\(weeklyRemaining)"
         )
 
         return ProviderResult(usage: usage, details: details)
@@ -247,16 +440,33 @@ final class NanoGptProvider: ProviderProtocol {
     private func normalizedPercent(_ percentValue: Double?, used: Int?, total: Int?) -> Double? {
         if let percentValue {
             if percentValue <= 1.0 {
-                return min(max(percentValue * 100.0, 0), 100)
+                let normalizedFromFraction = clampPercent(percentValue * 100.0)
+
+                if let usageDerivedPercent = derivePercentFromUsage(used: used, total: total) {
+                    let normalizedFromRawPercent = clampPercent(percentValue)
+                    if abs(normalizedFromRawPercent - usageDerivedPercent) < abs(normalizedFromFraction - usageDerivedPercent) {
+                        logger.debug(
+                            "Nano-GPT percent interpreted as raw percent using usage fallback: raw=\(percentValue, privacy: .public), derived=\(usageDerivedPercent, privacy: .public)"
+                        )
+                        return normalizedFromRawPercent
+                    }
+                }
+
+                return normalizedFromFraction
             }
-            return min(max(percentValue, 0), 100)
+            return clampPercent(percentValue)
         }
 
-        guard let used, let total, total > 0 else {
-            return nil
-        }
+        return derivePercentFromUsage(used: used, total: total)
+    }
 
-        return min(max((Double(used) / Double(total)) * 100.0, 0), 100)
+    private func derivePercentFromUsage(used: Int?, total: Int?) -> Double? {
+        guard let used, let total, total > 0 else { return nil }
+        return clampPercent((Double(used) / Double(total)) * 100.0)
+    }
+
+    private func clampPercent(_ value: Double) -> Double {
+        min(max(value, 0), 100)
     }
 
     private func dateFromMilliseconds(_ milliseconds: Int64?) -> Date? {
