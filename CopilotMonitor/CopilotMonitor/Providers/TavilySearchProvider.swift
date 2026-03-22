@@ -48,10 +48,11 @@ final class TavilySearchProvider: ProviderProtocol {
     }
 
     func fetch() async throws -> ProviderResult {
-        guard let apiKey = tokenManager.getTavilyAPIKey() else {
+        guard let apiKeyInfo = tokenManager.getTavilyAPIKeyWithSource() else {
             tavilyLogger.error("Tavily API key not found")
             throw ProviderError.authenticationFailed("Tavily API key not available")
         }
+        let apiKey = apiKeyInfo.key
 
         guard let url = URL(string: "https://api.tavily.com/usage") else {
             throw ProviderError.networkError("Invalid Tavily usage endpoint")
@@ -94,14 +95,13 @@ final class TavilySearchProvider: ProviderProtocol {
         let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: resolvedLimit, overagePermitted: false)
         let mcpUsagePercent = normalizedTavilyQuotaUsagePercent(used: resolvedUsed, limit: resolvedLimit)
 
-        let authSource = tokenManager.lastFoundOpenCodeConfigPath?.path ?? "~/.config/opencode/opencode.json"
         let resetText = formatEstimatedMonthlyResetText()
         let details = DetailedUsage(
             monthlyUsage: Double(resolvedUsed),
             limit: Double(resolvedLimit),
             limitRemaining: Double(remaining),
             resetPeriod: resetText,
-            authSource: authSource,
+            authSource: apiKeyInfo.source,
             authUsageSummary: decoded.account?.currentPlan ?? "Auto refresh",
             mcpUsagePercent: mcpUsagePercent
         )

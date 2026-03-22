@@ -9,6 +9,67 @@ CONFIG_PATHS=(
     "$HOME/Library/Application Support/opencode/opencode.json"
 )
 
+SEARCH_KEYS_PATHS=(
+    "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/search-keys.json"
+    "$HOME/.config/opencode/search-keys.json"
+    "$HOME/.local/share/opencode/search-keys.json"
+    "$HOME/Library/Application Support/opencode/search-keys.json"
+)
+
+strip_json_comments() {
+    python3 - "$1" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding='utf-8')
+result = []
+state = 'normal'
+escaped = False
+i = 0
+
+while i < len(text):
+    ch = text[i]
+    nxt = text[i + 1] if i + 1 < len(text) else ''
+
+    if state == 'normal':
+        if ch == '/' and nxt == '/':
+            state = 'line'
+            i += 2
+            continue
+        if ch == '/' and nxt == '*':
+            state = 'block'
+            i += 2
+            continue
+        result.append(ch)
+        if ch == '"':
+            state = 'string'
+            escaped = False
+    elif state == 'string':
+        result.append(ch)
+        if escaped:
+            escaped = False
+        elif ch == '\\':
+            escaped = True
+        elif ch == '"':
+            state = 'normal'
+    elif state == 'line':
+        if ch in '\r\n':
+            result.append(ch)
+            state = 'normal'
+    elif state == 'block':
+        if ch == '*' and nxt == '/':
+            state = 'normal'
+            i += 2
+            continue
+        if ch in '\r\n':
+            result.append(ch)
+
+    i += 1
+
+sys.stdout.write(''.join(result))
+PY
+}
+
 resolve_config_value() {
     local value="$1"
 
@@ -44,14 +105,41 @@ for path in "${CONFIG_PATHS[@]}"; do
     fi
 done
 
-if [[ -z "$CONFIG_FILE" ]]; then
-    echo "Error: OpenCode config file not found"
-    exit 1
+SEARCH_KEYS_FILE=""
+for path in "${SEARCH_KEYS_PATHS[@]}"; do
+    if [[ -f "$path" ]]; then
+        SEARCH_KEYS_FILE="$path"
+        break
+    fi
+done
+
+NORMALIZED_CONFIG_FILE=""
+NORMALIZED_SEARCH_KEYS_FILE=""
+
+if [[ -n "$CONFIG_FILE" ]]; then
+    NORMALIZED_CONFIG_FILE="$(mktemp)"
+    strip_json_comments "$CONFIG_FILE" > "$NORMALIZED_CONFIG_FILE"
 fi
 
-RAW_ENV_KEY=$(jq -r '.mcp.tavily.environment.TAVILY_API_KEY // empty' "$CONFIG_FILE")
-RAW_AUTH_HEADER=$(jq -r '.mcp.tavily.headers.Authorization // empty' "$CONFIG_FILE")
-RAW_X_API_KEY=$(jq -r '.mcp.tavily.headers["X-API-Key"] // empty' "$CONFIG_FILE")
+if [[ -n "$SEARCH_KEYS_FILE" ]]; then
+    NORMALIZED_SEARCH_KEYS_FILE="$(mktemp)"
+    strip_json_comments "$SEARCH_KEYS_FILE" > "$NORMALIZED_SEARCH_KEYS_FILE"
+fi
+
+cleanup() {
+    rm -f "$NORMALIZED_CONFIG_FILE" "$NORMALIZED_SEARCH_KEYS_FILE"
+}
+trap cleanup EXIT
+
+RAW_ENV_KEY=""
+RAW_AUTH_HEADER=""
+RAW_X_API_KEY=""
+
+if [[ -n "$NORMALIZED_CONFIG_FILE" ]]; then
+    RAW_ENV_KEY=$(jq -r '.mcp["tavily-search"].environment.TAVILY_API_KEY // .mcp.tavily.environment.TAVILY_API_KEY // empty' "$NORMALIZED_CONFIG_FILE")
+    RAW_AUTH_HEADER=$(jq -r '.mcp["tavily-search"].headers.Authorization // .mcp.tavily.headers.Authorization // empty' "$NORMALIZED_CONFIG_FILE")
+    RAW_X_API_KEY=$(jq -r '.mcp["tavily-search"].headers["X-API-Key"] // .mcp.tavily.headers["X-API-Key"] // empty' "$NORMALIZED_CONFIG_FILE")
+fi
 
 API_KEY=$(resolve_config_value "$RAW_ENV_KEY")
 if [[ -z "$API_KEY" ]]; then
@@ -61,17 +149,43 @@ if [[ -z "$API_KEY" ]]; then
     API_KEY=$(resolve_config_value "$RAW_X_API_KEY")
 fi
 
+if [[ -z "$API_KEY" && -n "$NORMALIZED_SEARCH_KEYS_FILE" ]]; then
+    RAW_SEARCH_KEY=$(jq -r '.tavily.apiKey // .TAVILY_API_KEY // empty' "$NORMALIZED_SEARCH_KEYS_FILE")
+    RAW_SEARCH_AUTH=$(jq -r '.tavily.authorization // empty' "$NORMALIZED_SEARCH_KEYS_FILE")
+    RAW_SEARCH_X_API_KEY=$(jq -r '.tavily.xApiKey // empty' "$NORMALIZED_SEARCH_KEYS_FILE")
+
+    API_KEY=$(resolve_config_value "$RAW_SEARCH_KEY")
+    if [[ -z "$API_KEY" ]]; then
+        API_KEY=$(resolve_config_value "$RAW_SEARCH_AUTH")
+    fi
+    if [[ -z "$API_KEY" ]]; then
+        API_KEY=$(resolve_config_value "$RAW_SEARCH_X_API_KEY")
+    fi
+fi
+
 if [[ -z "$API_KEY" ]]; then
-    echo "Error: Tavily API key not found in $CONFIG_FILE"
+    API_KEY=$(resolve_config_value "$TAVILY_API_KEY")
+fi
+
+if [[ -z "$API_KEY" ]]; then
+    echo "Error: Tavily API key not found"
     echo "Expected one of:"
-    echo "  - .mcp.tavily.environment.TAVILY_API_KEY"
-    echo "  - .mcp.tavily.headers.Authorization"
-    echo "  - .mcp.tavily.headers[\"X-API-Key\"]"
+    echo "  - .mcp[\"tavily-search\"].environment.TAVILY_API_KEY"
+    echo "  - .mcp[\"tavily-search\"].headers.Authorization"
+    echo "  - .mcp[\"tavily-search\"].headers[\"X-API-Key\"]"
+    echo "  - .tavily.apiKey in search-keys.json"
+    echo "  - TAVILY_API_KEY environment variable"
     exit 1
 fi
 
 echo "=== Tavily Usage ==="
-echo "Config: $CONFIG_FILE"
+if [[ -n "$CONFIG_FILE" ]]; then
+    echo "Config: $CONFIG_FILE"
+elif [[ -n "$SEARCH_KEYS_FILE" ]]; then
+    echo "Config: $SEARCH_KEYS_FILE"
+else
+    echo "Config: env:TAVILY_API_KEY"
+fi
 echo ""
 
 HTTP_PAYLOAD=$(curl -sS -w $'\n%{http_code}' "https://api.tavily.com/usage" \
