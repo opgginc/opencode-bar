@@ -593,6 +593,13 @@ final class TokenManager: @unchecked Sendable {
     /// Path where opencode.json was found
     private(set) var lastFoundOpenCodeConfigPath: URL?
 
+    /// Cached fallback search key JSON (search-keys.json)
+    private var cachedSearchKeysJSON: [String: Any]?
+    private var searchKeysCacheTimestamp: Date?
+
+    /// Path where search-keys.json was found
+    private(set) var lastFoundSearchKeysPath: URL?
+
     private init() {
         logger.info("TokenManager initialized")
     }
@@ -666,47 +673,167 @@ final class TokenManager: @unchecked Sendable {
         )
     }
 
+    /// Possible search-keys.json locations in priority order:
+    /// 1. $XDG_CONFIG_HOME/opencode/search-keys.json (if XDG_CONFIG_HOME is set)
+    /// 2. ~/.config/opencode/search-keys.json (XDG default on macOS/Linux)
+    /// 3. ~/.local/share/opencode/search-keys.json (fallback)
+    /// 4. ~/Library/Application Support/opencode/search-keys.json (macOS fallback)
+    func getSearchKeyFilePaths() -> [URL] {
+        return buildOpenCodeFilePaths(
+            envVarName: "XDG_CONFIG_HOME",
+            envRelativePathComponents: ["opencode", "search-keys.json"],
+            fallbackRelativePathComponents: [
+                [".config", "opencode", "search-keys.json"],
+                [".local", "share", "opencode", "search-keys.json"],
+                ["Library", "Application Support", "opencode", "search-keys.json"]
+            ]
+        )
+    }
+
+    private func readJSONDictionaryAllowingComments(
+        from paths: [URL],
+        cache: inout [String: Any]?,
+        timestamp: inout Date?,
+        foundPath: inout URL?,
+        warningPrefix: String
+    ) -> [String: Any]? {
+        if let cache,
+           let timestamp,
+           Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+            return cache
+        }
+
+        let fileManager = FileManager.default
+        for candidatePath in paths {
+            guard fileManager.fileExists(atPath: candidatePath.path) else {
+                continue
+            }
+            guard fileManager.isReadableFile(atPath: candidatePath.path) else {
+                logger.warning("\(warningPrefix) file not readable at \(candidatePath.path)")
+                continue
+            }
+
+            do {
+                let data = try Data(contentsOf: candidatePath)
+                let normalizedData = stripJSONComments(from: data)
+                let jsonObject = try JSONSerialization.jsonObject(with: normalizedData)
+                guard let dict = jsonObject as? [String: Any] else {
+                    logger.warning("\(warningPrefix) is not a JSON object at \(candidatePath.path)")
+                    continue
+                }
+
+                foundPath = candidatePath
+                cache = dict
+                timestamp = Date()
+                return dict
+            } catch {
+                logger.warning("Failed to parse \(warningPrefix) at \(candidatePath.path): \(error.localizedDescription)")
+            }
+        }
+
+        foundPath = nil
+        cache = nil
+        timestamp = nil
+        return nil
+    }
+
     private func readOpenCodeConfigJSON() -> [String: Any]? {
         return queue.sync {
-            if let cached = cachedOpenCodeConfigJSON,
-               let timestamp = openCodeConfigCacheTimestamp,
-               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
-                return cached
-            }
-
-            let fileManager = FileManager.default
-            let paths = getOpenCodeConfigFilePaths()
-            for configPath in paths {
-                guard fileManager.fileExists(atPath: configPath.path) else {
-                    continue
-                }
-                guard fileManager.isReadableFile(atPath: configPath.path) else {
-                    logger.warning("OpenCode config file not readable at \(configPath.path)")
-                    continue
-                }
-
-                do {
-                    let data = try Data(contentsOf: configPath)
-                    let jsonObject = try JSONSerialization.jsonObject(with: data)
-                    guard let dict = jsonObject as? [String: Any] else {
-                        logger.warning("OpenCode config is not a JSON object at \(configPath.path)")
-                        continue
-                    }
-
-                    lastFoundOpenCodeConfigPath = configPath
-                    cachedOpenCodeConfigJSON = dict
-                    openCodeConfigCacheTimestamp = Date()
-                    return dict
-                } catch {
-                    logger.warning("Failed to parse OpenCode config at \(configPath.path): \(error.localizedDescription)")
-                }
-            }
-
-            lastFoundOpenCodeConfigPath = nil
-            cachedOpenCodeConfigJSON = nil
-            openCodeConfigCacheTimestamp = nil
-            return nil
+            return readJSONDictionaryAllowingComments(
+                from: getOpenCodeConfigFilePaths(),
+                cache: &cachedOpenCodeConfigJSON,
+                timestamp: &openCodeConfigCacheTimestamp,
+                foundPath: &lastFoundOpenCodeConfigPath,
+                warningPrefix: "OpenCode config"
+            )
         }
+    }
+
+    private func readSearchKeysJSON() -> [String: Any]? {
+        return queue.sync {
+            return readJSONDictionaryAllowingComments(
+                from: getSearchKeyFilePaths(),
+                cache: &cachedSearchKeysJSON,
+                timestamp: &searchKeysCacheTimestamp,
+                foundPath: &lastFoundSearchKeysPath,
+                warningPrefix: "Search keys config"
+            )
+        }
+    }
+
+    private func stripJSONComments(from data: Data) -> Data {
+        guard let text = String(data: data, encoding: .utf8) else {
+            return data
+        }
+
+        enum State {
+            case normal
+            case string
+            case lineComment
+            case blockComment
+        }
+
+        var result = String()
+        result.reserveCapacity(text.count)
+
+        var state: State = .normal
+        var isEscaped = false
+        let characters = Array(text)
+        var index = 0
+
+        while index < characters.count {
+            let current = characters[index]
+            let next = index + 1 < characters.count ? characters[index + 1] : nil
+
+            switch state {
+            case .normal:
+                if current == "/", next == "/" {
+                    state = .lineComment
+                    index += 2
+                    continue
+                }
+                if current == "/", next == "*" {
+                    state = .blockComment
+                    index += 2
+                    continue
+                }
+                result.append(current)
+                if current == "\"" {
+                    state = .string
+                    isEscaped = false
+                }
+
+            case .string:
+                result.append(current)
+                if isEscaped {
+                    isEscaped = false
+                } else if current == "\\" {
+                    isEscaped = true
+                } else if current == "\"" {
+                    state = .normal
+                }
+
+            case .lineComment:
+                if current == "\n" || current == "\r" {
+                    result.append(current)
+                    state = .normal
+                }
+
+            case .blockComment:
+                if current == "*", next == "/" {
+                    state = .normal
+                    index += 2
+                    continue
+                }
+                if current == "\n" || current == "\r" {
+                    result.append(current)
+                }
+            }
+
+            index += 1
+        }
+
+        return Data(result.utf8)
     }
 
     private func resolveConfigValue(_ rawValue: String?) -> String? {
@@ -743,6 +870,39 @@ final class TokenManager: @unchecked Sendable {
             current = next
         }
         return current as? String
+    }
+
+    private func resolvedSearchAPIKey(
+        configDictionary: [String: Any]?,
+        configSourcePath: String?,
+        configPaths: [[String]],
+        searchKeysDictionary: [String: Any]?,
+        searchKeysSourcePath: String?,
+        searchKeyPaths: [[String]],
+        directEnvironmentVariable: String
+    ) -> (key: String, source: String)? {
+        if let configDictionary {
+            for path in configPaths {
+                if let resolved = resolveConfigValue(nestedString(in: configDictionary, path: path)) {
+                    return (resolved, configSourcePath ?? "opencode.json")
+                }
+            }
+        }
+
+        if let searchKeysDictionary {
+            for path in searchKeyPaths {
+                if let resolved = resolveConfigValue(nestedString(in: searchKeysDictionary, path: path)) {
+                    return (resolved, searchKeysSourcePath ?? "search-keys.json")
+                }
+            }
+        }
+
+        if let envValue = ProcessInfo.processInfo.environment[directEnvironmentVariable],
+           let resolved = resolveConfigValue(envValue) {
+            return (resolved, "Environment variable \(directEnvironmentVariable)")
+        }
+
+        return nil
     }
 
     /// Returns the path where auth.json was found, or nil if not found
@@ -2785,32 +2945,60 @@ final class TokenManager: @unchecked Sendable {
     }
 
     func getTavilyAPIKey() -> String? {
-        guard let config = readOpenCodeConfigJSON() else { return nil }
-
-        let envKey = nestedString(in: config, path: ["mcp", "tavily", "environment", "TAVILY_API_KEY"])
-        if let resolved = resolveConfigValue(envKey) {
-            return resolved
-        }
-
-        let authorization = nestedString(in: config, path: ["mcp", "tavily", "headers", "Authorization"])
-        if let resolved = resolveConfigValue(authorization) {
-            return resolved
-        }
-
-        let headerKey = nestedString(in: config, path: ["mcp", "tavily", "headers", "X-API-Key"])
-        return resolveConfigValue(headerKey)
+        return getTavilyAPIKeyWithSource()?.key
     }
 
     func getBraveSearchAPIKey() -> String? {
-        guard let config = readOpenCodeConfigJSON() else { return nil }
+        return getBraveSearchAPIKeyWithSource()?.key
+    }
 
-        let envKey = nestedString(in: config, path: ["mcp", "brave-search", "environment", "BRAVE_API_KEY"])
-        if let resolved = resolveConfigValue(envKey) {
-            return resolved
-        }
+    func getTavilyAPIKeyWithSource() -> (key: String, source: String)? {
+        let config = readOpenCodeConfigJSON()
+        let searchKeys = readSearchKeysJSON()
 
-        let headerKey = nestedString(in: config, path: ["mcp", "brave-search", "headers", "X-Subscription-Token"])
-        return resolveConfigValue(headerKey)
+        return resolvedSearchAPIKey(
+            configDictionary: config,
+            configSourcePath: lastFoundOpenCodeConfigPath?.path,
+            configPaths: [
+                ["mcp", "tavily-search", "environment", "TAVILY_API_KEY"],
+                ["mcp", "tavily-search", "headers", "Authorization"],
+                ["mcp", "tavily-search", "headers", "X-API-Key"],
+                ["mcp", "tavily", "environment", "TAVILY_API_KEY"],
+                ["mcp", "tavily", "headers", "Authorization"],
+                ["mcp", "tavily", "headers", "X-API-Key"]
+            ],
+            searchKeysDictionary: searchKeys,
+            searchKeysSourcePath: lastFoundSearchKeysPath?.path,
+            searchKeyPaths: [
+                ["tavily", "apiKey"],
+                ["tavily", "authorization"],
+                ["tavily", "xApiKey"],
+                ["TAVILY_API_KEY"]
+            ],
+            directEnvironmentVariable: "TAVILY_API_KEY"
+        )
+    }
+
+    func getBraveSearchAPIKeyWithSource() -> (key: String, source: String)? {
+        let config = readOpenCodeConfigJSON()
+        let searchKeys = readSearchKeysJSON()
+
+        return resolvedSearchAPIKey(
+            configDictionary: config,
+            configSourcePath: lastFoundOpenCodeConfigPath?.path,
+            configPaths: [
+                ["mcp", "brave-search", "environment", "BRAVE_API_KEY"],
+                ["mcp", "brave-search", "headers", "X-Subscription-Token"]
+            ],
+            searchKeysDictionary: searchKeys,
+            searchKeysSourcePath: lastFoundSearchKeysPath?.path,
+            searchKeyPaths: [
+                ["brave-search", "apiKey"],
+                ["brave-search", "subscriptionToken"],
+                ["BRAVE_API_KEY"]
+            ],
+            directEnvironmentVariable: "BRAVE_API_KEY"
+        )
     }
 
     /// Gets Gemini refresh token from discovered Gemini account sources
