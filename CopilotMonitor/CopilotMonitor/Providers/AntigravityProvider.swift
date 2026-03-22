@@ -96,6 +96,9 @@ final class AntigravityProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .antigravity
     let type: ProviderType = .quotaBased
 
+    private let tokenManager: TokenManager
+    private let session: URLSession
+
     private let cacheDBPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library")
         .appendingPathComponent("Application Support")
@@ -105,9 +108,23 @@ final class AntigravityProvider: ProviderProtocol {
         .appendingPathComponent("state.vscdb")
         .path
 
+    init(tokenManager: TokenManager = .shared, session: URLSession = .shared) {
+        self.tokenManager = tokenManager
+        self.session = session
+    }
+
     func fetch() async throws -> ProviderResult {
         logger.info("Antigravity cache fetch started")
 
+        do {
+            return try await fetchFromCache()
+        } catch {
+            logger.warning("Antigravity cache fetch failed, attempting accounts fallback: \(error.localizedDescription)")
+            return try await fetchFromAccountsFallback(cacheError: error)
+        }
+    }
+
+    private func fetchFromCache() async throws -> ProviderResult {
         let authStatus = try await loadCachedAuthStatus()
 
         guard let userStatusProtoBase64 = nonEmptyTrimmed(authStatus.userStatusProtoBinaryBase64),
@@ -144,6 +161,163 @@ final class AntigravityProvider: ProviderProtocol {
         )
 
         return ProviderResult(usage: usage, details: details)
+    }
+
+    private func fetchFromAccountsFallback(cacheError: Error) async throws -> ProviderResult {
+        guard let account = resolveFallbackAccount() else {
+            throw ProviderError.providerError(
+                "Antigravity cache unavailable and no enabled antigravity-accounts.json account with project ID was found"
+            )
+        }
+
+        guard let accessToken = await tokenManager.refreshGeminiAccessToken(refreshToken: account.refreshToken) else {
+            throw ProviderError.authenticationFailed("Unable to refresh Antigravity fallback token")
+        }
+
+        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else {
+            throw ProviderError.networkError("Invalid API endpoint")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = "{\"project\":\"\(account.projectId)\"}".data(using: .utf8)
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ProviderError.networkError("Invalid response type")
+        }
+
+        if httpResponse.statusCode == 401 {
+            throw ProviderError.authenticationFailed("Antigravity fallback token expired")
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
+        }
+
+        let quotaResponse = try JSONDecoder().decode(GeminiQuotaResponse.self, from: data)
+        guard !quotaResponse.buckets.isEmpty else {
+            throw ProviderError.decodingError("Empty buckets array")
+        }
+
+        let parsed = parseQuotaBuckets(quotaResponse.buckets)
+        let minRemaining = parsed.modelBreakdown.values.min() ?? 0.0
+        logger.info(
+            "Antigravity fallback fetch succeeded: \(parsed.modelBreakdown.count) models, min remaining \(String(format: "%.1f", minRemaining))%, email=\(account.email ?? "unknown")"
+        )
+        logger.info("Antigravity fallback source selected because cache path failed: \(cacheError.localizedDescription)")
+
+        let details = DetailedUsage(
+            modelBreakdown: parsed.modelBreakdown,
+            modelResetTimes: parsed.modelResetTimes.isEmpty ? nil : parsed.modelResetTimes,
+            planType: "accounts-fallback",
+            email: account.email,
+            authSource: account.authSource
+        )
+
+        let usage = ProviderUsage.quotaBased(
+            remaining: Int(minRemaining),
+            entitlement: 100,
+            overagePermitted: false
+        )
+
+        return ProviderResult(usage: usage, details: details)
+    }
+
+    private struct AntigravityFallbackAccount {
+        let email: String?
+        let refreshToken: String
+        let projectId: String
+        let authSource: String
+    }
+
+    private func resolveFallbackAccount() -> AntigravityFallbackAccount? {
+        guard let antigravityAccounts = tokenManager.readAntigravityAccounts(),
+              !antigravityAccounts.accounts.isEmpty else {
+            logger.warning("Antigravity fallback unavailable: antigravity-accounts.json missing or empty")
+            return nil
+        }
+
+        let preferredIndexes: [Int?] = [
+            antigravityAccounts.activeIndexByFamily?["gemini"],
+            antigravityAccounts.activeIndex
+        ]
+
+        func accountAtPreferredIndex() -> AntigravityAccounts.Account? {
+            for preferredIndex in preferredIndexes {
+                guard let index = preferredIndex,
+                      antigravityAccounts.accounts.indices.contains(index) else {
+                    continue
+                }
+
+                let account = antigravityAccounts.accounts[index]
+                if account.enabled == false {
+                    continue
+                }
+
+                return account
+            }
+
+            return antigravityAccounts.accounts.first(where: { $0.enabled != false })
+        }
+
+        guard let account = accountAtPreferredIndex() else {
+            logger.warning("Antigravity fallback unavailable: no enabled account found")
+            return nil
+        }
+
+        let refreshToken = account.refreshToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !refreshToken.isEmpty else {
+            logger.warning("Antigravity fallback unavailable: selected account is missing refresh token")
+            return nil
+        }
+
+        let primaryProjectId = account.projectId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let fallbackProjectId = account.managedProjectId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let projectId = primaryProjectId.isEmpty ? fallbackProjectId : primaryProjectId
+        guard !projectId.isEmpty else {
+            logger.warning("Antigravity fallback unavailable: selected account is missing project ID")
+            return nil
+        }
+
+        return AntigravityFallbackAccount(
+            email: nonEmptyTrimmed(account.email),
+            refreshToken: refreshToken,
+            projectId: projectId,
+            authSource: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".config")
+                .appendingPathComponent("opencode")
+                .appendingPathComponent("antigravity-accounts.json")
+                .path
+        )
+    }
+
+    private func parseQuotaBuckets(_ buckets: [GeminiQuotaResponse.Bucket]) -> AntigravityParsedCacheUsage {
+        var modelBreakdown: [String: Double] = [:]
+        var modelResetTimes: [String: Date] = [:]
+
+        let iso8601Formatter = ISO8601DateFormatter()
+        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let iso8601FormatterNoFrac = ISO8601DateFormatter()
+        iso8601FormatterNoFrac.formatOptions = [.withInternetDateTime]
+
+        for bucket in buckets {
+            let clampedFraction = max(0.0, min(1.0, bucket.remainingFraction))
+            modelBreakdown[bucket.modelId] = clampedFraction * 100.0
+
+            if let resetDate = iso8601Formatter.date(from: bucket.resetTime)
+                ?? iso8601FormatterNoFrac.date(from: bucket.resetTime) {
+                modelResetTimes[bucket.modelId] = resetDate
+            }
+        }
+
+        return AntigravityParsedCacheUsage(
+            email: nil,
+            modelBreakdown: modelBreakdown,
+            modelResetTimes: modelResetTimes
+        )
     }
 
     private func loadCachedAuthStatus() async throws -> AntigravityCachedAuthStatus {
