@@ -471,8 +471,13 @@ struct JSONFormatter {
 
             case .quotaBased(let remaining, let entitlement, let overagePermitted):
                 providerDict["type"] = "quota-based"
-                providerDict["remaining"] = remaining
-                providerDict["entitlement"] = entitlement
+                if entitlement == Int.max {
+                    providerDict["remaining"] = "unlimited"
+                    providerDict["entitlement"] = "unlimited"
+                } else {
+                    providerDict["remaining"] = remaining
+                    providerDict["entitlement"] = entitlement
+                }
                 providerDict["overagePermitted"] = overagePermitted
                 providerDict["usagePercentage"] = result.usage.usagePercentage
             }
@@ -519,8 +524,13 @@ struct JSONFormatter {
 
                     switch account.usage {
                     case .quotaBased(let remaining, let entitlement, let overagePermitted):
-                        accountDict["remaining"] = remaining
-                        accountDict["entitlement"] = entitlement
+                        if entitlement == Int.max {
+                            accountDict["remaining"] = "unlimited"
+                            accountDict["entitlement"] = "unlimited"
+                        } else {
+                            accountDict["remaining"] = remaining
+                            accountDict["entitlement"] = entitlement
+                        }
                         accountDict["overagePermitted"] = overagePermitted
                     case .payAsYouGo(_, let cost, _):
                         if let cost = cost {

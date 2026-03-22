@@ -229,7 +229,13 @@ final class CLIFormatterTests: XCTestCase {
             details: accountDetails
         )
         let aggregateUsage = ProviderUsage.quotaBased(remaining: 900, entitlement: 1500, overagePermitted: true)
-        let result = ProviderResult(usage: aggregateUsage, details: nil, accounts: [account])
+        let dummyAccount = ProviderAccountResult(
+            accountIndex: 1,
+            accountId: "other",
+            usage: .quotaBased(remaining: 50, entitlement: 200, overagePermitted: false),
+            details: nil
+        )
+        let result = ProviderResult(usage: aggregateUsage, details: nil, accounts: [account, dummyAccount])
 
         let output = TableFormatter.format([.copilot: result])
         let lines = output.components(separatedBy: "\n")
@@ -239,9 +245,6 @@ final class CLIFormatterTests: XCTestCase {
         }
 
         let separator = lines[1]
-        // The data row should contain the shortened auth source (just the last component of a
-        // non-path string passes through unchanged since it has no leading / or ~)
-        // longAuthSource has no leading / or ~, so it appears verbatim in brackets
         let dataRows = lines.dropFirst(2).filter { !$0.isEmpty }
         guard let dataRow = dataRows.first else {
             XCTFail("Expected at least one data row")
@@ -249,7 +252,6 @@ final class CLIFormatterTests: XCTestCase {
         }
         XCTAssertTrue(dataRow.contains("[\(longAuthSource)]"),
                       "Data row should contain the auth source label verbatim")
-        // The separator must be at least as long as the data row
         XCTAssertGreaterThanOrEqual(separator.count, dataRow.count,
                                     "Separator must be wide enough to span the longest data row")
     }
