@@ -350,7 +350,16 @@ enum CopilotAuthSource: CustomStringConvertible {
     case copilotCliKeychain
     case vscodeHosts
     case vscodeApps
-    
+
+    var priority: Int {
+        switch self {
+        case .opencodeAuth:       return 3
+        case .copilotCliKeychain: return 2
+        case .vscodeHosts:        return 1
+        case .vscodeApps:         return 0
+        }
+    }
+
     var description: String {
         switch self {
         case .opencodeAuth:
@@ -2252,9 +2261,10 @@ final class TokenManager: @unchecked Sendable {
                     snapshotEntitlement = totalEntitlement
                     snapshotRemaining = totalRemaining
                 } else if hasUnlimited {
-                    // If unlimited but no specific entitlement, use a placeholder
-                    snapshotEntitlement = 0
-                    snapshotRemaining = 0
+                    // Sentinel value so downstream guard (limit > 0) passes
+                    // and usage = (Int.max - Int.max) / Int.max ≈ 0%
+                    snapshotEntitlement = Int.max
+                    snapshotRemaining = Int.max
                 }
             }
 

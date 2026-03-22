@@ -130,18 +130,7 @@ actor CopilotCLIProvider: ProviderProtocol {
     // MARK: - Token & Account Helpers
 
     private func sourcePriority(_ source: CopilotAuthSource?) -> Int {
-        switch source {
-        case .opencodeAuth:
-            return 3
-        case .copilotCliKeychain:
-            return 2
-        case .vscodeHosts:
-            return 1
-        case .vscodeApps:
-            return 0
-        case .none:
-            return 0
-        }
+        source?.priority ?? 0
     }
 
     private func fetchTokenInfos(_ accounts: [CopilotAuthAccount]) async -> [CopilotTokenInfo] {
@@ -492,11 +481,11 @@ actor CopilotCLIProvider: ProviderProtocol {
             dict = data
         }
 
-        let netBilledAmount = parseDoubleValue(from: dict, keys: ["netBilledAmount", "net_billed_amount"])
-        let netQuantity = parseDoubleValue(from: dict, keys: ["netQuantity", "net_quantity"])
-        let discountQuantity = parseDoubleValue(from: dict, keys: ["discountQuantity", "discount_quantity"])
-        let limit = parseIntValue(from: dict, keys: ["userPremiumRequestEntitlement", "user_premium_request_entitlement", "quantity"])
-        let filteredLimit = parseIntValue(from: dict, keys: ["filteredUserPremiumRequestEntitlement"])
+        let netBilledAmount = APIValueParser.parseDouble(from: dict, keys: ["netBilledAmount", "net_billed_amount"])
+        let netQuantity = APIValueParser.parseDouble(from: dict, keys: ["netQuantity", "net_quantity"])
+        let discountQuantity = APIValueParser.parseDouble(from: dict, keys: ["discountQuantity", "discount_quantity"])
+        let limit = APIValueParser.parseInt(from: dict, keys: ["userPremiumRequestEntitlement", "user_premium_request_entitlement", "quantity"])
+        let filteredLimit = APIValueParser.parseInt(from: dict, keys: ["filteredUserPremiumRequestEntitlement"])
 
         return CopilotUsage(
             netBilledAmount: netBilledAmount,
@@ -517,35 +506,4 @@ actor CopilotCLIProvider: ProviderProtocol {
         return formatter.string(from: date)
     }
 
-    private func parseDoubleValue(from dict: [String: Any], keys: [String]) -> Double {
-        for key in keys {
-            if let value = dict[key] as? Double {
-                return value
-            }
-            if let value = dict[key] as? Int {
-                return Double(value)
-            }
-            if let value = dict[key] as? NSNumber {
-                return value.doubleValue
-            }
-        }
-        return 0.0
-    }
-
-    /// Extracts Int value from dictionary with multiple possible keys
-    /// - Parameters:
-    ///   - dict: Source dictionary
-    ///   - keys: Array of possible key names to try
-    /// - Returns: Extracted Int value or 0 if not found
-    private func parseIntValue(from dict: [String: Any], keys: [String]) -> Int {
-        for key in keys {
-            if let value = dict[key] as? Int {
-                return value
-            }
-            if let value = dict[key] as? Double {
-                return Int(value)
-            }
-        }
-        return 0
-    }
 }

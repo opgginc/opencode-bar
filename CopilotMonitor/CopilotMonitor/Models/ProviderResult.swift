@@ -498,6 +498,30 @@ struct CandidateDedupe {
     }
 }
 
+/// Shared numeric parser for API response dictionaries.
+/// APIs may return Double, Int, NSNumber, or String for numeric fields.
+enum APIValueParser {
+    static func parseDouble(from dict: [String: Any], keys: [String]) -> Double {
+        for key in keys {
+            if let value = dict[key] as? Double { return value }
+            if let value = dict[key] as? Int { return Double(value) }
+            if let value = dict[key] as? NSNumber { return value.doubleValue }
+            if let str = dict[key] as? String, let parsed = Double(str) { return parsed }
+        }
+        return 0.0
+    }
+
+    static func parseInt(from dict: [String: Any], keys: [String]) -> Int {
+        for key in keys {
+            if let value = dict[key] as? Int { return value }
+            if let value = dict[key] as? Double { return Int(value) }
+            if let value = dict[key] as? NSNumber { return value.intValue }
+            if let str = dict[key] as? String, let parsed = Int(str) { return parsed }
+        }
+        return 0
+    }
+}
+
 extension DetailedUsage {
     var hasAnyValue: Bool {
         return dailyUsage != nil || weeklyUsage != nil || monthlyUsage != nil
