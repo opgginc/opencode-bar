@@ -110,16 +110,18 @@ extension StatusBarController {
         case .copilot:
             // === Usage ===
             if let used = details.copilotUsedRequests, let limit = details.copilotLimitRequests, limit > 0 {
-                let usageRatio = Double(used) / Double(max(limit, 1))
+                let isUnlimitedPlan = limit == Int.max
+                let usageRatio = isUnlimitedPlan ? 0.0 : (Double(used) / Double(max(limit, 1)))
                 let normalizedUsageRatio = min(max(usageRatio, 0), 1)
                 let filledBlocks = Int(normalizedUsageRatio * 10)
                 let emptyBlocks = 10 - filledBlocks
                 let progressBar = String(repeating: "═", count: filledBlocks) + String(repeating: "░", count: emptyBlocks)
+                let limitText = isUnlimitedPlan ? "Unlimited" : "\(limit)"
                 let progressItem = NSMenuItem()
-                progressItem.view = createDisabledLabelView(text: "[\(progressBar)] \(used)/\(limit)")
+                progressItem.view = createDisabledLabelView(text: "[\(progressBar)] \(used)/\(limitText)")
                 submenu.addItem(progressItem)
 
-                let usagePercent = (Double(used) / Double(limit)) * 100
+                let usagePercent = isUnlimitedPlan ? 0.0 : ((Double(used) / Double(limit)) * 100)
                 let items = createUsageWindowRow(label: "Monthly", usagePercent: usagePercent, resetDate: details.copilotQuotaResetDateUTC, isMonthly: true)
                 items.forEach { submenu.addItem($0) }
             } else {
@@ -151,7 +153,8 @@ extension StatusBarController {
 
             if let limit = details.copilotLimitRequests {
                 let freeItem = NSMenuItem()
-                freeItem.view = createDisabledLabelView(text: "Quota Limit: \(limit)")
+                let limitText = (limit == Int.max) ? "Unlimited" : "\(limit)"
+                freeItem.view = createDisabledLabelView(text: "Quota Limit: \(limitText)")
                 submenu.addItem(freeItem)
             }
 

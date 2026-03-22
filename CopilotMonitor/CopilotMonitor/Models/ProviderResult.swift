@@ -550,6 +550,35 @@ struct TableFormatter {
     private static let typeWidth = 15
     private static let usageWidth = 10
 
+    private static func isUnlimitedEntitlement(_ entitlement: Int) -> Bool {
+        entitlement == Int.max
+    }
+
+    private static func formatQuotaUsagePercentage(remaining: Int, entitlement: Int) -> String {
+        if isUnlimitedEntitlement(entitlement) {
+            return "0%"
+        }
+
+        guard entitlement > 0 else { return "0%" }
+        let used = entitlement - remaining
+        let percentage = (Double(used) / Double(entitlement)) * 100
+        return String(format: "%.0f%%", percentage)
+    }
+
+    private static func formatQuotaMetrics(remaining: Int, entitlement: Int, overagePermitted: Bool) -> String {
+        if isUnlimitedEntitlement(entitlement) {
+            let remainingLabel = (remaining == Int.max) ? "∞" : "\(remaining)"
+            return "\(remainingLabel)/Unlimited remaining"
+        }
+
+        if remaining >= 0 {
+            return "\(remaining)/\(entitlement) remaining"
+        }
+
+        let overage = abs(remaining)
+        return overagePermitted ? "\(overage) overage (allowed)" : "\(overage) overage (not allowed)"
+    }
+
     private static func accountLabel(identifier: ProviderIdentifier, account: ProviderAccountResult) -> String {
         if let accountId = account.accountId, !accountId.isEmpty {
             return "\(identifier.displayName) (\(accountId))"
@@ -598,12 +627,11 @@ struct TableFormatter {
                             metricsStr = "Cost unavailable"
                         }
                     case .quotaBased(let remaining, let entitlement, let overagePermitted):
-                        if remaining >= 0 {
-                            metricsStr = "\(remaining)/\(entitlement) remaining"
-                        } else {
-                            let overage = abs(remaining)
-                            metricsStr = overagePermitted ? "\(overage) overage (allowed)" : "\(overage) overage (not allowed)"
-                        }
+                        metricsStr = formatQuotaMetrics(
+                            remaining: remaining,
+                            entitlement: entitlement,
+                            overagePermitted: overagePermitted
+                        )
                     }
                     let source = account.details?.authSource ?? ""
                     let sourceLabel = source.isEmpty ? "" : " [\(shortenAuthSource(source))]"
@@ -727,8 +755,12 @@ struct TableFormatter {
                     return percents.map { String(format: "%.0f%%", $0) }.joined(separator: ",")
                 }
             }
-            let percentage = result.usage.usagePercentage
-            return String(format: "%.0f%%", percentage)
+            switch result.usage {
+            case .quotaBased(let remaining, let entitlement, _):
+                return formatQuotaUsagePercentage(remaining: remaining, entitlement: entitlement)
+            case .payAsYouGo:
+                return "-"
+            }
         }
     }
 
@@ -768,14 +800,12 @@ struct TableFormatter {
             }
         case .quotaBased(let remaining, let entitlement, let overagePermitted):
             typeStr = "Quota-based"
-            let percentage = account.usage.usagePercentage
-            usageStr = String(format: "%.0f%%", percentage)
-            if remaining >= 0 {
-                metricsStr = "\(remaining)/\(entitlement) remaining"
-            } else {
-                let overage = abs(remaining)
-                metricsStr = overagePermitted ? "\(overage) overage (allowed)" : "\(overage) overage (not allowed)"
-            }
+            usageStr = formatQuotaUsagePercentage(remaining: remaining, entitlement: entitlement)
+            metricsStr = formatQuotaMetrics(
+                remaining: remaining,
+                entitlement: entitlement,
+                overagePermitted: overagePermitted
+            )
         }
 
         let source = account.details?.authSource ?? ""
@@ -808,16 +838,11 @@ struct TableFormatter {
             return metrics
 
         case .quotaBased(let remaining, let entitlement, let overagePermitted):
-            if remaining >= 0 {
-                return "\(remaining)/\(entitlement) remaining"
-            } else {
-                let overage = abs(remaining)
-                if overagePermitted {
-                    return "\(overage) overage (allowed)"
-                } else {
-                    return "\(overage) overage (not allowed)"
-                }
-            }
+            return formatQuotaMetrics(
+                remaining: remaining,
+                entitlement: entitlement,
+                overagePermitted: overagePermitted
+            )
         }
     }
 }

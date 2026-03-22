@@ -2348,7 +2348,7 @@ final class TokenManager: @unchecked Sendable {
         var accounts: [CopilotAuthAccount] = []
 
         // Step 2: For each item, query individually to get the password data
-            for item in items {
+        for item in items {
             guard let account = item[kSecAttrAccount as String] as? String else {
                 continue
             }
@@ -2369,7 +2369,7 @@ final class TokenManager: @unchecked Sendable {
                   let passwordData = dataResult as? Data,
                   let token = String(data: passwordData, encoding: .utf8),
                   !token.isEmpty else {
-                logger.warning("[CopilotKeychain] Failed to get token for account '\(account)' (status: \(dataStatus))")
+                logger.debug("[CopilotKeychain] Failed to get token for account '\(account)' (status: \(dataStatus))")
                 continue
             }
 
@@ -2447,20 +2447,11 @@ final class TokenManager: @unchecked Sendable {
     }
 
     private func dedupeCopilotAccounts(_ accounts: [CopilotAuthAccount]) -> [CopilotAuthAccount] {
-        func priority(for source: CopilotAuthSource) -> Int {
-            switch source {
-            case .opencodeAuth: return 3
-            case .copilotCliKeychain: return 2
-            case .vscodeHosts: return 1
-            case .vscodeApps: return 0
-            }
-        }
-
         var byToken: [String: CopilotAuthAccount] = [:]
         for account in accounts {
             if let existing = byToken[account.accessToken] {
-                let existingPriority = priority(for: existing.source)
-                let newPriority = priority(for: account.source)
+                let existingPriority = existing.source.priority
+                let newPriority = account.source.priority
                 if newPriority > existingPriority {
                     byToken[account.accessToken] = account
                 }
