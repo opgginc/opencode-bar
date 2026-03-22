@@ -265,7 +265,7 @@ final class CopilotProvider: ProviderProtocol {
         sourcePriority: Int,
         dailyHistory: [DailyUsage]?
     ) -> CopilotAccountCandidate {
-        let remaining = usage.limitRequests - usage.usedRequests
+        let remaining = max(0, usage.limitRequests - usage.usedRequests)
         let providerUsage = ProviderUsage.quotaBased(
             remaining: remaining,
             entitlement: usage.limitRequests,

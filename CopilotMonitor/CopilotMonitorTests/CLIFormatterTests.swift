@@ -351,6 +351,36 @@ final class CLIFormatterTests: XCTestCase {
                       "Non-path auth source should pass through unchanged: got\n\(output)")
     }
 
+    // MARK: Multi-account code path coverage
+
+    func testTableFormatterMultiAccountRowsAppear() {
+        let account1 = ProviderAccountResult(
+            accountIndex: 0,
+            accountId: "alice",
+            usage: .quotaBased(remaining: 500, entitlement: 1500, overagePermitted: true),
+            details: DetailedUsage(authSource: "~/.config/auth.json")
+        )
+        let account2 = ProviderAccountResult(
+            accountIndex: 1,
+            accountId: "bob",
+            usage: .quotaBased(remaining: 300, entitlement: 1500, overagePermitted: true),
+            details: DetailedUsage(authSource: "/usr/local/copilot/creds.json")
+        )
+        let aggregate = ProviderUsage.quotaBased(remaining: 800, entitlement: 3000, overagePermitted: true)
+        let result = ProviderResult(usage: aggregate, details: nil, accounts: [account1, account2])
+
+        let output = TableFormatter.format([.copilot: result])
+
+        XCTAssertTrue(output.contains("Copilot (alice)"),
+                      "First account row should appear: got\n\(output)")
+        XCTAssertTrue(output.contains("Copilot (bob)"),
+                      "Second account row should appear: got\n\(output)")
+        XCTAssertTrue(output.contains("[auth.json]"),
+                      "Tilde-prefixed path should be shortened: got\n\(output)")
+        XCTAssertTrue(output.contains("[creds.json]"),
+                      "Absolute path should be shortened: got\n\(output)")
+    }
+
     // MARK: Gemini multi-account separator width
 
     func testTableFormatterSeparatorWidthGeminiMultiAccount() {

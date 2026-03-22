@@ -1742,7 +1742,7 @@ final class TokenManager: @unchecked Sendable {
         var accounts: [CopilotAuthAccount] = []
 
         // Step 2: For each item, query individually to get the password data
-        for (index, item) in items.enumerated() {
+            for item in items {
             guard let account = item[kSecAttrAccount as String] as? String else {
                 continue
             }
@@ -1769,9 +1769,12 @@ final class TokenManager: @unchecked Sendable {
 
             // Parse username from account field (format: "https://github.com:username")
             var login: String?
-            let components = account.components(separatedBy: ":")
-            if components.count >= 2 {
-                login = components.last
+            if let lastColon = account.lastIndex(of: ":") {
+                let afterColon = account.index(after: lastColon)
+                let candidate = String(account[afterColon...])
+                if !candidate.isEmpty {
+                    login = candidate
+                }
             }
 
             accounts.append(
@@ -2161,7 +2164,8 @@ final class TokenManager: @unchecked Sendable {
             guard httpResponse.statusCode == 200 else {
                 logger.error("Copilot API returned status: \(httpResponse.statusCode)")
                 if let responseBody = String(data: data, encoding: .utf8) {
-                    logger.error("Copilot API error response: \(responseBody)")
+                    let truncated = String(responseBody.prefix(256))
+                    logger.debug("Copilot API error body (truncated): \(truncated)")
                 }
                 return nil
             }
