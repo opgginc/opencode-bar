@@ -298,8 +298,9 @@ struct CodexAuth: Codable {
 }
 
 /// codex-lb row payload from store.db/accounts table
-private struct CodexLBEncryptedAccount {
+struct CodexLBEncryptedAccount {
     let accountId: String?
+    let chatGPTAccountId: String?
     let email: String?
     let planType: String?
     let status: String?
@@ -320,10 +321,21 @@ enum OpenAIAuthSource {
 struct OpenAIAuthAccount {
     let accessToken: String
     let accountId: String?
+    let externalUsageAccountId: String?
     let email: String?
     let authSource: String
     let sourceLabels: [String]
     let source: OpenAIAuthSource
+}
+
+enum CodexEndpointMode: Equatable {
+    case directChatGPT
+    case external(usageURL: URL)
+}
+
+struct CodexEndpointConfiguration: Equatable {
+    let mode: CodexEndpointMode
+    let source: String
 }
 
 /// Auth source types for Claude account discovery
@@ -872,6 +884,74 @@ final class TokenManager: @unchecked Sendable {
         return current as? String
     }
 
+    func codexEndpointConfiguration(
+        from configDictionary: [String: Any]?,
+        sourcePath: String? = nil
+    ) -> CodexEndpointConfiguration {
+        let defaultConfiguration = CodexEndpointConfiguration(
+            mode: .directChatGPT,
+            source: "Default ChatGPT usage endpoint"
+        )
+
+        guard let configDictionary else {
+            return defaultConfiguration
+        }
+
+        if let explicitUsageURL = resolveConfigValue(
+            nestedString(in: configDictionary, path: ["opencode-bar", "codex", "usageURL"])
+        ) {
+            if let resolvedURL = URL(string: explicitUsageURL),
+               let scheme = resolvedURL.scheme?.lowercased(),
+               (scheme == "http" || scheme == "https"),
+               resolvedURL.host != nil {
+                return CodexEndpointConfiguration(
+                    mode: .external(usageURL: resolvedURL),
+                    source: sourcePath ?? "opencode-bar.codex.usageURL"
+                )
+            }
+
+            logger.warning(
+                "Ignoring invalid Codex usage URL override '\(explicitUsageURL, privacy: .public)' from \(sourcePath ?? "opencode-bar.codex.usageURL", privacy: .public)"
+            )
+        }
+
+        if let baseURLString = resolveConfigValue(
+            nestedString(in: configDictionary, path: ["provider", "openai", "options", "baseURL"])
+        ) {
+            if let baseURL = URL(string: baseURLString),
+               let scheme = baseURL.scheme?.lowercased(),
+               (scheme == "http" || scheme == "https"),
+               let host = baseURL.host {
+                var components = URLComponents()
+                components.scheme = scheme
+                components.host = host
+                components.port = baseURL.port
+                components.path = "/api/codex/usage"
+
+                if let usageURL = components.url {
+                    return CodexEndpointConfiguration(
+                        mode: .external(usageURL: usageURL),
+                        source: sourcePath ?? "provider.openai.options.baseURL"
+                    )
+                }
+            }
+
+            logger.warning(
+                "Ignoring invalid OpenAI base URL '\(baseURLString, privacy: .public)' from \(sourcePath ?? "provider.openai.options.baseURL", privacy: .public)"
+            )
+        }
+
+        return defaultConfiguration
+    }
+
+    func getCodexEndpointConfiguration() -> CodexEndpointConfiguration {
+        let config = readOpenCodeConfigJSON()
+        return codexEndpointConfiguration(
+            from: config,
+            sourcePath: lastFoundOpenCodeConfigPath?.path
+        )
+    }
+
     private func resolvedSearchAPIKey(
         configDictionary: [String: Any]?,
         configSourcePath: String?,
@@ -1139,6 +1219,7 @@ final class TokenManager: @unchecked Sendable {
             """
             SELECT
                 id,
+                chatgpt_account_id,
                 email,
                 plan_type,
                 status,
@@ -1151,6 +1232,33 @@ final class TokenManager: @unchecked Sendable {
             """
             SELECT
                 id,
+                chatgpt_account_id,
+                email,
+                NULL AS plan_type,
+                NULL AS status,
+                access_token_encrypted,
+                NULL AS refresh_token_encrypted,
+                NULL AS id_token_encrypted,
+                NULL AS last_refresh
+            FROM accounts
+            """,
+            """
+            SELECT
+                id,
+                NULL AS chatgpt_account_id,
+                email,
+                plan_type,
+                status,
+                access_token_encrypted,
+                refresh_token_encrypted,
+                id_token_encrypted,
+                last_refresh
+            FROM accounts
+            """,
+            """
+            SELECT
+                id,
+                NULL AS chatgpt_account_id,
                 email,
                 NULL AS plan_type,
                 NULL AS status,
@@ -1195,13 +1303,14 @@ final class TokenManager: @unchecked Sendable {
 
             let account = CodexLBEncryptedAccount(
                 accountId: sqliteColumnString(statement, index: 0),
-                email: sqliteColumnString(statement, index: 1),
-                planType: sqliteColumnString(statement, index: 2),
-                status: sqliteColumnString(statement, index: 3),
+                chatGPTAccountId: sqliteColumnString(statement, index: 1),
+                email: sqliteColumnString(statement, index: 2),
+                planType: sqliteColumnString(statement, index: 3),
+                status: sqliteColumnString(statement, index: 4),
                 accessTokenEncrypted: accessTokenEncrypted,
-                refreshTokenEncrypted: sqliteColumnData(statement, index: 5),
-                idTokenEncrypted: sqliteColumnData(statement, index: 6),
-                lastRefresh: sqliteColumnString(statement, index: 7)
+                refreshTokenEncrypted: sqliteColumnData(statement, index: 6),
+                idTokenEncrypted: sqliteColumnData(statement, index: 7),
+                lastRefresh: sqliteColumnString(statement, index: 8)
             )
             accounts.append(account)
         }
@@ -1340,6 +1449,29 @@ final class TokenManager: @unchecked Sendable {
         return token
     }
 
+    func makeCodexLBOpenAIAccount(
+        from encryptedAccount: CodexLBEncryptedAccount,
+        accessToken: String,
+        authSourcePath: String
+    ) -> OpenAIAuthAccount {
+        let normalizedAccountId = encryptedAccount.accountId?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedChatGPTAccountId = encryptedAccount.chatGPTAccountId?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedEmail = encryptedAccount.email?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return OpenAIAuthAccount(
+            accessToken: accessToken,
+            accountId: normalizedAccountId?.isEmpty == true ? nil : normalizedAccountId,
+            externalUsageAccountId: normalizedChatGPTAccountId?.isEmpty == true ? nil : normalizedChatGPTAccountId,
+            email: normalizedEmail?.isEmpty == true ? nil : normalizedEmail,
+            authSource: authSourcePath,
+            sourceLabels: [openAISourceLabel(for: .codexLB)],
+            source: .codexLB
+        )
+    }
+
     func readCodexLBOpenAIAccounts() -> [OpenAIAuthAccount] {
         return queue.sync {
             if let cached = cachedCodexLBAccounts,
@@ -1377,25 +1509,20 @@ final class TokenManager: @unchecked Sendable {
                                 encryptedAccount.accessTokenEncrypted,
                                 key: fernetKey
                             )
-                            let normalizedAccountId = encryptedAccount.accountId?
-                                .trimmingCharacters(in: .whitespacesAndNewlines)
-                            let normalizedEmail = encryptedAccount.email?
-                                .trimmingCharacters(in: .whitespacesAndNewlines)
                             decodedAccounts.append(
-                                OpenAIAuthAccount(
+                                makeCodexLBOpenAIAccount(
+                                    from: encryptedAccount,
                                     accessToken: accessToken,
-                                    accountId: normalizedAccountId?.isEmpty == true ? nil : normalizedAccountId,
-                                    email: normalizedEmail?.isEmpty == true ? nil : normalizedEmail,
-                                    authSource: candidate.databaseURL.path,
-                                    sourceLabels: [openAISourceLabel(for: .codexLB)],
-                                    source: .codexLB
+                                    authSourcePath: candidate.databaseURL.path
                                 )
                             )
                             // PII fields (email, account ID) kept at debug level to avoid
                             // leaking personal info in production console logs.
                             logger.debug(
                                 """
-                                codex-lb account loaded: id=\(normalizedAccountId ?? "nil"), \
+                                \(candidate.databaseURL.path, privacy: .public) codex-lb account loaded: \
+                                id=\(encryptedAccount.accountId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "nil"), \
+                                chatgpt_account_id=\(encryptedAccount.chatGPTAccountId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "nil"), \
                                 email=\(encryptedAccount.email ?? "unknown"), \
                                 plan=\(encryptedAccount.planType ?? "unknown"), \
                                 status=\(encryptedAccount.status ?? "unknown"), \
@@ -1574,6 +1701,7 @@ final class TokenManager: @unchecked Sendable {
         return OpenAIAuthAccount(
             accessToken: primary.accessToken,
             accountId: (primaryAccountId?.isEmpty == false) ? primaryAccountId : fallbackAccountId,
+            externalUsageAccountId: normalizedNonEmpty(primary.externalUsageAccountId) ?? normalizedNonEmpty(fallback.externalUsageAccountId),
             email: (primaryEmail?.isEmpty == false) ? primaryEmail : fallbackEmail,
             authSource: primary.authSource,
             sourceLabels: mergedSourceLabels,
@@ -2525,6 +2653,7 @@ final class TokenManager: @unchecked Sendable {
                 OpenAIAuthAccount(
                     accessToken: access,
                     accountId: auth.openai?.accountId,
+                    externalUsageAccountId: auth.openai?.accountId,
                     email: nil,
                     authSource: authSource,
                     sourceLabels: [openAISourceLabel(for: .opencodeAuth)],
@@ -2552,6 +2681,7 @@ final class TokenManager: @unchecked Sendable {
                 OpenAIAuthAccount(
                     accessToken: access,
                     accountId: codexAuth.tokens?.accountId,
+                    externalUsageAccountId: codexAuth.tokens?.accountId,
                     email: codexEmail,
                     authSource: authSource,
                     sourceLabels: [openAISourceLabel(for: .codexAuth)],
