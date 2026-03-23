@@ -872,27 +872,30 @@ final class TokenManager: @unchecked Sendable {
         return current as? String
     }
 
+    private struct SearchAPIKeyLookupSource {
+        let dictionary: [String: Any]?
+        let sourcePath: String?
+        let paths: [[String]]
+        let fallbackSourceName: String
+    }
+
     private func resolvedSearchAPIKey(
-        configDictionary: [String: Any]?,
-        configSourcePath: String?,
-        configPaths: [[String]],
-        searchKeysDictionary: [String: Any]?,
-        searchKeysSourcePath: String?,
-        searchKeyPaths: [[String]],
+        configSource: SearchAPIKeyLookupSource,
+        searchKeysSource: SearchAPIKeyLookupSource,
         directEnvironmentVariable: String
     ) -> (key: String, source: String)? {
-        if let configDictionary {
-            for path in configPaths {
+        if let configDictionary = configSource.dictionary {
+            for path in configSource.paths {
                 if let resolved = resolveConfigValue(nestedString(in: configDictionary, path: path)) {
-                    return (resolved, configSourcePath ?? "opencode.json")
+                    return (resolved, configSource.sourcePath ?? configSource.fallbackSourceName)
                 }
             }
         }
 
-        if let searchKeysDictionary {
-            for path in searchKeyPaths {
+        if let searchKeysDictionary = searchKeysSource.dictionary {
+            for path in searchKeysSource.paths {
                 if let resolved = resolveConfigValue(nestedString(in: searchKeysDictionary, path: path)) {
-                    return (resolved, searchKeysSourcePath ?? "search-keys.json")
+                    return (resolved, searchKeysSource.sourcePath ?? searchKeysSource.fallbackSourceName)
                 }
             }
         }
@@ -2957,24 +2960,30 @@ final class TokenManager: @unchecked Sendable {
         let searchKeys = readSearchKeysJSON()
 
         return resolvedSearchAPIKey(
-            configDictionary: config,
-            configSourcePath: lastFoundOpenCodeConfigPath?.path,
-            configPaths: [
-                ["mcp", "tavily-search", "environment", "TAVILY_API_KEY"],
-                ["mcp", "tavily-search", "headers", "Authorization"],
-                ["mcp", "tavily-search", "headers", "X-API-Key"],
-                ["mcp", "tavily", "environment", "TAVILY_API_KEY"],
-                ["mcp", "tavily", "headers", "Authorization"],
-                ["mcp", "tavily", "headers", "X-API-Key"]
-            ],
-            searchKeysDictionary: searchKeys,
-            searchKeysSourcePath: lastFoundSearchKeysPath?.path,
-            searchKeyPaths: [
-                ["tavily", "apiKey"],
-                ["tavily", "authorization"],
-                ["tavily", "xApiKey"],
-                ["TAVILY_API_KEY"]
-            ],
+            configSource: SearchAPIKeyLookupSource(
+                dictionary: config,
+                sourcePath: lastFoundOpenCodeConfigPath?.path,
+                paths: [
+                    ["mcp", "tavily-search", "environment", "TAVILY_API_KEY"],
+                    ["mcp", "tavily-search", "headers", "Authorization"],
+                    ["mcp", "tavily-search", "headers", "X-API-Key"],
+                    ["mcp", "tavily", "environment", "TAVILY_API_KEY"],
+                    ["mcp", "tavily", "headers", "Authorization"],
+                    ["mcp", "tavily", "headers", "X-API-Key"]
+                ],
+                fallbackSourceName: "opencode.json"
+            ),
+            searchKeysSource: SearchAPIKeyLookupSource(
+                dictionary: searchKeys,
+                sourcePath: lastFoundSearchKeysPath?.path,
+                paths: [
+                    ["tavily", "apiKey"],
+                    ["tavily", "authorization"],
+                    ["tavily", "xApiKey"],
+                    ["TAVILY_API_KEY"]
+                ],
+                fallbackSourceName: "search-keys.json"
+            ),
             directEnvironmentVariable: "TAVILY_API_KEY"
         )
     }
@@ -2984,19 +2993,25 @@ final class TokenManager: @unchecked Sendable {
         let searchKeys = readSearchKeysJSON()
 
         return resolvedSearchAPIKey(
-            configDictionary: config,
-            configSourcePath: lastFoundOpenCodeConfigPath?.path,
-            configPaths: [
-                ["mcp", "brave-search", "environment", "BRAVE_API_KEY"],
-                ["mcp", "brave-search", "headers", "X-Subscription-Token"]
-            ],
-            searchKeysDictionary: searchKeys,
-            searchKeysSourcePath: lastFoundSearchKeysPath?.path,
-            searchKeyPaths: [
-                ["brave-search", "apiKey"],
-                ["brave-search", "subscriptionToken"],
-                ["BRAVE_API_KEY"]
-            ],
+            configSource: SearchAPIKeyLookupSource(
+                dictionary: config,
+                sourcePath: lastFoundOpenCodeConfigPath?.path,
+                paths: [
+                    ["mcp", "brave-search", "environment", "BRAVE_API_KEY"],
+                    ["mcp", "brave-search", "headers", "X-Subscription-Token"]
+                ],
+                fallbackSourceName: "opencode.json"
+            ),
+            searchKeysSource: SearchAPIKeyLookupSource(
+                dictionary: searchKeys,
+                sourcePath: lastFoundSearchKeysPath?.path,
+                paths: [
+                    ["brave-search", "apiKey"],
+                    ["brave-search", "subscriptionToken"],
+                    ["BRAVE_API_KEY"]
+                ],
+                fallbackSourceName: "search-keys.json"
+            ),
             directEnvironmentVariable: "BRAVE_API_KEY"
         )
     }
