@@ -915,6 +915,24 @@ final class StatusBarController: NSObject {
         return details.dailyUsage
     }
 
+    private func chutesMonthlyPercentFromDetails(_ details: DetailedUsage?) -> Double? {
+        guard let details else { return nil }
+
+        let configuredPlan = SubscriptionSettingsManager.shared.getPlan(for: .chutes)
+        let configuredCapUSD = configuredPlan.isSet
+            ? configuredPlan.cost * ChutesProvider.monthlyValueMultiplier
+            : nil
+        let capUSD = configuredCapUSD ?? details.chutesMonthlyValueCapUSD
+
+        if let usedUSD = details.chutesMonthlyValueUsedUSD,
+           let capUSD,
+           capUSD > 0 {
+            return min(max((usedUSD / capUSD) * 100.0, 0), 999)
+        }
+
+        return details.chutesMonthlyValueUsedPercent
+    }
+
     private func usagePercentCandidates(
         identifier: ProviderIdentifier,
         usage: ProviderUsage,
@@ -954,6 +972,7 @@ final class StatusBarController: NSObject {
         case .nanoGpt:
             add(details?.sevenDayUsage, priority: .weekly)
         case .chutes:
+            add(chutesMonthlyPercentFromDetails(details), priority: .monthly)
             add(dailyPercentFromDetails(details), priority: .daily)
         case .synthetic:
             add(details?.fiveHourUsage, priority: .hourly)
@@ -1910,6 +1929,9 @@ final class StatusBarController: NSObject {
                         } else if identifier == .zaiCodingPlan {
                             let percents = [account.details?.tokenUsagePercent, account.details?.mcpUsagePercent].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
+                        } else if identifier == .chutes {
+                            let percents = [dailyPercentFromDetails(account.details), chutesMonthlyPercentFromDetails(account.details)].compactMap { $0 }
+                            usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else if identifier == .nanoGpt {
                             let percents = [
                                 account.details?.sevenDayUsage,
@@ -1962,6 +1984,9 @@ final class StatusBarController: NSObject {
                         usedPercents = percents
                     } else if identifier == .zaiCodingPlan {
                         let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
+                        usedPercents = percents.isEmpty ? [singlePercent] : percents
+                    } else if identifier == .chutes {
+                        let percents = [dailyPercentFromDetails(result.details), chutesMonthlyPercentFromDetails(result.details)].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else if identifier == .nanoGpt {
                         let percents = [

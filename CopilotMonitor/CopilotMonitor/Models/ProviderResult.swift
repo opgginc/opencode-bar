@@ -102,6 +102,11 @@ struct DetailedUsage {
     let creditsBalance: Double?
     let planType: String?
 
+    // Chutes-specific value cap tracking
+    let chutesMonthlyValueCapUSD: Double?
+    let chutesMonthlyValueUsedUSD: Double?
+    let chutesMonthlyValueUsedPercent: Double?
+
     // Claude extra usage toggle
     let extraUsageEnabled: Bool?
     // Claude extra usage (monthly credits limit + usage)
@@ -184,6 +189,9 @@ struct DetailedUsage {
         sparkWindowLabel: String? = nil,
         creditsBalance: Double? = nil,
         planType: String? = nil,
+        chutesMonthlyValueCapUSD: Double? = nil,
+        chutesMonthlyValueUsedUSD: Double? = nil,
+        chutesMonthlyValueUsedPercent: Double? = nil,
         extraUsageEnabled: Bool? = nil,
         extraUsageMonthlyLimitUSD: Double? = nil,
         extraUsageUsedUSD: Double? = nil,
@@ -247,6 +255,9 @@ struct DetailedUsage {
         self.sparkWindowLabel = sparkWindowLabel
         self.creditsBalance = creditsBalance
         self.planType = planType
+        self.chutesMonthlyValueCapUSD = chutesMonthlyValueCapUSD
+        self.chutesMonthlyValueUsedUSD = chutesMonthlyValueUsedUSD
+        self.chutesMonthlyValueUsedPercent = chutesMonthlyValueUsedPercent
         self.extraUsageEnabled = extraUsageEnabled
         self.extraUsageMonthlyLimitUSD = extraUsageMonthlyLimitUSD
         self.extraUsageUsedUSD = extraUsageUsedUSD
@@ -292,7 +303,9 @@ extension DetailedUsage: Codable {
         case sonnetUsage, sonnetReset, opusUsage, opusReset, modelBreakdown, modelResetTimes
         case secondaryUsage, secondaryReset, primaryReset
         case sparkUsage, sparkReset, sparkSecondaryUsage, sparkSecondaryReset, sparkWindowLabel
-        case creditsBalance, planType, extraUsageEnabled
+        case creditsBalance, planType
+        case chutesMonthlyValueCapUSD, chutesMonthlyValueUsedUSD, chutesMonthlyValueUsedPercent
+        case extraUsageEnabled
         case extraUsageMonthlyLimitUSD, extraUsageUsedUSD, extraUsageUtilizationPercent
         case sessions, messages, avgCostPerDay, email
         case dailyHistory, monthlyCost, creditsRemaining, creditsTotal
@@ -334,6 +347,9 @@ extension DetailedUsage: Codable {
         sparkWindowLabel = try container.decodeIfPresent(String.self, forKey: .sparkWindowLabel)
         creditsBalance = try container.decodeIfPresent(Double.self, forKey: .creditsBalance)
         planType = try container.decodeIfPresent(String.self, forKey: .planType)
+        chutesMonthlyValueCapUSD = try container.decodeIfPresent(Double.self, forKey: .chutesMonthlyValueCapUSD)
+        chutesMonthlyValueUsedUSD = try container.decodeIfPresent(Double.self, forKey: .chutesMonthlyValueUsedUSD)
+        chutesMonthlyValueUsedPercent = try container.decodeIfPresent(Double.self, forKey: .chutesMonthlyValueUsedPercent)
         extraUsageEnabled = try container.decodeIfPresent(Bool.self, forKey: .extraUsageEnabled)
         extraUsageMonthlyLimitUSD = try container.decodeIfPresent(Double.self, forKey: .extraUsageMonthlyLimitUSD)
         extraUsageUsedUSD = try container.decodeIfPresent(Double.self, forKey: .extraUsageUsedUSD)
@@ -400,6 +416,9 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(sparkWindowLabel, forKey: .sparkWindowLabel)
         try container.encodeIfPresent(creditsBalance, forKey: .creditsBalance)
         try container.encodeIfPresent(planType, forKey: .planType)
+        try container.encodeIfPresent(chutesMonthlyValueCapUSD, forKey: .chutesMonthlyValueCapUSD)
+        try container.encodeIfPresent(chutesMonthlyValueUsedUSD, forKey: .chutesMonthlyValueUsedUSD)
+        try container.encodeIfPresent(chutesMonthlyValueUsedPercent, forKey: .chutesMonthlyValueUsedPercent)
         try container.encodeIfPresent(extraUsageEnabled, forKey: .extraUsageEnabled)
         try container.encodeIfPresent(extraUsageMonthlyLimitUSD, forKey: .extraUsageMonthlyLimitUSD)
         try container.encodeIfPresent(extraUsageUsedUSD, forKey: .extraUsageUsedUSD)
@@ -784,6 +803,7 @@ extension DetailedUsage {
             || secondaryUsage != nil || secondaryReset != nil || primaryReset != nil
             || sparkUsage != nil || sparkReset != nil || sparkSecondaryUsage != nil || sparkSecondaryReset != nil || sparkWindowLabel != nil
             || creditsBalance != nil || planType != nil
+            || chutesMonthlyValueCapUSD != nil || chutesMonthlyValueUsedUSD != nil || chutesMonthlyValueUsedPercent != nil
             || extraUsageEnabled != nil
             || extraUsageMonthlyLimitUSD != nil || extraUsageUsedUSD != nil || extraUsageUtilizationPercent != nil
             || sessions != nil || messages != nil || avgCostPerDay != nil

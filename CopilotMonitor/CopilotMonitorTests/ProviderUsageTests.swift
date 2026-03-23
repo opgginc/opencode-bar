@@ -92,6 +92,45 @@ final class ProviderUsageTests: XCTestCase {
         )
     }
 
+    func testChutesInferredMonthlySubscriptionCostUsesKnownPlanTiers() {
+        XCTAssertEqual(ChutesProvider.inferredMonthlySubscriptionCost(planTier: "Base"), 3)
+        XCTAssertEqual(ChutesProvider.inferredMonthlySubscriptionCost(planTier: "Plus"), 10)
+        XCTAssertEqual(ChutesProvider.inferredMonthlySubscriptionCost(planTier: "Pro"), 20)
+        XCTAssertNil(ChutesProvider.inferredMonthlySubscriptionCost(planTier: "Unknown"))
+    }
+
+    func testChutesCalculateMonthlyValueUsedPercent() {
+        XCTAssertEqual(ChutesProvider.calculateMonthlyValueUsedPercent(usedUSD: 34, capUSD: 50), 68)
+        XCTAssertNil(ChutesProvider.calculateMonthlyValueUsedPercent(usedUSD: nil, capUSD: 50))
+        XCTAssertNil(ChutesProvider.calculateMonthlyValueUsedPercent(usedUSD: 10, capUSD: 0))
+    }
+
+    func testChutesExtractMonthlyValueUsedUSDPrefersAggregateFields() {
+        let payload: [String: Any] = [
+            "summary": [
+                "total_cost_usd": 34.25
+            ],
+            "items": [
+                ["cost_usd": 10.0],
+                ["cost_usd": 20.0]
+            ]
+        ]
+
+        XCTAssertEqual(ChutesProvider.extractMonthlyValueUsedUSD(from: payload), 34.25)
+    }
+
+    func testChutesExtractMonthlyValueUsedUSDSumsRecognizedItemFields() {
+        let payload: [String: Any] = [
+            "items": [
+                ["cost_usd": 12.5],
+                ["total_cost": "7.25"],
+                ["ignored": 99]
+            ]
+        ]
+
+        XCTAssertEqual(ChutesProvider.extractMonthlyValueUsedUSD(from: payload), 19.75)
+    }
+
     func testTableFormatterShowsZaiDualPercentWhenBothWindowsExist() {
         let usage = ProviderUsage.quotaBased(remaining: 30, entitlement: 100, overagePermitted: false)
         let details = DetailedUsage(tokenUsagePercent: 70, mcpUsagePercent: 40)

@@ -573,6 +573,12 @@ extension StatusBarController {
             addSubscriptionItems(to: submenu, provider: .nanoGpt, accountId: accountId)
 
         case .chutes:
+            if let plan = details.planType {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Plan: \(plan)")
+                submenu.addItem(item)
+            }
+
             if let daily = details.dailyUsage,
                let limit = details.limit {
                 let used = Int(daily)
@@ -580,23 +586,37 @@ extension StatusBarController {
                 let percentage = total > 0 ? Int((Double(used) / Double(total)) * 100) : 0
 
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Daily: %d%% used (%d/%d)", percentage, used, total))
+                item.view = createDisabledLabelView(text: String(format: "Daily Requests: %d / %d (%.0f%% used)", used, total, Double(percentage)))
                 submenu.addItem(item)
             }
 
-            submenu.addItem(NSMenuItem.separator())
+            let chutesMonthlyValue = resolvedChutesMonthlyValuePresentation(details: details)
 
-            if let plan = details.planType {
+            if let usedUSD = chutesMonthlyValue.usedUSD,
+               let capUSD = chutesMonthlyValue.capUSD,
+               let usedPercent = chutesMonthlyValue.usedPercent {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: "Plan: \(plan)")
+                item.view = createDisabledLabelView(
+                    text: String(format: "Monthly Value Used: $%.2f / $%.2f (%.0f%% used)", usedUSD, capUSD, usedPercent)
+                )
+                submenu.addItem(item)
+            } else if let capUSD = chutesMonthlyValue.capUSD {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(
+                    text: String(format: "Monthly Cap: $%.2f (5× subscription)", capUSD)
+                )
                 submenu.addItem(item)
             }
 
             if let credits = details.creditsBalance {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Credits: $%.2f", credits))
+                item.view = createDisabledLabelView(text: String(format: "Credits Balance: $%.2f", credits))
                 submenu.addItem(item)
             }
+
+            let overageItem = NSMenuItem()
+            overageItem.view = createDisabledLabelView(text: "Overage: PAYGO after cap")
+            submenu.addItem(overageItem)
 
             addSubscriptionItems(to: submenu, provider: .chutes)
 
@@ -719,6 +739,24 @@ extension StatusBarController {
         return TokenManager.shared.getOpenAIAccounts().first { account in
             account.accountId == accountId
         }?.email
+    }
+
+    private func resolvedChutesMonthlyValuePresentation(details: DetailedUsage) -> (usedUSD: Double?, capUSD: Double?, usedPercent: Double?) {
+        let configuredPlan = SubscriptionSettingsManager.shared.getPlan(for: .chutes)
+        let configuredCapUSD = configuredPlan.isSet
+            ? configuredPlan.cost * ChutesProvider.monthlyValueMultiplier
+            : nil
+        let capUSD = configuredCapUSD ?? details.chutesMonthlyValueCapUSD
+        let usedUSD = details.chutesMonthlyValueUsedUSD
+
+        let usedPercent: Double?
+        if let usedUSD, let capUSD, capUSD > 0 {
+            usedPercent = min(max((usedUSD / capUSD) * 100.0, 0), 999)
+        } else {
+            usedPercent = details.chutesMonthlyValueUsedPercent
+        }
+
+        return (usedUSD, capUSD, usedPercent)
     }
 
     private func addGroupedModelUsageSection(
