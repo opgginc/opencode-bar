@@ -463,7 +463,7 @@ final class AntigravityProvider: ProviderProtocol {
             index += 1
 
             result |= UInt64(byte & 0x7F) << shift
-            if (byte & 0x80) == 0 {
+            if byte & 0x80 == 0 {
                 return result
             }
 
