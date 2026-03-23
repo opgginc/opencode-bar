@@ -303,7 +303,7 @@ final class CodexProvider: ProviderProtocol {
 
     private func fetchUsageForAccount(_ account: OpenAIAuthAccount) async throws -> CodexAccountCandidate {
         let endpointConfiguration = TokenManager.shared.getCodexEndpointConfiguration()
-        let url = codexUsageURL(for: endpointConfiguration)
+        let url = try codexUsageURL(for: endpointConfiguration)
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -441,11 +441,12 @@ final class CodexProvider: ProviderProtocol {
         )
     }
 
-    func codexUsageURL(for configuration: CodexEndpointConfiguration) -> URL {
+    func codexUsageURL(for configuration: CodexEndpointConfiguration) throws -> URL {
         switch configuration.mode {
         case .directChatGPT:
             guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else {
-                preconditionFailure("Default Codex usage URL must be valid")
+                logger.error("Default Codex usage URL is invalid; aborting request")
+                throw ProviderError.providerError("Default Codex usage URL is invalid")
             }
             return url
         case .external(let usageURL):
