@@ -131,6 +131,16 @@ final class ProviderUsageTests: XCTestCase {
         XCTAssertEqual(ChutesProvider.extractMonthlyValueUsedUSD(from: payload), 19.75)
     }
 
+    func testChutesCurrentMonthDateRangeUsesUTCMonthBoundaries() throws {
+        let formatter = ISO8601DateFormatter()
+        let referenceDate = try XCTUnwrap(formatter.date(from: "2026-03-01T00:30:00+14:00"))
+
+        let range = ChutesProvider.currentMonthDateRangeStrings(referenceDate: referenceDate)
+
+        XCTAssertEqual(range.0, "2026-02-01")
+        XCTAssertEqual(range.1, "2026-02-28")
+    }
+
     func testTableFormatterShowsZaiDualPercentWhenBothWindowsExist() {
         let usage = ProviderUsage.quotaBased(remaining: 30, entitlement: 100, overagePermitted: false)
         let details = DetailedUsage(tokenUsagePercent: 70, mcpUsagePercent: 40)

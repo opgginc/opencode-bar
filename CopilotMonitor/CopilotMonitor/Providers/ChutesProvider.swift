@@ -438,9 +438,9 @@ final class ChutesProvider: ProviderProtocol {
         }
     }
 
-    private static func currentMonthDateRangeStrings(referenceDate: Date = Date()) -> (String, String) {
+    static func currentMonthDateRangeStrings(referenceDate: Date = Date()) -> (String, String) {
         var calendar = Calendar.current
-        calendar.timeZone = TimeZone.current
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? TimeZone.current
 
         let formatter = DateFormatter()
         formatter.calendar = calendar
