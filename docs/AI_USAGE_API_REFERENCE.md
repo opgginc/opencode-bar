@@ -6,7 +6,8 @@
 
 | Provider | Token File |
 |----------|-----------|
-| Claude, Codex, Copilot, Nano-GPT | `~/.local/share/opencode/auth.json` |
+| Claude | `~/.config/opencode/opencode-anthropic-auth/accounts.json`, `~/.local/share/opencode/auth.json`, `~/.config/claude-code/auth.json`, macOS Keychain (`Claude Code-credentials`, `Claude Code`) |
+| Codex, Copilot, Nano-GPT | `~/.local/share/opencode/auth.json` |
 | Antigravity (Gemini) | `~/.config/opencode/antigravity-accounts.json` |
 | Antigravity (Local cache) | `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb` |
 
@@ -16,13 +17,26 @@
 
 **Endpoint:** `GET https://api.anthropic.com/api/oauth/usage`
 
+Latest Claude Code-compatible usage requests use Bearer OAuth with `anthropic-beta: oauth-2025-04-20`, a Claude Code `User-Agent` (`claude-code/<version>`), and no browser cookies.
+
 ```bash
 ACCESS=$(jq -r '.anthropic.access' ~/.local/share/opencode/auth.json)
+CLAUDE_CODE_VERSION="${ANTHROPIC_CLI_VERSION:-2.1.80}"
 
 curl -s "https://api.anthropic.com/api/oauth/usage" \
   -H "Authorization: Bearer $ACCESS" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -H "User-Agent: claude-code/${CLAUDE_CODE_VERSION}" \
   -H "anthropic-beta: oauth-2025-04-20"
 ```
+
+The bundled [`scripts/query-claude.sh`](/Users/kargnas/projects/opencode-bar/scripts/query-claude.sh) now resolves Claude auth in this order:
+
+1. `opencode-anthropic-auth/accounts.json`
+2. OpenCode `auth.json`
+3. Claude Code `auth.json`
+4. macOS Keychain (`Claude Code-credentials`, `Claude Code`)
 
 **Response:**
 ```json
