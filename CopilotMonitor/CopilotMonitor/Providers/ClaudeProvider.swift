@@ -4,6 +4,46 @@ import os.log
 
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "ClaudeProvider")
 
+enum ClaudeOAuthRequestPolicy {
+    static let betaHeader = "oauth-2025-04-20"
+    static let defaultClaudeCodeVersion = "2.1.80"
+
+    static func codeVersion(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+        let rawVersion = environment["ANTHROPIC_CLI_VERSION"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let rawVersion, !rawVersion.isEmpty {
+            return rawVersion
+        }
+        return defaultClaudeCodeVersion
+    }
+
+    static func usageUserAgent(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+        let rawUserAgent = environment["ANTHROPIC_CODE_USER_AGENT"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let rawUserAgent, !rawUserAgent.isEmpty {
+            return rawUserAgent
+        }
+        return "claude-code/\(codeVersion(environment: environment))"
+    }
+
+    static func applyHeaders(
+        to request: inout URLRequest,
+        accessToken: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(usageUserAgent(environment: environment), forHTTPHeaderField: "User-Agent")
+        request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
+        request.setValue(nil, forHTTPHeaderField: "Cookie")
+        request.httpShouldHandleCookies = false
+        request.timeoutInterval = 10
+
+        logger.debug(
+            "Prepared Claude OAuth request headers: userAgent=\(usageUserAgent(environment: environment), privacy: .public), cookies=disabled"
+        )
+    }
+}
+
 // MARK: - Claude API Response Models
 
 /// Response structure from Claude usage API
@@ -336,8 +376,7 @@ final class ClaudeProvider: ProviderProtocol {
 
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
-            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+            ClaudeOAuthRequestPolicy.applyHeaders(to: &request, accessToken: accessToken)
 
             do {
                 let (data, response) = try await session.data(for: request)
@@ -472,8 +511,7 @@ final class ClaudeProvider: ProviderProtocol {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        ClaudeOAuthRequestPolicy.applyHeaders(to: &request, accessToken: accessToken)
 
         let (data, response) = try await session.data(for: request)
 

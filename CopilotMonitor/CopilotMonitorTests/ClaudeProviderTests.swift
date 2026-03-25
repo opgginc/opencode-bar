@@ -68,6 +68,44 @@ final class ClaudeProviderTests: XCTestCase {
         
         XCTAssertNil(response.seven_day)
     }
+
+    func testClaudeOAuthRequestPolicyUsesClaudeCodeUserAgentAndDisablesCookies() throws {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "https://api.anthropic.com/api/oauth/usage")))
+
+        ClaudeOAuthRequestPolicy.applyHeaders(
+            to: &request,
+            accessToken: "test-access-token",
+            environment: [:]
+        )
+
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-access-token")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "claude-code/2.1.80")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-beta"), "oauth-2025-04-20")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+        XCTAssertFalse(request.httpShouldHandleCookies)
+        XCTAssertEqual(request.timeoutInterval, 10, accuracy: 0.001)
+    }
+
+    func testClaudeOAuthRequestPolicyPrefersExplicitUserAgentOverride() {
+        let userAgent = ClaudeOAuthRequestPolicy.usageUserAgent(
+            environment: [
+                "ANTHROPIC_CODE_USER_AGENT": "claude-code-custom/9.9.9",
+                "ANTHROPIC_CLI_VERSION": "3.0.0"
+            ]
+        )
+
+        XCTAssertEqual(userAgent, "claude-code-custom/9.9.9")
+    }
+
+    func testClaudeOAuthRequestPolicyUsesVersionOverrideForUserAgent() {
+        let userAgent = ClaudeOAuthRequestPolicy.usageUserAgent(
+            environment: ["ANTHROPIC_CLI_VERSION": "3.0.0"]
+        )
+
+        XCTAssertEqual(userAgent, "claude-code/3.0.0")
+    }
     
     private func loadFixture(named: String) -> Data {
         let bundle = Bundle(for: type(of: self))
