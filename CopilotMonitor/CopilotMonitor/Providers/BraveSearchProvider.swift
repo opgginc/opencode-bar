@@ -101,10 +101,9 @@ final class BraveSearchProvider: ProviderProtocol {
     }
 
     func fetch() async throws -> ProviderResult {
-        guard let apiKeyInfo = tokenManager.getBraveSearchAPIKeyWithSource() else {
+        guard let apiKey = tokenManager.getBraveSearchAPIKey() else {
             throw ProviderError.authenticationFailed("Brave Search API key not available")
         }
-        let apiKey = apiKeyInfo.key
 
         let mode = currentRefreshMode()
         var state = stateQueue.sync { loadState() }
@@ -143,6 +142,7 @@ final class BraveSearchProvider: ProviderProtocol {
         let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: limit, overagePermitted: false)
         let mcpUsagePercent = normalizedBraveQuotaUsagePercent(used: used, limit: limit)
         let resetText = formatResetText(seconds: state.lastResetSeconds)
+        let authSource = tokenManager.lastFoundOpenCodeConfigPath?.path ?? "~/.config/opencode/opencode.json"
         let sourceSummary = mode == .eventOnly ? "Estimated (event-based)" : "Mode: \(mode.title)"
 
         let details = DetailedUsage(
@@ -150,7 +150,7 @@ final class BraveSearchProvider: ProviderProtocol {
             limit: Double(limit),
             limitRemaining: Double(remaining),
             resetPeriod: resetText,
-            authSource: apiKeyInfo.source,
+            authSource: authSource,
             authUsageSummary: sourceSummary,
             mcpUsagePercent: mcpUsagePercent
         )
