@@ -248,6 +248,8 @@ done
 
 NORMALIZED_CONFIG_FILE=""
 NORMALIZED_SEARCH_KEYS_FILE=""
+headers_file=""
+body_file=""
 
 if [[ -n "$CONFIG_FILE" ]]; then
     NORMALIZED_CONFIG_FILE="$(mktemp)"
@@ -260,7 +262,7 @@ if [[ -n "$SEARCH_KEYS_FILE" ]]; then
 fi
 
 cleanup() {
-    rm -f "$NORMALIZED_CONFIG_FILE" "$NORMALIZED_SEARCH_KEYS_FILE"
+    rm -f "$NORMALIZED_CONFIG_FILE" "$NORMALIZED_SEARCH_KEYS_FILE" "$headers_file" "$body_file"
 }
 trap cleanup EXIT
 
@@ -313,7 +315,6 @@ echo ""
 
 headers_file="$(mktemp)"
 body_file="$(mktemp)"
-trap 'rm -f "$headers_file" "$body_file"' EXIT
 
 HTTP_CODE=$(curl -sS -o "$body_file" -D "$headers_file" -w "%{http_code}" \
     "https://api.search.brave.com/res/v1/web/search?q=opencode&count=1" \
