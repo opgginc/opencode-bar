@@ -1526,7 +1526,9 @@ final class StatusBarController: NSObject {
                 if let errorMessage, shouldDisplayErrorStateEvenWithResult(errorMessage) {
                     hasPayAsYouGo = true
                     let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                    item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
+                    if item.isEnabled {
+                        item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
+                    }
                     menu.insertItem(item, at: insertIndex)
                     insertIndex += 1
                 } else if let result {
@@ -1548,9 +1550,15 @@ final class StatusBarController: NSObject {
                        insertIndex += 1
                    }
                 } else if let errorMessage {
+                    guard shouldDisplayErrorMenuItem(errorMessage) else {
+                        debugLog("updateMultiProviderMenu: hiding \(identifier.displayName) pay-as-you-go row because credentials are unavailable")
+                        continue
+                    }
                     hasPayAsYouGo = true
                     let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                    item.submenu = createErrorSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage)
+                    if item.isEnabled {
+                        item.submenu = createErrorSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage)
+                    }
                     menu.insertItem(item, at: insertIndex)
                     insertIndex += 1
                 } else if loadingProviders.contains(identifier) {
@@ -1682,18 +1690,23 @@ final class StatusBarController: NSObject {
                         let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: .copilot) ?? "Unknown"
                         displayName += " - \(sourceLabel)"
                     }
-                    if let unavailableLabel = unavailableUsageSuffix(for: account, identifier: .copilot) {
+                    let unavailableLabel = unavailableUsageSuffix(for: account, identifier: .copilot)
+                    if let unavailableLabel {
                         displayName += " (\(unavailableLabel))"
                     }
+                    let isUnavailableRateLimited = unavailableLabel == "Rate limited"
                     let usedPercent = account.usage.usagePercentage
                     let quotaItem = createNativeQuotaMenuItem(
                         name: displayName,
                         usedPercent: usedPercent,
-                        icon: iconForProvider(.copilot)
+                        icon: iconForProvider(.copilot),
+                        isEnabled: !isUnavailableRateLimited
                     )
                     quotaItem.tag = 999
 
-                    if let details = account.details, details.hasAnyValue {
+                    if quotaItem.isEnabled,
+                       let details = account.details,
+                       details.hasAnyValue {
                         quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot, accountId: account.accountId)
                     }
 
@@ -1812,7 +1825,9 @@ final class StatusBarController: NSObject {
                shouldDisplayErrorStateEvenWithResult(errorMessage, identifier: identifier, result: result) {
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
+                if item.isEnabled {
+                    item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
+                }
                 menu.insertItem(item, at: insertIndex)
                 insertIndex += 1
             } else if let result {
@@ -1883,9 +1898,11 @@ final class StatusBarController: NSObject {
                             let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: identifier) ?? "Unknown"
                             displayName += " (\(sourceLabel))"
                         }
-                        if let unavailableLabel = unavailableUsageSuffix(for: account, identifier: identifier) {
+                        let unavailableLabel = unavailableUsageSuffix(for: account, identifier: identifier)
+                        if let unavailableLabel {
                             displayName += " (\(unavailableLabel))"
                         }
+                        let isUnavailableRateLimited = unavailableLabel == "Rate limited"
 
                         // Keep menu list rows in multi-window format (e.g., 5h, weekly, monthly together).
                         let usedPercents: [Double]
@@ -1927,10 +1944,17 @@ final class StatusBarController: NSObject {
                         } else {
                             usedPercents = [account.usage.usagePercentage]
                         }
-                        let item = createNativeQuotaMenuItem(name: displayName, usedPercents: usedPercents, icon: iconForProvider(identifier))
+                        let item = createNativeQuotaMenuItem(
+                            name: displayName,
+                            usedPercents: usedPercents,
+                            icon: iconForProvider(identifier),
+                            isEnabled: !isUnavailableRateLimited
+                        )
                         item.tag = 999
 
-                        if let details = account.details, details.hasAnyValue {
+                        if item.isEnabled,
+                           let details = account.details,
+                           details.hasAnyValue {
                             item.submenu = createDetailSubmenu(details, identifier: identifier, accountId: account.accountId)
                         }
 
@@ -1991,9 +2015,15 @@ final class StatusBarController: NSObject {
                     insertIndex += 1
                 }
             } else if let errorMessage {
+                guard shouldDisplayErrorMenuItem(errorMessage) else {
+                    debugLog("updateMultiProviderMenu: hiding \(identifier.displayName) quota row because credentials are unavailable")
+                    continue
+                }
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                item.submenu = createErrorSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage)
+                if item.isEnabled {
+                    item.submenu = createErrorSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage)
+                }
                 let status = errorMenuStatus(for: errorMessage)
                 if status.shouldDeferToBottom {
                     deferredUnavailableItems.append(item)
@@ -2022,7 +2052,9 @@ final class StatusBarController: NSObject {
                shouldDisplayErrorStateEvenWithResult(geminiError, identifier: .geminiCLI, result: geminiResult) {
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: geminiError)
-                item.submenu = createErrorSubmenu(identifier: .geminiCLI, result: geminiResult, errorMessage: geminiError)
+                if item.isEnabled {
+                    item.submenu = createErrorSubmenu(identifier: .geminiCLI, result: geminiResult, errorMessage: geminiError)
+                }
                 menu.insertItem(item, at: insertIndex)
                 insertIndex += 1
             } else if let result = geminiResult,
@@ -2069,17 +2101,23 @@ final class StatusBarController: NSObject {
                     insertIndex += 1
                 }
             } else if let errorMessage = geminiError {
-                hasQuota = true
-                let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: errorMessage)
-                item.submenu = createErrorSubmenu(identifier: .geminiCLI, result: nil, errorMessage: errorMessage)
-                let status = errorMenuStatus(for: errorMessage)
-                if status.shouldDeferToBottom {
-                    deferredUnavailableItems.append(item)
-                    deferredUnavailableProviders.append(.geminiCLI)
-                    debugLog("updateMultiProviderMenu: deferred \(status.title) item for Gemini CLI")
+                if shouldDisplayErrorMenuItem(errorMessage) {
+                    hasQuota = true
+                    let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: errorMessage)
+                    if item.isEnabled {
+                        item.submenu = createErrorSubmenu(identifier: .geminiCLI, result: nil, errorMessage: errorMessage)
+                    }
+                    let status = errorMenuStatus(for: errorMessage)
+                    if status.shouldDeferToBottom {
+                        deferredUnavailableItems.append(item)
+                        deferredUnavailableProviders.append(.geminiCLI)
+                        debugLog("updateMultiProviderMenu: deferred \(status.title) item for Gemini CLI")
+                    } else {
+                        menu.insertItem(item, at: insertIndex)
+                        insertIndex += 1
+                    }
                 } else {
-                    menu.insertItem(item, at: insertIndex)
-                    insertIndex += 1
+                    debugLog("updateMultiProviderMenu: hiding Gemini CLI row because credentials are unavailable")
                 }
             } else if loadingProviders.contains(.geminiCLI) {
                 hasQuota = true
@@ -2309,12 +2347,22 @@ final class StatusBarController: NSObject {
     
     /// Creates NSMenuItem for quota providers with colored percentages.
     /// Color: 70%+ orange, 90%+ red, 100%+ red+bold
-    private func createNativeQuotaMenuItem(name: String, usedPercents: [Double], icon: NSImage?) -> NSMenuItem {
+    private func createNativeQuotaMenuItem(
+        name: String,
+        usedPercents: [Double],
+        icon: NSImage?,
+        isEnabled: Bool = true
+    ) -> NSMenuItem {
         let attributed = NSMutableAttributedString()
+        let primaryColor = isEnabled ? NSColor.labelColor : NSColor.disabledControlTextColor
+        let secondaryColor = isEnabled ? NSColor.secondaryLabelColor : NSColor.disabledControlTextColor
         
         attributed.append(NSAttributedString(
             string: "\(name)",
-            attributes: [.font: MenuDesignToken.Typography.defaultFont]
+            attributes: [
+                .font: MenuDesignToken.Typography.defaultFont,
+                .foregroundColor: primaryColor
+            ]
         ))
 
         let defaultFontUsagePercent: NSFont = MenuDesignToken.Typography.monospacedFont
@@ -2323,14 +2371,16 @@ final class StatusBarController: NSObject {
             string: ": ",
             attributes: [
                 .font: defaultFontUsagePercent,
-                .foregroundColor: NSColor.secondaryLabelColor
+                .foregroundColor: secondaryColor
             ]
         ))
         
         for (index, percent) in usedPercents.enumerated() {
             let percentText = String(format: "%.0f%%", percent)
-            let percentColor = colorForUsagePercent(percent)
-            let font: NSFont = percent >= 100 ? MenuDesignToken.Typography.monospacedBoldFont : defaultFontUsagePercent
+            let percentColor = isEnabled ? colorForUsagePercent(percent) : NSColor.disabledControlTextColor
+            let font: NSFont = isEnabled && percent >= 100
+                ? MenuDesignToken.Typography.monospacedBoldFont
+                : defaultFontUsagePercent
             
             attributed.append(NSAttributedString(
                 string: percentText,
@@ -2345,7 +2395,7 @@ final class StatusBarController: NSObject {
                     string: ", ",
                     attributes: [
                         .font: defaultFontUsagePercent,
-                        .foregroundColor: NSColor.secondaryLabelColor
+                        .foregroundColor: secondaryColor
                     ]
                 ))
             }
@@ -2359,17 +2409,27 @@ final class StatusBarController: NSObject {
         let item = NSMenuItem()
         item.attributedTitle = attributed
         item.image = icon
+        item.isEnabled = isEnabled
         
-        if let maxPercent = usedPercents.max(), maxPercent >= 70, let icon = icon {
-            let iconColor: NSColor = maxPercent >= 90 ? .systemRed : .systemOrange
-            item.image = tintedImage(icon, color: iconColor)
+        if let icon {
+            if !isEnabled {
+                item.image = tintedImage(icon, color: .disabledControlTextColor)
+            } else if let maxPercent = usedPercents.max(), maxPercent >= 70 {
+                let iconColor: NSColor = maxPercent >= 90 ? .systemRed : .systemOrange
+                item.image = tintedImage(icon, color: iconColor)
+            }
         }
         
         return item
     }
     
-    private func createNativeQuotaMenuItem(name: String, usedPercent: Double, icon: NSImage?) -> NSMenuItem {
-        return createNativeQuotaMenuItem(name: name, usedPercents: [usedPercent], icon: icon)
+    private func createNativeQuotaMenuItem(
+        name: String,
+        usedPercent: Double,
+        icon: NSImage?,
+        isEnabled: Bool = true
+    ) -> NSMenuItem {
+        return createNativeQuotaMenuItem(name: name, usedPercents: [usedPercent], icon: icon, isEnabled: isEnabled)
     }
 
     private func unavailableUsageSuffix(for account: ProviderAccountResult, identifier: ProviderIdentifier) -> String? {
@@ -2446,6 +2506,24 @@ final class StatusBarController: NSObject {
                 return true
             }
         }
+
+        var shouldDisplayInList: Bool {
+            switch self {
+            case .noCredentials:
+                return false
+            case .rateLimited, .noSubscription, .error:
+                return true
+            }
+        }
+
+        var shouldDisableListItem: Bool {
+            switch self {
+            case .rateLimited, .error:
+                return true
+            case .noCredentials, .noSubscription:
+                return false
+            }
+        }
     }
 
     private func errorMenuStatus(for errorMessage: String) -> ErrorMenuStatus {
@@ -2469,6 +2547,10 @@ final class StatusBarController: NSObject {
         case .noCredentials, .noSubscription, .error:
             return false
         }
+    }
+
+    private func shouldDisplayErrorMenuItem(_ errorMessage: String) -> Bool {
+        errorMenuStatus(for: errorMessage).shouldDisplayInList
     }
 
     private func shouldDisplayErrorStateEvenWithResult(
@@ -2495,12 +2577,14 @@ final class StatusBarController: NSObject {
     }
 
     private func createErrorMenuItem(identifier: ProviderIdentifier, errorMessage: String) -> NSMenuItem {
-        let statusText = errorMenuStatus(for: errorMessage).title
+        let status = errorMenuStatus(for: errorMessage)
+        let statusText = status.title
         let title = "\(identifier.displayName) (\(statusText))"
 
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.image = tintedImage(iconForProvider(identifier), color: .systemOrange)
-        item.isEnabled = true
+        let iconColor: NSColor = status.shouldDisableListItem ? .disabledControlTextColor : .systemOrange
+        item.image = tintedImage(iconForProvider(identifier), color: iconColor)
+        item.isEnabled = !status.shouldDisableListItem
         item.tag = 999
         item.toolTip = errorMessage
 
@@ -2541,13 +2625,21 @@ final class StatusBarController: NSObject {
 
     private func createSearchEnginesQuotaMenuItem() -> NSMenuItem? {
         let enabledSearchProviders: [ProviderIdentifier] = [.braveSearch, .tavilySearch].filter { isProviderEnabled($0) }
-        guard !enabledSearchProviders.isEmpty else { return nil }
+        let visibleSearchProviders = enabledSearchProviders.filter { identifier in
+            guard let errorMessage = lastProviderErrors[identifier] else { return true }
+            let shouldDisplay = shouldDisplayErrorMenuItem(errorMessage)
+            if !shouldDisplay {
+                debugLog("createSearchEnginesQuotaMenuItem: hiding \(identifier.displayName) because credentials are unavailable")
+            }
+            return shouldDisplay
+        }
+        guard !visibleSearchProviders.isEmpty else { return nil }
 
         let searchEnginesItem = NSMenuItem(title: "Search Engines", action: nil, keyEquivalent: "")
         searchEnginesItem.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Search Engines")
 
         let submenu = NSMenu()
-        for identifier in enabledSearchProviders {
+        for identifier in visibleSearchProviders {
             let rowTitle = identifier.displayName
             let rowItem = createSearchEngineRow(identifier: identifier, title: rowTitle)
             submenu.addItem(rowItem)
@@ -2563,8 +2655,8 @@ final class StatusBarController: NSObject {
 
         if let errorMessage, shouldDisplayErrorStateEvenWithResult(errorMessage) {
             let rowItem = NSMenuItem(title: "\(title) (Rate limited)", action: nil, keyEquivalent: "")
-            rowItem.image = tintedImage(iconForProvider(identifier), color: .systemOrange)
-            rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: result, errorMessage: errorMessage, isLoading: false)
+            rowItem.image = tintedImage(iconForProvider(identifier), color: .disabledControlTextColor)
+            rowItem.isEnabled = false
             return rowItem
         }
 
@@ -2576,8 +2668,13 @@ final class StatusBarController: NSObject {
 
         if let errorMessage {
             let rowItem = NSMenuItem(title: "\(title) (Error)", action: nil, keyEquivalent: "")
-            rowItem.image = tintedImage(iconForProvider(identifier), color: .systemOrange)
-            rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage, isLoading: false)
+            let status = errorMenuStatus(for: errorMessage)
+            let iconColor: NSColor = status.shouldDisableListItem ? .disabledControlTextColor : .systemOrange
+            rowItem.image = tintedImage(iconForProvider(identifier), color: iconColor)
+            rowItem.isEnabled = !status.shouldDisableListItem
+            if rowItem.isEnabled {
+                rowItem.submenu = createSearchEngineDetailSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage, isLoading: false)
+            }
             return rowItem
         }
 
