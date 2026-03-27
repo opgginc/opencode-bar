@@ -110,16 +110,18 @@ extension StatusBarController {
         case .copilot:
             // === Usage ===
             if let used = details.copilotUsedRequests, let limit = details.copilotLimitRequests, limit > 0 {
-                let usageRatio = Double(used) / Double(max(limit, 1))
+                let isUnlimitedPlan = limit == Int.max
+                let usageRatio = isUnlimitedPlan ? 0.0 : (Double(used) / Double(max(limit, 1)))
                 let normalizedUsageRatio = min(max(usageRatio, 0), 1)
                 let filledBlocks = Int(normalizedUsageRatio * 10)
                 let emptyBlocks = 10 - filledBlocks
                 let progressBar = String(repeating: "═", count: filledBlocks) + String(repeating: "░", count: emptyBlocks)
+                let limitText = isUnlimitedPlan ? "Unlimited" : "\(limit)"
                 let progressItem = NSMenuItem()
-                progressItem.view = createDisabledLabelView(text: "[\(progressBar)] \(used)/\(limit)")
+                progressItem.view = createDisabledLabelView(text: "[\(progressBar)] \(used)/\(limitText)")
                 submenu.addItem(progressItem)
 
-                let usagePercent = (Double(used) / Double(limit)) * 100
+                let usagePercent = isUnlimitedPlan ? 0.0 : ((Double(used) / Double(limit)) * 100)
                 let items = createUsageWindowRow(label: "Monthly", usagePercent: usagePercent, resetDate: details.copilotQuotaResetDateUTC, isMonthly: true)
                 items.forEach { submenu.addItem($0) }
             } else {
@@ -151,7 +153,8 @@ extension StatusBarController {
 
             if let limit = details.copilotLimitRequests {
                 let freeItem = NSMenuItem()
-                freeItem.view = createDisabledLabelView(text: "Quota Limit: \(limit)")
+                let limitText = (limit == Int.max) ? "Unlimited" : "\(limit)"
+                freeItem.view = createDisabledLabelView(text: "Quota Limit: \(limitText)")
                 submenu.addItem(freeItem)
             }
 
@@ -455,6 +458,31 @@ extension StatusBarController {
             // === Subscription ===
             addSubscriptionItems(to: submenu, provider: .kimi, accountId: accountId)
 
+        case .minimaxCodingPlan:
+            if let fiveHour = details.fiveHourUsage {
+                let items = createUsageWindowRow(
+                    label: "5h",
+                    usagePercent: fiveHour,
+                    resetDate: details.fiveHourReset,
+                    windowHours: 5
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if details.fiveHourUsage != nil, details.sevenDayUsage != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let weekly = details.sevenDayUsage {
+                let items = createUsageWindowRow(
+                    label: "Weekly",
+                    usagePercent: weekly,
+                    resetDate: details.sevenDayReset,
+                    windowHours: 168
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+
+            addSubscriptionItems(to: submenu, provider: .minimaxCodingPlan, accountId: accountId)
+
         case .zaiCodingPlan:
             // === Token Usage ===
             if let tokenUsage = details.tokenUsagePercent {
@@ -573,6 +601,12 @@ extension StatusBarController {
             addSubscriptionItems(to: submenu, provider: .nanoGpt, accountId: accountId)
 
         case .chutes:
+            if let plan = details.planType {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Plan: \(plan)")
+                submenu.addItem(item)
+            }
+
             if let daily = details.dailyUsage,
                let limit = details.limit {
                 let used = Int(daily)
@@ -580,23 +614,37 @@ extension StatusBarController {
                 let percentage = total > 0 ? Int((Double(used) / Double(total)) * 100) : 0
 
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Daily: %d%% used (%d/%d)", percentage, used, total))
+                item.view = createDisabledLabelView(text: String(format: "Daily Requests: %d / %d (%.0f%% used)", used, total, Double(percentage)))
                 submenu.addItem(item)
             }
 
-            submenu.addItem(NSMenuItem.separator())
+            let chutesMonthlyValue = resolvedChutesMonthlyValuePresentation(details: details)
 
-            if let plan = details.planType {
+            if let usedUSD = chutesMonthlyValue.usedUSD,
+               let capUSD = chutesMonthlyValue.capUSD,
+               let usedPercent = chutesMonthlyValue.usedPercent {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: "Plan: \(plan)")
+                item.view = createDisabledLabelView(
+                    text: String(format: "Monthly Value Used: $%.2f / $%.2f (%.0f%% used)", usedUSD, capUSD, usedPercent)
+                )
+                submenu.addItem(item)
+            } else if let capUSD = chutesMonthlyValue.capUSD {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(
+                    text: String(format: "Monthly Cap: $%.2f (5× subscription)", capUSD)
+                )
                 submenu.addItem(item)
             }
 
             if let credits = details.creditsBalance {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Credits: $%.2f", credits))
+                item.view = createDisabledLabelView(text: String(format: "Credits Balance: $%.2f", credits))
                 submenu.addItem(item)
             }
+
+            let overageItem = NSMenuItem()
+            overageItem.view = createDisabledLabelView(text: "Overage: PAYGO after cap")
+            submenu.addItem(overageItem)
 
             addSubscriptionItems(to: submenu, provider: .chutes)
 
@@ -680,7 +728,8 @@ extension StatusBarController {
             submenu.addItem(item)
         }
 
-        if let authSource = details.authSource {
+        // Skip generic "Token From:" for providers that already render it in their case block above.
+        if let authSource = details.authSource, identifier != .copilot {
             submenu.addItem(NSMenuItem.separator())
             let authItem = NSMenuItem()
             authItem.view = createDisabledLabelView(
@@ -719,6 +768,24 @@ extension StatusBarController {
         return TokenManager.shared.getOpenAIAccounts().first { account in
             account.accountId == accountId
         }?.email
+    }
+
+    private func resolvedChutesMonthlyValuePresentation(details: DetailedUsage) -> (usedUSD: Double?, capUSD: Double?, usedPercent: Double?) {
+        let configuredPlan = SubscriptionSettingsManager.shared.getPlan(for: .chutes)
+        let configuredCapUSD = configuredPlan.isSet
+            ? configuredPlan.cost * ChutesProvider.monthlyValueMultiplier
+            : nil
+        let capUSD = configuredCapUSD ?? details.chutesMonthlyValueCapUSD
+        let usedUSD = details.chutesMonthlyValueUsedUSD
+
+        let usedPercent: Double?
+        if let usedUSD, let capUSD, capUSD > 0 {
+            usedPercent = min(max((usedUSD / capUSD) * 100.0, 0), 999)
+        } else {
+            usedPercent = details.chutesMonthlyValueUsedPercent
+        }
+
+        return (usedUSD, capUSD, usedPercent)
     }
 
     private func addGroupedModelUsageSection(

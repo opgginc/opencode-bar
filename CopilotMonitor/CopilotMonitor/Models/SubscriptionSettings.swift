@@ -130,6 +130,15 @@ struct ProviderSubscriptionPresets {
         SubscriptionPreset(name: "Vivace", cost: 199)
     ]
 
+    static let minimaxCodingPlan: [SubscriptionPreset] = [
+        SubscriptionPreset(name: "Starter", cost: 10),
+        SubscriptionPreset(name: "Plus", cost: 20),
+        SubscriptionPreset(name: "Max", cost: 50),
+        SubscriptionPreset(name: "Plus HS", cost: 40),
+        SubscriptionPreset(name: "Max HS", cost: 80),
+        SubscriptionPreset(name: "Ultra HS", cost: 150)
+    ]
+
     static let antigravity: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Pro", cost: 20)
     ]
@@ -173,6 +182,8 @@ struct ProviderSubscriptionPresets {
             return copilot
         case .kimi:
             return kimi
+        case .minimaxCodingPlan:
+            return minimaxCodingPlan
         case .antigravity:
             return antigravity
         case .openRouter:

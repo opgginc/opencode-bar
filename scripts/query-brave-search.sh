@@ -9,6 +9,67 @@ CONFIG_PATHS=(
     "$HOME/Library/Application Support/opencode/opencode.json"
 )
 
+SEARCH_KEYS_PATHS=(
+    "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/search-keys.json"
+    "$HOME/.config/opencode/search-keys.json"
+    "$HOME/.local/share/opencode/search-keys.json"
+    "$HOME/Library/Application Support/opencode/search-keys.json"
+)
+
+strip_json_comments() {
+    python3 - "$1" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding='utf-8')
+result = []
+state = 'normal'
+escaped = False
+i = 0
+
+while i < len(text):
+    ch = text[i]
+    nxt = text[i + 1] if i + 1 < len(text) else ''
+
+    if state == 'normal':
+        if ch == '/' and nxt == '/':
+            state = 'line'
+            i += 2
+            continue
+        if ch == '/' and nxt == '*':
+            state = 'block'
+            i += 2
+            continue
+        result.append(ch)
+        if ch == '"':
+            state = 'string'
+            escaped = False
+    elif state == 'string':
+        result.append(ch)
+        if escaped:
+            escaped = False
+        elif ch == '\\':
+            escaped = True
+        elif ch == '"':
+            state = 'normal'
+    elif state == 'line':
+        if ch in '\r\n':
+            result.append(ch)
+            state = 'normal'
+    elif state == 'block':
+        if ch == '*' and nxt == '/':
+            state = 'normal'
+            i += 2
+            continue
+        if ch in '\r\n':
+            result.append(ch)
+
+    i += 1
+
+sys.stdout.write(''.join(result))
+PY
+}
+
 resolve_config_value() {
     local value="$1"
 
@@ -177,34 +238,83 @@ for path in "${CONFIG_PATHS[@]}"; do
     fi
 done
 
-if [[ -z "$CONFIG_FILE" ]]; then
-    echo "Error: OpenCode config file not found"
-    exit 1
+SEARCH_KEYS_FILE=""
+for path in "${SEARCH_KEYS_PATHS[@]}"; do
+    if [[ -f "$path" ]]; then
+        SEARCH_KEYS_FILE="$path"
+        break
+    fi
+done
+
+NORMALIZED_CONFIG_FILE=""
+NORMALIZED_SEARCH_KEYS_FILE=""
+headers_file=""
+body_file=""
+
+if [[ -n "$CONFIG_FILE" ]]; then
+    NORMALIZED_CONFIG_FILE="$(mktemp)"
+    strip_json_comments "$CONFIG_FILE" > "$NORMALIZED_CONFIG_FILE"
 fi
 
-RAW_ENV_KEY=$(jq -r '.mcp["brave-search"].environment.BRAVE_API_KEY // empty' "$CONFIG_FILE")
-RAW_HEADER_KEY=$(jq -r '.mcp["brave-search"].headers["X-Subscription-Token"] // empty' "$CONFIG_FILE")
+if [[ -n "$SEARCH_KEYS_FILE" ]]; then
+    NORMALIZED_SEARCH_KEYS_FILE="$(mktemp)"
+    strip_json_comments "$SEARCH_KEYS_FILE" > "$NORMALIZED_SEARCH_KEYS_FILE"
+fi
+
+cleanup() {
+    rm -f "$NORMALIZED_CONFIG_FILE" "$NORMALIZED_SEARCH_KEYS_FILE" "$headers_file" "$body_file"
+}
+trap cleanup EXIT
+
+RAW_ENV_KEY=""
+RAW_HEADER_KEY=""
+
+if [[ -n "$NORMALIZED_CONFIG_FILE" ]]; then
+    RAW_ENV_KEY=$(jq -r '.mcp["brave-search"].environment.BRAVE_API_KEY // empty' "$NORMALIZED_CONFIG_FILE")
+    RAW_HEADER_KEY=$(jq -r '.mcp["brave-search"].headers["X-Subscription-Token"] // empty' "$NORMALIZED_CONFIG_FILE")
+fi
 
 API_KEY=$(resolve_config_value "$RAW_ENV_KEY")
 if [[ -z "$API_KEY" ]]; then
     API_KEY=$(resolve_config_value "$RAW_HEADER_KEY")
 fi
 
+if [[ -z "$API_KEY" && -n "$NORMALIZED_SEARCH_KEYS_FILE" ]]; then
+    RAW_SEARCH_KEY=$(jq -r '."brave-search".apiKey // .BRAVE_API_KEY // empty' "$NORMALIZED_SEARCH_KEYS_FILE")
+    RAW_SEARCH_TOKEN=$(jq -r '."brave-search".subscriptionToken // empty' "$NORMALIZED_SEARCH_KEYS_FILE")
+
+    API_KEY=$(resolve_config_value "$RAW_SEARCH_KEY")
+    if [[ -z "$API_KEY" ]]; then
+        API_KEY=$(resolve_config_value "$RAW_SEARCH_TOKEN")
+    fi
+fi
+
 if [[ -z "$API_KEY" ]]; then
-    echo "Error: Brave Search API key not found in $CONFIG_FILE"
+    API_KEY=$(resolve_config_value "$BRAVE_API_KEY")
+fi
+
+if [[ -z "$API_KEY" ]]; then
+    echo "Error: Brave Search API key not found"
     echo "Expected one of:"
     echo "  - .mcp[\"brave-search\"].environment.BRAVE_API_KEY"
     echo "  - .mcp[\"brave-search\"].headers[\"X-Subscription-Token\"]"
+    echo "  - .[\"brave-search\"].apiKey in search-keys.json"
+    echo "  - BRAVE_API_KEY environment variable"
     exit 1
 fi
 
 echo "=== Brave Search Usage ==="
-echo "Config: $CONFIG_FILE"
+if [[ -n "$CONFIG_FILE" ]]; then
+    echo "Config: $CONFIG_FILE"
+elif [[ -n "$SEARCH_KEYS_FILE" ]]; then
+    echo "Config: $SEARCH_KEYS_FILE"
+else
+    echo "Config: env:BRAVE_API_KEY"
+fi
 echo ""
 
 headers_file="$(mktemp)"
 body_file="$(mktemp)"
-trap 'rm -f "$headers_file" "$body_file"' EXIT
 
 HTTP_CODE=$(curl -sS -o "$body_file" -D "$headers_file" -w "%{http_code}" \
     "https://api.search.brave.com/res/v1/web/search?q=opencode&count=1" \

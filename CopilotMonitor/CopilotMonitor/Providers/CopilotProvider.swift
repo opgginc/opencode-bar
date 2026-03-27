@@ -171,16 +171,7 @@ final class CopilotProvider: ProviderProtocol {
     }
 
     private func sourcePriority(_ source: CopilotAuthSource?) -> Int {
-        switch source {
-        case .opencodeAuth:
-            return 3
-        case .vscodeHosts:
-            return 2
-        case .vscodeApps:
-            return 1
-        case .none:
-            return 0
-        }
+        source?.priority ?? 0
     }
 
     private func fetchTokenInfos(_ accounts: [CopilotAuthAccount]) async -> [CopilotTokenInfo] {
@@ -274,7 +265,7 @@ final class CopilotProvider: ProviderProtocol {
         sourcePriority: Int,
         dailyHistory: [DailyUsage]?
     ) -> CopilotAccountCandidate {
-        let remaining = usage.limitRequests - usage.usedRequests
+        let remaining = max(0, usage.limitRequests - usage.usedRequests)
         let providerUsage = ProviderUsage.quotaBased(
             remaining: remaining,
             entitlement: usage.limitRequests,
@@ -560,11 +551,11 @@ final class CopilotProvider: ProviderProtocol {
         logger.info("CopilotProvider: Parsing data (Keys: \(dict.keys.joined(separator: ", ")))")
 
         // Extract values with fallback key names
-        let netBilledAmount = parseDoubleValue(from: dict, keys: ["netBilledAmount", "net_billed_amount"])
-        let netQuantity = parseDoubleValue(from: dict, keys: ["netQuantity", "net_quantity"])
-        let discountQuantity = parseDoubleValue(from: dict, keys: ["discountQuantity", "discount_quantity"])
-        let limit = parseIntValue(from: dict, keys: ["userPremiumRequestEntitlement", "user_premium_request_entitlement", "quantity"])
-        let filteredLimit = parseIntValue(from: dict, keys: ["filteredUserPremiumRequestEntitlement"])
+        let netBilledAmount = APIValueParser.parseDouble(from: dict, keys: ["netBilledAmount", "net_billed_amount"])
+        let netQuantity = APIValueParser.parseDouble(from: dict, keys: ["netQuantity", "net_quantity"])
+        let discountQuantity = APIValueParser.parseDouble(from: dict, keys: ["discountQuantity", "discount_quantity"])
+        let limit = APIValueParser.parseInt(from: dict, keys: ["userPremiumRequestEntitlement", "user_premium_request_entitlement", "quantity"])
+        let filteredLimit = APIValueParser.parseInt(from: dict, keys: ["filteredUserPremiumRequestEntitlement"])
 
         return CopilotUsage(
             netBilledAmount: netBilledAmount,
@@ -573,35 +564,6 @@ final class CopilotProvider: ProviderProtocol {
             userPremiumRequestEntitlement: limit,
             filteredUserPremiumRequestEntitlement: filteredLimit
         )
-    }
-
-    /// Parse double value from dictionary with multiple possible keys
-    private func parseDoubleValue(from dict: [String: Any], keys: [String]) -> Double {
-        for key in keys {
-            if let value = dict[key] as? Double {
-                return value
-            }
-            if let value = dict[key] as? Int {
-                return Double(value)
-            }
-            if let value = dict[key] as? NSNumber {
-                return value.doubleValue
-            }
-        }
-        return 0.0
-    }
-
-    /// Parse integer value from dictionary with multiple possible keys
-    private func parseIntValue(from dict: [String: Any], keys: [String]) -> Int {
-        for key in keys {
-            if let value = dict[key] as? Int {
-                return value
-            }
-            if let value = dict[key] as? Double {
-                return Int(value)
-            }
-        }
-        return 0
     }
 
     // MARK: - Caching

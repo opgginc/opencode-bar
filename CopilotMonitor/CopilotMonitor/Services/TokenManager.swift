@@ -173,6 +173,7 @@ struct OpenCodeAuth: Codable {
     let openrouter: APIKey?
     let opencode: APIKey?
     let kimiForCoding: APIKey?
+    let minimaxCodingPlan: APIKey?
     let zaiCodingPlan: APIKey?
     let nanoGpt: APIKey?
     let synthetic: APIKey?
@@ -182,6 +183,7 @@ struct OpenCodeAuth: Codable {
         case anthropic, openai, openrouter, opencode, synthetic, chutes
         case githubCopilot = "github-copilot"
         case kimiForCoding = "kimi-for-coding"
+        case minimaxCodingPlan = "minimax-coding-plan"
         case zaiCodingPlan = "zai-coding-plan"
         case nanoGpt = "nano-gpt"
     }
@@ -193,6 +195,7 @@ struct OpenCodeAuth: Codable {
         openrouter: APIKey?,
         opencode: APIKey?,
         kimiForCoding: APIKey?,
+        minimaxCodingPlan: APIKey?,
         zaiCodingPlan: APIKey?,
         nanoGpt: APIKey?,
         synthetic: APIKey?,
@@ -204,6 +207,7 @@ struct OpenCodeAuth: Codable {
         self.openrouter = openrouter
         self.opencode = opencode
         self.kimiForCoding = kimiForCoding
+        self.minimaxCodingPlan = minimaxCodingPlan
         self.zaiCodingPlan = zaiCodingPlan
         self.nanoGpt = nanoGpt
         self.synthetic = synthetic
@@ -218,6 +222,7 @@ struct OpenCodeAuth: Codable {
         openrouter = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .openrouter)
         opencode = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .opencode)
         kimiForCoding = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .kimiForCoding)
+        minimaxCodingPlan = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .minimaxCodingPlan)
         zaiCodingPlan = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .zaiCodingPlan)
         nanoGpt = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .nanoGpt)
         synthetic = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .synthetic)
@@ -229,6 +234,7 @@ struct OpenCodeAuth: Codable {
            openrouter == nil,
            opencode == nil,
            kimiForCoding == nil,
+           minimaxCodingPlan == nil,
            zaiCodingPlan == nil,
            nanoGpt == nil,
            synthetic == nil,
@@ -262,6 +268,7 @@ struct OpenCodeAuth: Codable {
         try container.encodeIfPresent(openrouter, forKey: .openrouter)
         try container.encodeIfPresent(opencode, forKey: .opencode)
         try container.encodeIfPresent(kimiForCoding, forKey: .kimiForCoding)
+        try container.encodeIfPresent(minimaxCodingPlan, forKey: .minimaxCodingPlan)
         try container.encodeIfPresent(zaiCodingPlan, forKey: .zaiCodingPlan)
         try container.encodeIfPresent(nanoGpt, forKey: .nanoGpt)
         try container.encodeIfPresent(synthetic, forKey: .synthetic)
@@ -379,10 +386,33 @@ struct ClaudeAuthAccount {
 }
 
 /// Auth source types for GitHub Copilot token discovery
-enum CopilotAuthSource {
+enum CopilotAuthSource: CustomStringConvertible {
     case opencodeAuth
+    case copilotCliKeychain
     case vscodeHosts
     case vscodeApps
+
+    var priority: Int {
+        switch self {
+        case .opencodeAuth:       return 3
+        case .copilotCliKeychain: return 2
+        case .vscodeHosts:        return 1
+        case .vscodeApps:         return 0
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .opencodeAuth:
+            return "opencodeAuth"
+        case .copilotCliKeychain:
+            return "copilotCliKeychain"
+        case .vscodeHosts:
+            return "vscodeHosts"
+        case .vscodeApps:
+            return "vscodeApps"
+        }
+    }
 }
 
 /// Unified GitHub Copilot token model used by the provider layer
@@ -605,6 +635,13 @@ final class TokenManager: @unchecked Sendable {
     /// Path where opencode.json was found
     private(set) var lastFoundOpenCodeConfigPath: URL?
 
+    /// Cached fallback search key JSON (search-keys.json)
+    private var cachedSearchKeysJSON: [String: Any]?
+    private var searchKeysCacheTimestamp: Date?
+
+    /// Path where search-keys.json was found
+    private(set) var lastFoundSearchKeysPath: URL?
+
     private init() {
         logger.info("TokenManager initialized")
     }
@@ -678,47 +715,167 @@ final class TokenManager: @unchecked Sendable {
         )
     }
 
+    /// Possible search-keys.json locations in priority order:
+    /// 1. $XDG_CONFIG_HOME/opencode/search-keys.json (if XDG_CONFIG_HOME is set)
+    /// 2. ~/.config/opencode/search-keys.json (XDG default on macOS/Linux)
+    /// 3. ~/.local/share/opencode/search-keys.json (fallback)
+    /// 4. ~/Library/Application Support/opencode/search-keys.json (macOS fallback)
+    func getSearchKeyFilePaths() -> [URL] {
+        return buildOpenCodeFilePaths(
+            envVarName: "XDG_CONFIG_HOME",
+            envRelativePathComponents: ["opencode", "search-keys.json"],
+            fallbackRelativePathComponents: [
+                [".config", "opencode", "search-keys.json"],
+                [".local", "share", "opencode", "search-keys.json"],
+                ["Library", "Application Support", "opencode", "search-keys.json"]
+            ]
+        )
+    }
+
+    private func readJSONDictionaryAllowingComments(
+        from paths: [URL],
+        cache: inout [String: Any]?,
+        timestamp: inout Date?,
+        foundPath: inout URL?,
+        warningPrefix: String
+    ) -> [String: Any]? {
+        if let cache,
+           let timestamp,
+           Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+            return cache
+        }
+
+        let fileManager = FileManager.default
+        for candidatePath in paths {
+            guard fileManager.fileExists(atPath: candidatePath.path) else {
+                continue
+            }
+            guard fileManager.isReadableFile(atPath: candidatePath.path) else {
+                logger.warning("\(warningPrefix) file not readable at \(candidatePath.path)")
+                continue
+            }
+
+            do {
+                let data = try Data(contentsOf: candidatePath)
+                let normalizedData = stripJSONComments(from: data)
+                let jsonObject = try JSONSerialization.jsonObject(with: normalizedData)
+                guard let dict = jsonObject as? [String: Any] else {
+                    logger.warning("\(warningPrefix) is not a JSON object at \(candidatePath.path)")
+                    continue
+                }
+
+                foundPath = candidatePath
+                cache = dict
+                timestamp = Date()
+                return dict
+            } catch {
+                logger.warning("Failed to parse \(warningPrefix) at \(candidatePath.path): \(error.localizedDescription)")
+            }
+        }
+
+        foundPath = nil
+        cache = nil
+        timestamp = nil
+        return nil
+    }
+
     private func readOpenCodeConfigJSON() -> [String: Any]? {
         return queue.sync {
-            if let cached = cachedOpenCodeConfigJSON,
-               let timestamp = openCodeConfigCacheTimestamp,
-               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
-                return cached
-            }
-
-            let fileManager = FileManager.default
-            let paths = getOpenCodeConfigFilePaths()
-            for configPath in paths {
-                guard fileManager.fileExists(atPath: configPath.path) else {
-                    continue
-                }
-                guard fileManager.isReadableFile(atPath: configPath.path) else {
-                    logger.warning("OpenCode config file not readable at \(configPath.path)")
-                    continue
-                }
-
-                do {
-                    let data = try Data(contentsOf: configPath)
-                    let jsonObject = try JSONSerialization.jsonObject(with: data)
-                    guard let dict = jsonObject as? [String: Any] else {
-                        logger.warning("OpenCode config is not a JSON object at \(configPath.path)")
-                        continue
-                    }
-
-                    lastFoundOpenCodeConfigPath = configPath
-                    cachedOpenCodeConfigJSON = dict
-                    openCodeConfigCacheTimestamp = Date()
-                    return dict
-                } catch {
-                    logger.warning("Failed to parse OpenCode config at \(configPath.path): \(error.localizedDescription)")
-                }
-            }
-
-            lastFoundOpenCodeConfigPath = nil
-            cachedOpenCodeConfigJSON = nil
-            openCodeConfigCacheTimestamp = nil
-            return nil
+            return readJSONDictionaryAllowingComments(
+                from: getOpenCodeConfigFilePaths(),
+                cache: &cachedOpenCodeConfigJSON,
+                timestamp: &openCodeConfigCacheTimestamp,
+                foundPath: &lastFoundOpenCodeConfigPath,
+                warningPrefix: "OpenCode config"
+            )
         }
+    }
+
+    private func readSearchKeysJSON() -> [String: Any]? {
+        return queue.sync {
+            return readJSONDictionaryAllowingComments(
+                from: getSearchKeyFilePaths(),
+                cache: &cachedSearchKeysJSON,
+                timestamp: &searchKeysCacheTimestamp,
+                foundPath: &lastFoundSearchKeysPath,
+                warningPrefix: "Search keys config"
+            )
+        }
+    }
+
+    private func stripJSONComments(from data: Data) -> Data {
+        guard let text = String(data: data, encoding: .utf8) else {
+            return data
+        }
+
+        enum State {
+            case normal
+            case string
+            case lineComment
+            case blockComment
+        }
+
+        var result = String()
+        result.reserveCapacity(text.count)
+
+        var state: State = .normal
+        var isEscaped = false
+        let characters = Array(text)
+        var index = 0
+
+        while index < characters.count {
+            let current = characters[index]
+            let next = index + 1 < characters.count ? characters[index + 1] : nil
+
+            switch state {
+            case .normal:
+                if current == "/", next == "/" {
+                    state = .lineComment
+                    index += 2
+                    continue
+                }
+                if current == "/", next == "*" {
+                    state = .blockComment
+                    index += 2
+                    continue
+                }
+                result.append(current)
+                if current == "\"" {
+                    state = .string
+                    isEscaped = false
+                }
+
+            case .string:
+                result.append(current)
+                if isEscaped {
+                    isEscaped = false
+                } else if current == "\\" {
+                    isEscaped = true
+                } else if current == "\"" {
+                    state = .normal
+                }
+
+            case .lineComment:
+                if current == "\n" || current == "\r" {
+                    result.append(current)
+                    state = .normal
+                }
+
+            case .blockComment:
+                if current == "*", next == "/" {
+                    state = .normal
+                    index += 2
+                    continue
+                }
+                if current == "\n" || current == "\r" {
+                    result.append(current)
+                }
+            }
+
+            index += 1
+        }
+
+        return Data(result.utf8)
     }
 
     private func resolveConfigValue(_ rawValue: String?) -> String? {
@@ -823,6 +980,42 @@ final class TokenManager: @unchecked Sendable {
             from: config,
             sourcePath: lastFoundOpenCodeConfigPath?.path
         )
+    }
+
+    private struct SearchAPIKeyLookupSource {
+        let dictionary: [String: Any]?
+        let sourcePath: String?
+        let paths: [[String]]
+        let fallbackSourceName: String
+    }
+
+    private func resolvedSearchAPIKey(
+        configSource: SearchAPIKeyLookupSource,
+        searchKeysSource: SearchAPIKeyLookupSource,
+        directEnvironmentVariable: String
+    ) -> (key: String, source: String)? {
+        if let configDictionary = configSource.dictionary {
+            for path in configSource.paths {
+                if let resolved = resolveConfigValue(nestedString(in: configDictionary, path: path)) {
+                    return (resolved, configSource.sourcePath ?? configSource.fallbackSourceName)
+                }
+            }
+        }
+
+        if let searchKeysDictionary = searchKeysSource.dictionary {
+            for path in searchKeysSource.paths {
+                if let resolved = resolveConfigValue(nestedString(in: searchKeysDictionary, path: path)) {
+                    return (resolved, searchKeysSource.sourcePath ?? searchKeysSource.fallbackSourceName)
+                }
+            }
+        }
+
+        if let envValue = ProcessInfo.processInfo.environment[directEnvironmentVariable],
+           let resolved = resolveConfigValue(envValue) {
+            return (resolved, "Environment variable \(directEnvironmentVariable)")
+        }
+
+        return nil
     }
 
     /// Returns the path where auth.json was found, or nil if not found
@@ -2412,7 +2605,97 @@ final class TokenManager: @unchecked Sendable {
         return accounts
     }
 
-    /// Gets all GitHub Copilot token accounts (OpenCode auth + VS Code Copilot tokens)
+    /// Read GitHub Copilot CLI credentials from macOS Keychain
+    /// Service name: "copilot-cli", class: kSecClassGenericPassword
+    /// Account format: "https://github.com:username"
+    /// Password: GitHub OAuth token
+    private func readCopilotCliKeychainAccounts() -> [CopilotAuthAccount] {
+        let service = "copilot-cli"
+
+        // Step 1: Query for all matching items to get their accounts
+        let listQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+
+        var listResult: AnyObject?
+        let listStatus = SecItemCopyMatching(listQuery as CFDictionary, &listResult)
+
+        guard listStatus == errSecSuccess else {
+            if listStatus == errSecItemNotFound {
+                logger.debug("[CopilotKeychain] No Keychain items found for service '\(service)'")
+            } else {
+                logger.warning("[CopilotKeychain] Failed to list Keychain items for '\(service)', status: \(listStatus)")
+            }
+            return []
+        }
+
+        // Get array of account attributes
+        let items: [[String: Any]]
+        if let dict = listResult as? [String: Any] {
+            items = [dict]
+        } else if let array = listResult as? [[String: Any]] {
+            items = array
+        } else {
+            logger.warning("[CopilotKeychain] Unexpected result type when listing items")
+            return []
+        }
+
+        var accounts: [CopilotAuthAccount] = []
+
+        // Step 2: For each item, query individually to get the password data
+        for item in items {
+            guard let account = item[kSecAttrAccount as String] as? String else {
+                continue
+            }
+
+            // Query individually for this account to get the password
+            let dataQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne
+            ]
+
+            var dataResult: AnyObject?
+            let dataStatus = SecItemCopyMatching(dataQuery as CFDictionary, &dataResult)
+
+            guard dataStatus == errSecSuccess,
+                  let passwordData = dataResult as? Data,
+                  let token = String(data: passwordData, encoding: .utf8),
+                  !token.isEmpty else {
+                logger.debug("[CopilotKeychain] Failed to get token for account '\(account)' (status: \(dataStatus))")
+                continue
+            }
+
+            // Parse username from account field (format: "https://github.com:username")
+            var login: String?
+            if let lastColon = account.lastIndex(of: ":") {
+                let afterColon = account.index(after: lastColon)
+                let candidate = String(account[afterColon...])
+                if !candidate.isEmpty {
+                    login = candidate
+                }
+            }
+
+            accounts.append(
+                CopilotAuthAccount(
+                    accessToken: token,
+                    accountId: nil,
+                    login: login,
+                    authSource: "Keychain (copilot-cli)",
+                    source: .copilotCliKeychain
+                )
+            )
+        }
+
+        return accounts
+    }
+
+    /// Gets all GitHub Copilot token accounts (OpenCode auth + Copilot CLI Keychain + VS Code Copilot tokens)
     func getGitHubCopilotAccounts() -> [CopilotAuthAccount] {
         if let cached = queue.sync(execute: {
             if let cached = cachedCopilotAccounts,
@@ -2442,6 +2725,9 @@ final class TokenManager: @unchecked Sendable {
             )
         }
 
+        // Add Copilot CLI Keychain accounts
+        accounts.append(contentsOf: readCopilotCliKeychainAccounts())
+
         for path in copilotTokenPaths() {
             guard let dict = readJSONDictionary(at: path) else { continue }
             let source: CopilotAuthSource = path.lastPathComponent == "apps.json" ? .vscodeApps : .vscodeHosts
@@ -2449,6 +2735,7 @@ final class TokenManager: @unchecked Sendable {
         }
 
         let deduped = dedupeCopilotAccounts(accounts)
+        
         logger.info("GitHub Copilot token accounts discovered: \(deduped.count)")
         queue.sync {
             cachedCopilotAccounts = deduped
@@ -2458,18 +2745,12 @@ final class TokenManager: @unchecked Sendable {
     }
 
     private func dedupeCopilotAccounts(_ accounts: [CopilotAuthAccount]) -> [CopilotAuthAccount] {
-        func priority(for source: CopilotAuthSource) -> Int {
-            switch source {
-            case .opencodeAuth: return 2
-            case .vscodeHosts: return 1
-            case .vscodeApps: return 0
-            }
-        }
-
         var byToken: [String: CopilotAuthAccount] = [:]
         for account in accounts {
             if let existing = byToken[account.accessToken] {
-                if priority(for: account.source) > priority(for: existing.source) {
+                let existingPriority = existing.source.priority
+                let newPriority = account.source.priority
+                if newPriority > existingPriority {
                     byToken[account.accessToken] = account
                 }
             } else {
@@ -2779,6 +3060,10 @@ final class TokenManager: @unchecked Sendable {
 
             guard httpResponse.statusCode == 200 else {
                 logger.error("Copilot API returned status: \(httpResponse.statusCode)")
+                if let responseBody = String(data: data, encoding: .utf8) {
+                    let truncated = String(responseBody.prefix(256))
+                    logger.debug("Copilot API error body (truncated): \(truncated)")
+                }
                 return nil
             }
 
@@ -2827,8 +3112,10 @@ final class TokenManager: @unchecked Sendable {
                 }
             }
 
+            // Try multiple quota sources for different API versions
             let limitedUserQuotas = json["limited_user_quotas"] as? [String: Any]
             let monthlyQuotas = json["monthly_quotas"] as? [String: Any]
+            let quotaSnapshots = json["quota_snapshots"] as? [String: Any]
 
             func quotaValue(_ dict: [String: Any]?, key: String) -> Int? {
                 guard let dict = dict else { return nil }
@@ -2839,14 +3126,53 @@ final class TokenManager: @unchecked Sendable {
                 return nil
             }
 
+            // Legacy API format: monthly_quotas and limited_user_quotas
             let monthlyCompletions = quotaValue(monthlyQuotas, key: "completions")
             let monthlyChat = quotaValue(monthlyQuotas, key: "chat")
             let limitedCompletions = quotaValue(limitedUserQuotas, key: "completions")
             let limitedChat = quotaValue(limitedUserQuotas, key: "chat")
 
-            let quotaLimit = monthlyCompletions ?? monthlyChat
+            // New API format: quota_snapshots (contains entitlement/remaining for each quota type)
+            var snapshotEntitlement: Int?
+            var snapshotRemaining: Int?
+            if let snapshots = quotaSnapshots {
+                // Sum up entitlement and remaining from all quota types
+                var totalEntitlement = 0
+                var totalRemaining = 0
+                var hasUnlimited = false
+                
+                for (_, value) in snapshots {
+                    if let quota = value as? [String: Any] {
+                        // Check if this quota type is unlimited
+                        if let unlimited = quota["unlimited"] as? Bool, unlimited {
+                            hasUnlimited = true
+                        }
+                        
+                        // Add entitlement and remaining
+                        if let entitlement = quotaValue(quota, key: "entitlement"), entitlement > 0 {
+                            totalEntitlement += entitlement
+                        }
+                        if let remaining = quotaValue(quota, key: "remaining") {
+                            totalRemaining += remaining
+                        }
+                    }
+                }
+                
+                if totalEntitlement > 0 {
+                    snapshotEntitlement = totalEntitlement
+                    snapshotRemaining = totalRemaining
+                } else if hasUnlimited {
+                    // Sentinel value so downstream guard (limit > 0) passes
+                    // and usage = (Int.max - Int.max) / Int.max ≈ 0%
+                    snapshotEntitlement = Int.max
+                    snapshotRemaining = Int.max
+                }
+            }
+
+            // Combine all quota sources with priority: snapshots > monthly > legacy
+            let quotaLimit = snapshotEntitlement ?? monthlyCompletions ?? monthlyChat
                 ?? ((monthlyCompletions != nil || monthlyChat != nil) ? (monthlyCompletions ?? 0) + (monthlyChat ?? 0) : nil)
-            let quotaRemaining = limitedCompletions ?? limitedChat
+            let quotaRemaining = snapshotRemaining ?? limitedCompletions ?? limitedChat
                 ?? ((limitedCompletions != nil || limitedChat != nil) ? (limitedCompletions ?? 0) + (limitedChat ?? 0) : nil)
 
             if let resetDate = resetDate {
@@ -2894,6 +3220,11 @@ final class TokenManager: @unchecked Sendable {
         return auth.kimiForCoding?.key
     }
 
+    func getMiniMaxCodingPlanAPIKey() -> String? {
+        guard let auth = readOpenCodeAuth() else { return nil }
+        return auth.minimaxCodingPlan?.key
+    }
+
     func getZaiCodingPlanAPIKey() -> String? {
         guard let auth = readOpenCodeAuth() else { return nil }
         return auth.zaiCodingPlan?.key
@@ -2915,32 +3246,72 @@ final class TokenManager: @unchecked Sendable {
     }
 
     func getTavilyAPIKey() -> String? {
-        guard let config = readOpenCodeConfigJSON() else { return nil }
-
-        let envKey = nestedString(in: config, path: ["mcp", "tavily", "environment", "TAVILY_API_KEY"])
-        if let resolved = resolveConfigValue(envKey) {
-            return resolved
-        }
-
-        let authorization = nestedString(in: config, path: ["mcp", "tavily", "headers", "Authorization"])
-        if let resolved = resolveConfigValue(authorization) {
-            return resolved
-        }
-
-        let headerKey = nestedString(in: config, path: ["mcp", "tavily", "headers", "X-API-Key"])
-        return resolveConfigValue(headerKey)
+        return getTavilyAPIKeyWithSource()?.key
     }
 
     func getBraveSearchAPIKey() -> String? {
-        guard let config = readOpenCodeConfigJSON() else { return nil }
+        return getBraveSearchAPIKeyWithSource()?.key
+    }
 
-        let envKey = nestedString(in: config, path: ["mcp", "brave-search", "environment", "BRAVE_API_KEY"])
-        if let resolved = resolveConfigValue(envKey) {
-            return resolved
-        }
+    func getTavilyAPIKeyWithSource() -> (key: String, source: String)? {
+        let config = readOpenCodeConfigJSON()
+        let searchKeys = readSearchKeysJSON()
 
-        let headerKey = nestedString(in: config, path: ["mcp", "brave-search", "headers", "X-Subscription-Token"])
-        return resolveConfigValue(headerKey)
+        return resolvedSearchAPIKey(
+            configSource: SearchAPIKeyLookupSource(
+                dictionary: config,
+                sourcePath: lastFoundOpenCodeConfigPath?.path,
+                paths: [
+                    ["mcp", "tavily-search", "environment", "TAVILY_API_KEY"],
+                    ["mcp", "tavily-search", "headers", "Authorization"],
+                    ["mcp", "tavily-search", "headers", "X-API-Key"],
+                    ["mcp", "tavily", "environment", "TAVILY_API_KEY"],
+                    ["mcp", "tavily", "headers", "Authorization"],
+                    ["mcp", "tavily", "headers", "X-API-Key"]
+                ],
+                fallbackSourceName: "opencode.json"
+            ),
+            searchKeysSource: SearchAPIKeyLookupSource(
+                dictionary: searchKeys,
+                sourcePath: lastFoundSearchKeysPath?.path,
+                paths: [
+                    ["tavily", "apiKey"],
+                    ["tavily", "authorization"],
+                    ["tavily", "xApiKey"],
+                    ["TAVILY_API_KEY"]
+                ],
+                fallbackSourceName: "search-keys.json"
+            ),
+            directEnvironmentVariable: "TAVILY_API_KEY"
+        )
+    }
+
+    func getBraveSearchAPIKeyWithSource() -> (key: String, source: String)? {
+        let config = readOpenCodeConfigJSON()
+        let searchKeys = readSearchKeysJSON()
+
+        return resolvedSearchAPIKey(
+            configSource: SearchAPIKeyLookupSource(
+                dictionary: config,
+                sourcePath: lastFoundOpenCodeConfigPath?.path,
+                paths: [
+                    ["mcp", "brave-search", "environment", "BRAVE_API_KEY"],
+                    ["mcp", "brave-search", "headers", "X-Subscription-Token"]
+                ],
+                fallbackSourceName: "opencode.json"
+            ),
+            searchKeysSource: SearchAPIKeyLookupSource(
+                dictionary: searchKeys,
+                sourcePath: lastFoundSearchKeysPath?.path,
+                paths: [
+                    ["brave-search", "apiKey"],
+                    ["brave-search", "subscriptionToken"],
+                    ["BRAVE_API_KEY"]
+                ],
+                fallbackSourceName: "search-keys.json"
+            ),
+            directEnvironmentVariable: "BRAVE_API_KEY"
+        )
     }
 
     /// Gets Gemini refresh token from discovered Gemini account sources
@@ -3363,6 +3734,12 @@ final class TokenManager: @unchecked Sendable {
         lines.append("")
         lines.append("[GitHub Copilot]")
         lines.append("  OpenCode auth.json (\(shortPath(openCodePath))): \(tokenStatus(hasAuth: openCodeAuth != nil, token: openCodeAuth?.githubCopilot?.access, accountId: openCodeAuth?.githubCopilot?.accountId))")
+
+        // Copilot CLI Keychain status
+        let copilotCliKeychainAccounts = readCopilotCliKeychainAccounts()
+        let copilotCliStatus = copilotCliKeychainAccounts.isEmpty ? "NOT FOUND" : "FOUND (\(copilotCliKeychainAccounts.count) account(s))"
+        lines.append("  Copilot CLI Keychain (copilot-cli): \(copilotCliStatus)")
+
         let copilotBase = homeDir
             .appendingPathComponent("Library")
             .appendingPathComponent("Application Support")
@@ -3508,6 +3885,7 @@ final class TokenManager: @unchecked Sendable {
             debugLines.append("  [OpenRouter] \(auth.openrouter != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [OpenCode] \(auth.opencode != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [Kimi] \(auth.kimiForCoding != nil ? "CONFIGURED" : "NOT CONFIGURED")")
+            debugLines.append("  [MiniMax Coding Plan] \(auth.minimaxCodingPlan != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [Z.AI Coding Plan] \(auth.zaiCodingPlan != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [Nano-GPT] \(auth.nanoGpt != nil ? "CONFIGURED" : "NOT CONFIGURED")")
         } else {
@@ -3801,6 +4179,14 @@ final class TokenManager: @unchecked Sendable {
                 debugLines.append("  - Key Preview: \(maskToken(kimi.key))")
             } else {
                 debugLines.append("[Kimi for Coding] NOT CONFIGURED")
+            }
+
+            if let minimaxCodingPlan = auth.minimaxCodingPlan {
+                debugLines.append("[MiniMax Coding Plan] API Key Present")
+                debugLines.append("  - Key Length: \(minimaxCodingPlan.key.count) chars")
+                debugLines.append("  - Key Preview: \(maskToken(minimaxCodingPlan.key))")
+            } else {
+                debugLines.append("[MiniMax Coding Plan] NOT CONFIGURED")
             }
 
             if let zaiCodingPlan = auth.zaiCodingPlan {

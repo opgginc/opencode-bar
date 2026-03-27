@@ -95,6 +95,53 @@ final class CopilotProviderTests: XCTestCase {
         XCTAssertEqual(usage.limitRequests, 0)
     }
     
+    // MARK: - CopilotAuthSource Tests
+
+    func testCopilotAuthSourceAllCasesExist() {
+        // Verify all four expected auth source cases exist and have distinct descriptions
+        let descriptions: Set<String> = [
+            CopilotAuthSource.opencodeAuth.description,
+            CopilotAuthSource.copilotCliKeychain.description,
+            CopilotAuthSource.vscodeHosts.description,
+            CopilotAuthSource.vscodeApps.description
+        ]
+        XCTAssertEqual(descriptions.count, 4, "Each CopilotAuthSource case must have a unique description")
+    }
+
+    func testCopilotAuthSourceDescriptions() {
+        XCTAssertEqual(CopilotAuthSource.opencodeAuth.description, "opencodeAuth")
+        XCTAssertEqual(CopilotAuthSource.copilotCliKeychain.description, "copilotCliKeychain")
+        XCTAssertEqual(CopilotAuthSource.vscodeHosts.description, "vscodeHosts")
+        XCTAssertEqual(CopilotAuthSource.vscodeApps.description, "vscodeApps")
+    }
+
+    // MARK: - CopilotAuthSource.priority
+
+    func testSourcePriorityOrdering() {
+        XCTAssertGreaterThan(
+            CopilotAuthSource.opencodeAuth.priority,
+            CopilotAuthSource.copilotCliKeychain.priority,
+            "opencodeAuth must outrank copilotCliKeychain"
+        )
+        XCTAssertGreaterThan(
+            CopilotAuthSource.copilotCliKeychain.priority,
+            CopilotAuthSource.vscodeHosts.priority,
+            "copilotCliKeychain must outrank vscodeHosts"
+        )
+        XCTAssertGreaterThan(
+            CopilotAuthSource.vscodeHosts.priority,
+            CopilotAuthSource.vscodeApps.priority,
+            "vscodeHosts must outrank vscodeApps"
+        )
+    }
+
+    func testSourcePriorityAbsoluteValues() {
+        XCTAssertEqual(CopilotAuthSource.opencodeAuth.priority, 3)
+        XCTAssertEqual(CopilotAuthSource.copilotCliKeychain.priority, 2)
+        XCTAssertEqual(CopilotAuthSource.vscodeHosts.priority, 1)
+        XCTAssertEqual(CopilotAuthSource.vscodeApps.priority, 0)
+    }
+
     private func loadFixture(named: String) -> Data {
         let bundle = Bundle(for: type(of: self))
         guard let url = bundle.url(forResource: named, withExtension: nil) else {

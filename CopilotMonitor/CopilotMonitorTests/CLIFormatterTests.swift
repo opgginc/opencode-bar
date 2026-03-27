@@ -12,6 +12,7 @@ final class CLIFormatterTests: XCTestCase {
         XCTAssertEqual(ProviderIdentifier.claude.rawValue, "claude")
         XCTAssertEqual(ProviderIdentifier.codex.rawValue, "codex")
         XCTAssertEqual(ProviderIdentifier.kimi.rawValue, "kimi")
+        XCTAssertEqual(ProviderIdentifier.minimaxCodingPlan.rawValue, "minimax_coding_plan")
         XCTAssertEqual(ProviderIdentifier.antigravity.rawValue, "antigravity")
         XCTAssertEqual(ProviderIdentifier.copilot.rawValue, "copilot")
         XCTAssertEqual(ProviderIdentifier.nanoGpt.rawValue, "nano_gpt")
@@ -23,6 +24,7 @@ final class CLIFormatterTests: XCTestCase {
         XCTAssertEqual(ProviderIdentifier.geminiCLI.displayName, "Gemini CLI")
         XCTAssertEqual(ProviderIdentifier.claude.displayName, "Claude")
         XCTAssertEqual(ProviderIdentifier.kimi.displayName, "Kimi for Coding")
+        XCTAssertEqual(ProviderIdentifier.minimaxCodingPlan.displayName, "MiniMax Coding Plan")
         XCTAssertEqual(ProviderIdentifier.nanoGpt.displayName, "Nano-GPT")
     }
     
@@ -186,5 +188,244 @@ final class CLIFormatterTests: XCTestCase {
         
         XCTAssertNotNil(result.details?.geminiAccounts)
         XCTAssertEqual(result.details?.geminiAccounts?.count, 2)
+    }
+
+    // MARK: - TableFormatter Tests
+
+    // MARK: Single-account separator width
+
+    /// The separator line must be exactly providerWidth + typeWidth(15) + usageWidth(10) + metricsWidth + 6
+    /// for a single provider result.
+    func testTableFormatterSeparatorWidthSingleAccount() {
+        let usage = ProviderUsage.quotaBased(remaining: 50, entitlement: 100, overagePermitted: false)
+        let result = ProviderResult(usage: usage, details: nil)
+        let output = TableFormatter.format([.claude: result])
+
+        let lines = output.components(separatedBy: "\n")
+        // Line 0 = header, line 1 = separator
+        guard lines.count >= 2 else {
+            XCTFail("Expected at least 2 lines in table output")
+            return
+        }
+        let header = lines[0]
+        let separator = lines[1]
+
+        XCTAssertGreaterThanOrEqual(separator.count, header.count,
+                                    "Separator width (\(separator.count)) must be >= header width (\(header.count))")
+        // Separator must consist solely of the box-drawing character ─
+        XCTAssertTrue(separator.unicodeScalars.allSatisfy { $0.value == 0x2500 },
+                      "Separator must contain only ─ characters")
+    }
+
+    // MARK: Multi-account separator width grows with metrics content
+
+    /// When a generic multi-account result has long auth-source labels the separator
+    /// must be wide enough to accommodate the longest metrics string.
+    func testTableFormatterSeparatorWidthGrowsForLongAuthSource() {
+        let longAuthSource = "Browser Cookies (Chrome/Brave/Arc/Edge)"
+        let accountDetails = DetailedUsage(authSource: longAuthSource)
+        let account = ProviderAccountResult(
+            accountIndex: 0,
+            accountId: "user1",
+            usage: .quotaBased(remaining: 900, entitlement: 1500, overagePermitted: true),
+            details: accountDetails
+        )
+        let aggregateUsage = ProviderUsage.quotaBased(remaining: 900, entitlement: 1500, overagePermitted: true)
+        let dummyAccount = ProviderAccountResult(
+            accountIndex: 1,
+            accountId: "other",
+            usage: .quotaBased(remaining: 50, entitlement: 200, overagePermitted: false),
+            details: nil
+        )
+        let result = ProviderResult(usage: aggregateUsage, details: nil, accounts: [account, dummyAccount])
+
+        let output = TableFormatter.format([.copilot: result])
+        let lines = output.components(separatedBy: "\n")
+        guard lines.count >= 2 else {
+            XCTFail("Expected at least 2 lines in table output")
+            return
+        }
+
+        let separator = lines[1]
+        let dataRows = lines.dropFirst(2).filter { !$0.isEmpty }
+        guard let dataRow = dataRows.first else {
+            XCTFail("Expected at least one data row")
+            return
+        }
+        XCTAssertTrue(dataRow.contains("[\(longAuthSource)]"),
+                      "Data row should contain the auth source label verbatim")
+        XCTAssertGreaterThanOrEqual(separator.count, dataRow.count,
+                                    "Separator must be wide enough to span the longest data row")
+    }
+
+    // MARK: accountLabel – accountId vs. fallback index
+
+    /// When an account has an `accountId`, the label uses it; otherwise #N index is used.
+    func testTableFormatterAccountLabelUsesAccountId() {
+        let accountWithId = ProviderAccountResult(
+            accountIndex: 0,
+            accountId: "alice",
+            usage: .quotaBased(remaining: 500, entitlement: 1500, overagePermitted: false),
+            details: nil
+        )
+        let accountWithoutId = ProviderAccountResult(
+            accountIndex: 1,
+            accountId: nil,
+            usage: .quotaBased(remaining: 800, entitlement: 1500, overagePermitted: false),
+            details: nil
+        )
+        let aggregateUsage = ProviderUsage.quotaBased(remaining: 500, entitlement: 1500, overagePermitted: false)
+        let result = ProviderResult(usage: aggregateUsage, details: nil, accounts: [accountWithId, accountWithoutId])
+
+        let output = TableFormatter.format([.copilot: result])
+
+        // Account with ID should appear as "Copilot (alice)"
+        XCTAssertTrue(output.contains("Copilot (alice)"),
+                      "Row for account with accountId should use the id: got\n\(output)")
+        // Account without ID should fall back to "Copilot (#2)"
+        XCTAssertTrue(output.contains("Copilot (#2)"),
+                      "Row for account without accountId should use #N index: got\n\(output)")
+    }
+
+    // MARK: shortenAuthSource – file paths are shortened, non-paths pass through
+
+    func testTableFormatterShortenAuthSourceAbsolutePath() {
+        let absPath = "/Users/alice/.config/some-tool/credentials.json"
+        let accountDetails = DetailedUsage(authSource: absPath)
+        let dummyAccount = ProviderAccountResult(
+            accountIndex: 1,
+            accountId: "other",
+            usage: .quotaBased(remaining: 50, entitlement: 200, overagePermitted: false),
+            details: nil
+        )
+        let account = ProviderAccountResult(
+            accountIndex: 0,
+            accountId: "alice",
+            usage: .quotaBased(remaining: 100, entitlement: 200, overagePermitted: false),
+            details: accountDetails
+        )
+        let result = ProviderResult(
+            usage: .quotaBased(remaining: 100, entitlement: 200, overagePermitted: false),
+            details: nil,
+            accounts: [account, dummyAccount]
+        )
+        let output = TableFormatter.format([.copilot: result])
+
+        // Full path should NOT appear; just the filename should
+        XCTAssertFalse(output.contains(absPath),
+                       "Full absolute path should be shortened in table output")
+        XCTAssertTrue(output.contains("[credentials.json]"),
+                      "Only the filename component should appear in table output: got\n\(output)")
+    }
+
+    func testTableFormatterShortenAuthSourceTildePath() {
+        let tildePath = "~/.local/share/opencode/auth.json"
+        let accountDetails = DetailedUsage(authSource: tildePath)
+        let dummyAccount = ProviderAccountResult(
+            accountIndex: 1,
+            accountId: "other",
+            usage: .quotaBased(remaining: 50, entitlement: 200, overagePermitted: false),
+            details: nil
+        )
+        let account = ProviderAccountResult(
+            accountIndex: 0,
+            accountId: "bob",
+            usage: .quotaBased(remaining: 300, entitlement: 1000, overagePermitted: false),
+            details: accountDetails
+        )
+        let result = ProviderResult(
+            usage: .quotaBased(remaining: 300, entitlement: 1000, overagePermitted: false),
+            details: nil,
+            accounts: [account, dummyAccount]
+        )
+        let output = TableFormatter.format([.copilot: result])
+
+        XCTAssertFalse(output.contains(tildePath),
+                       "Tilde path should be shortened in table output")
+        XCTAssertTrue(output.contains("[auth.json]"),
+                      "Only the filename component of a tilde path should appear: got\n\(output)")
+    }
+
+    func testTableFormatterShortenAuthSourceNonPathPassesThrough() {
+        let nonPath = "Browser Cookies (Chrome/Brave/Arc/Edge)"
+        let accountDetails = DetailedUsage(authSource: nonPath)
+        let dummyAccount = ProviderAccountResult(
+            accountIndex: 1,
+            accountId: "other",
+            usage: .quotaBased(remaining: 50, entitlement: 200, overagePermitted: false),
+            details: nil
+        )
+        let account = ProviderAccountResult(
+            accountIndex: 0,
+            accountId: "carol",
+            usage: .quotaBased(remaining: 200, entitlement: 500, overagePermitted: false),
+            details: accountDetails
+        )
+        let result = ProviderResult(
+            usage: .quotaBased(remaining: 200, entitlement: 500, overagePermitted: false),
+            details: nil,
+            accounts: [account, dummyAccount]
+        )
+        let output = TableFormatter.format([.copilot: result])
+
+        XCTAssertTrue(output.contains("[\(nonPath)]"),
+                      "Non-path auth source should pass through unchanged: got\n\(output)")
+    }
+
+    // MARK: Multi-account code path coverage
+
+    func testTableFormatterMultiAccountRowsAppear() {
+        let account1 = ProviderAccountResult(
+            accountIndex: 0,
+            accountId: "alice",
+            usage: .quotaBased(remaining: 500, entitlement: 1500, overagePermitted: true),
+            details: DetailedUsage(authSource: "~/.config/auth.json")
+        )
+        let account2 = ProviderAccountResult(
+            accountIndex: 1,
+            accountId: "bob",
+            usage: .quotaBased(remaining: 300, entitlement: 1500, overagePermitted: true),
+            details: DetailedUsage(authSource: "/usr/local/copilot/creds.json")
+        )
+        let aggregate = ProviderUsage.quotaBased(remaining: 800, entitlement: 3000, overagePermitted: true)
+        let result = ProviderResult(usage: aggregate, details: nil, accounts: [account1, account2])
+
+        let output = TableFormatter.format([.copilot: result])
+
+        XCTAssertTrue(output.contains("Copilot (alice)"),
+                      "First account row should appear: got\n\(output)")
+        XCTAssertTrue(output.contains("Copilot (bob)"),
+                      "Second account row should appear: got\n\(output)")
+        XCTAssertTrue(output.contains("[auth.json]"),
+                      "Tilde-prefixed path should be shortened: got\n\(output)")
+        XCTAssertTrue(output.contains("[creds.json]"),
+                      "Absolute path should be shortened: got\n\(output)")
+    }
+
+    // MARK: Gemini multi-account separator width
+
+    func testTableFormatterSeparatorWidthGeminiMultiAccount() {
+        let accounts = [
+            GeminiAccountQuota(accountIndex: 0, email: "user1@gmail.com", accountId: "sub-abc", remainingPercentage: 80, modelBreakdown: [:], authSource: "test", earliestReset: nil, modelResetTimes: [:]),
+            GeminiAccountQuota(accountIndex: 1, email: "a-very-long-user@example.com", accountId: "sub-xyz", remainingPercentage: 60, modelBreakdown: [:], authSource: "test", earliestReset: nil, modelResetTimes: [:])
+        ]
+        let details = DetailedUsage(geminiAccounts: accounts)
+        let usage = ProviderUsage.quotaBased(remaining: 60, entitlement: 100, overagePermitted: false)
+        let result = ProviderResult(usage: usage, details: details)
+
+        let output = TableFormatter.format([.geminiCLI: result])
+        let lines = output.components(separatedBy: "\n")
+        guard lines.count >= 2 else {
+            XCTFail("Expected at least 2 lines in table output")
+            return
+        }
+
+        let separator = lines[1]
+        let dataRows = lines.dropFirst(2).filter { !$0.isEmpty }
+
+        for row in dataRows {
+            XCTAssertLessThanOrEqual(row.count, separator.count,
+                                     "Separator must be at least as wide as every data row. Row: \(row)")
+        }
     }
 }

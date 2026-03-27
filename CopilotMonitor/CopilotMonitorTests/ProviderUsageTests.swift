@@ -49,6 +49,20 @@ final class ProviderUsageTests: XCTestCase {
         XCTAssertNotNil(dict?["buckets"])
     }
 
+    func testMiniMaxFixtureLoading() throws {
+        let fixture = try loadFixture(named: "minimax_response")
+        XCTAssertNotNil(fixture)
+
+        let dict = fixture as? [String: Any]
+        XCTAssertNotNil(dict?["model_remains"])
+        XCTAssertNotNil(dict?["base_resp"])
+
+        let rows = try XCTUnwrap(dict?["model_remains"] as? [[String: Any]])
+        let primaryRow = try XCTUnwrap(rows.first)
+        XCTAssertEqual(primaryRow["current_interval_total_count"] as? Int, 1500)
+        XCTAssertEqual(primaryRow["current_interval_usage_count"] as? Int, 1500)
+    }
+
     // MARK: - CLI Formatter Regression Tests
 
     func testJSONFormatterIncludesZaiDualUsageFields() throws {
@@ -62,6 +76,19 @@ final class ProviderUsageTests: XCTestCase {
 
         XCTAssertEqual(providerDict["tokenUsagePercent"] as? Double, 70)
         XCTAssertEqual(providerDict["mcpUsagePercent"] as? Double, 40)
+    }
+
+    func testJSONFormatterIncludesMiniMaxDualUsageFields() throws {
+        let usage = ProviderUsage.quotaBased(remaining: 20, entitlement: 100, overagePermitted: false)
+        let details = DetailedUsage(fiveHourUsage: 80, sevenDayUsage: 45)
+        let result = ProviderResult(usage: usage, details: details)
+
+        let json = try JSONFormatter.format([.minimaxCodingPlan: result])
+        let parsed = try parseJSONObject(json)
+        let providerDict = try XCTUnwrap(parsed[ProviderIdentifier.minimaxCodingPlan.rawValue] as? [String: Any])
+
+        XCTAssertEqual(providerDict["fiveHourUsage"] as? Double, 80)
+        XCTAssertEqual(providerDict["sevenDayUsage"] as? Double, 45)
     }
 
     func testJSONFormatterIncludesGeminiAccountAuthSource() throws {
@@ -92,6 +119,55 @@ final class ProviderUsageTests: XCTestCase {
         )
     }
 
+    func testChutesInferredMonthlySubscriptionCostUsesKnownPlanTiers() {
+        XCTAssertEqual(ChutesProvider.inferredMonthlySubscriptionCost(planTier: "Base"), 3)
+        XCTAssertEqual(ChutesProvider.inferredMonthlySubscriptionCost(planTier: "Plus"), 10)
+        XCTAssertEqual(ChutesProvider.inferredMonthlySubscriptionCost(planTier: "Pro"), 20)
+        XCTAssertNil(ChutesProvider.inferredMonthlySubscriptionCost(planTier: "Unknown"))
+    }
+
+    func testChutesCalculateMonthlyValueUsedPercent() {
+        XCTAssertEqual(ChutesProvider.calculateMonthlyValueUsedPercent(usedUSD: 34, capUSD: 50), 68)
+        XCTAssertNil(ChutesProvider.calculateMonthlyValueUsedPercent(usedUSD: nil, capUSD: 50))
+        XCTAssertNil(ChutesProvider.calculateMonthlyValueUsedPercent(usedUSD: 10, capUSD: 0))
+    }
+
+    func testChutesExtractMonthlyValueUsedUSDPrefersAggregateFields() {
+        let payload: [String: Any] = [
+            "summary": [
+                "total_cost_usd": 34.25
+            ],
+            "items": [
+                ["cost_usd": 10.0],
+                ["cost_usd": 20.0]
+            ]
+        ]
+
+        XCTAssertEqual(ChutesProvider.extractMonthlyValueUsedUSD(from: payload), 34.25)
+    }
+
+    func testChutesExtractMonthlyValueUsedUSDSumsRecognizedItemFields() {
+        let payload: [String: Any] = [
+            "items": [
+                ["cost_usd": 12.5],
+                ["total_cost": "7.25"],
+                ["ignored": 99]
+            ]
+        ]
+
+        XCTAssertEqual(ChutesProvider.extractMonthlyValueUsedUSD(from: payload), 19.75)
+    }
+
+    func testChutesCurrentMonthDateRangeUsesUTCMonthBoundaries() throws {
+        let formatter = ISO8601DateFormatter()
+        let referenceDate = try XCTUnwrap(formatter.date(from: "2026-03-01T00:30:00+14:00"))
+
+        let range = ChutesProvider.currentMonthDateRangeStrings(referenceDate: referenceDate)
+
+        XCTAssertEqual(range.0, "2026-02-01")
+        XCTAssertEqual(range.1, "2026-02-28")
+    }
+
     func testTableFormatterShowsZaiDualPercentWhenBothWindowsExist() {
         let usage = ProviderUsage.quotaBased(remaining: 30, entitlement: 100, overagePermitted: false)
         let details = DetailedUsage(tokenUsagePercent: 70, mcpUsagePercent: 40)
@@ -108,6 +184,15 @@ final class ProviderUsageTests: XCTestCase {
 
         let output = TableFormatter.format([.zaiCodingPlan: result])
         XCTAssertTrue(output.contains("55%"))
+    }
+
+    func testTableFormatterShowsMiniMaxDualPercentWhenBothWindowsExist() {
+        let usage = ProviderUsage.quotaBased(remaining: 0, entitlement: 100, overagePermitted: false)
+        let details = DetailedUsage(fiveHourUsage: 100, sevenDayUsage: 80)
+        let result = ProviderResult(usage: usage, details: details)
+
+        let output = TableFormatter.format([.minimaxCodingPlan: result])
+        XCTAssertTrue(output.contains("100%,80%"))
     }
 
     func testTableFormatterShowsGeminiPercentOnlyForGeminiAccounts() {
