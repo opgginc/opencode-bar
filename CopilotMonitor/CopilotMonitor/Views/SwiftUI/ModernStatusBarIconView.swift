@@ -99,6 +99,13 @@ struct SwiftUIProviderAlertView: View {
                 .scaledToFit()
                 .frame(width: 12, height: 12)
                 .foregroundColor(.red)
+        } else if identifier == .minimaxCodingPlan {
+            Image("MinimaxIcon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 12, height: 12)
+                .foregroundColor(.red)
         } else {
             Image(systemName: iconName(for: identifier))
                 .font(.system(size: 12))
@@ -116,6 +123,7 @@ struct SwiftUIProviderAlertView: View {
         case .openCode, .openCodeZen: return "chevron.left.forwardslash.chevron.right"
         case .antigravity: return "arrow.up.circle"
         case .kimi: return "k.circle"
+        case .minimaxCodingPlan: return "m.circle"
         case .zaiCodingPlan: return "globe"
         case .nanoGpt: return "n.circle"
         case .synthetic: return "diamond"

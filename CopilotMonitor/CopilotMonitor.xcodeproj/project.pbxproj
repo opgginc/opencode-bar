@@ -33,6 +33,7 @@
 		A33333333333333333333333 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44444444444444444444444 /* AppDelegate.swift */; };
 		A454D8C22F30544900E355E3 /* MenuBarExtraAccess in Frameworks */ = {isa = PBXBuildFile; productRef = MBA2222222222222222222222 /* MenuBarExtraAccess */; };
 		A454D8C42F30548900E355E3 /* ZaiCodingPlanProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A454D8C32F30548900E355E3 /* ZaiCodingPlanProvider.swift */; };
+		MINIMAXAPP11111111111111 /* MiniMaxProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXFILE2222222222222 /* MiniMaxProvider.swift */; };
 		NANOGPTAPP11111111111111 /* NanoGptProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = NANOGPTFILE222222222222 /* NanoGptProvider.swift */; };
 		A55555555555555555555555 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A66666666666666666666666 /* Assets.xcassets */; };
 		AD95EBD6AE3134DF4C797577 /* ClaudeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DDC1B4DE6B5118CE4AE8F82 /* ClaudeProvider.swift */; };
@@ -52,6 +53,7 @@
 		CLICOPY111111111111111111 /* opencodebar-cli in Embed CLI */ = {isa = PBXBuildFile; fileRef = CLI5555555555555555555555 /* opencodebar-cli */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		CLIHISTORY11111111111111 /* CopilotHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B1085A77EF4A58E5B5EC71B /* CopilotHistoryService.swift */; };
 		CLIKIMI1111111111111111 /* KimiProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = KI2222222222222222222222 /* KimiProvider.swift */; };
+		CLIMINIMAX11111111111111 /* MiniMaxProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXFILE2222222222222 /* MiniMaxProvider.swift */; };
 		CLIZAI11111111111111111 /* ZaiCodingPlanProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A454D8C32F30548900E355E3 /* ZaiCodingPlanProvider.swift */; };
 		NANOGPTCLI11111111111111 /* NanoGptProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = NANOGPTFILE222222222222 /* NanoGptProvider.swift */; };
 		CLIOPENCZEN1111111111111 /* OpenCodeZenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OZ2222222222222222222222 /* OpenCodeZenProvider.swift */; };
@@ -65,6 +67,8 @@
 		F11111111111111111111111 /* UsagePredictor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F22222222222222222222222 /* UsagePredictor.swift */; };
 		F35960B456C28D71BE7575A5 /* GeminiCLIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06EC3B683EB6892E4F9C8316 /* GeminiCLIProvider.swift */; };
 		KI1111111111111111111111 /* KimiProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = KI2222222222222222222222 /* KimiProvider.swift */; };
+		MINIMAXTESTBF11111111111 /* MiniMaxProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXTESTFR11111111111 /* MiniMaxProviderTests.swift */; };
+		MINIMAXJSONBF11111111111 /* minimax_response.json in Resources */ = {isa = PBXBuildFile; fileRef = MINIMAXJSONFR11111111111 /* minimax_response.json */; };
 		BRAVEAPP1111111111111111 /* BraveSearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = BRAVEFILE22222222222222 /* BraveSearchProvider.swift */; };
 		TAVILYAPP111111111111111 /* TavilySearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = TAVILYFILE22222222222222 /* TavilySearchProvider.swift */; };
 		SYNTHETIC1111111111111111 /* SyntheticProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNTHETIC2222222222222222 /* SyntheticProvider.swift */; };
@@ -151,6 +155,7 @@
 		9B1085A77EF4A58E5B5EC71B /* CopilotHistoryService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CopilotHistoryService.swift; sourceTree = "<group>"; };
 		A44444444444444444444444 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A454D8C32F30548900E355E3 /* ZaiCodingPlanProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZaiCodingPlanProvider.swift; sourceTree = "<group>"; };
+		MINIMAXFILE2222222222222 /* MiniMaxProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniMaxProvider.swift; sourceTree = "<group>"; };
 		NANOGPTFILE222222222222 /* NanoGptProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoGptProvider.swift; sourceTree = "<group>"; };
 		A66666666666666666666666 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A77777777777777777777777 /* OpenCode Bar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OpenCode Bar.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -175,6 +180,8 @@
 		F22222222222222222222222 /* UsagePredictor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePredictor.swift; sourceTree = "<group>"; };
 		F4AE672516E564CC52739BD9 /* CopilotProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CopilotProvider.swift; sourceTree = "<group>"; };
 		KI2222222222222222222222 /* KimiProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KimiProvider.swift; sourceTree = "<group>"; };
+		MINIMAXTESTFR11111111111 /* MiniMaxProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniMaxProviderTests.swift; sourceTree = "<group>"; };
+		MINIMAXJSONFR11111111111 /* minimax_response.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = minimax_response.json; sourceTree = "<group>"; };
 		BRAVEFILE22222222222222 /* BraveSearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveSearchProvider.swift; sourceTree = "<group>"; };
 		TAVILYFILE22222222222222 /* TavilySearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TavilySearchProvider.swift; sourceTree = "<group>"; };
 		ME2222222222222222222222 /* MenuEnums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuEnums.swift; sourceTree = "<group>"; };
@@ -257,6 +264,7 @@
 				F1DA8E47F4CFEFC3571708AD /* AntigravityProvider.swift */,
 				OZ2222222222222222222222 /* OpenCodeZenProvider.swift */,
 				KI2222222222222222222222 /* KimiProvider.swift */,
+				MINIMAXFILE2222222222222 /* MiniMaxProvider.swift */,
 				283349002F313176004DADE1 /* ChutesProvider.swift */,
 				TAVILYFILE22222222222222 /* TavilySearchProvider.swift */,
 				BRAVEFILE22222222222222 /* BraveSearchProvider.swift */,
@@ -406,6 +414,7 @@
 				54353FD130DDE0500F6B367F /* MenuResultBuilderTests.swift */,
 				SYNTHTEST1111111111111111 /* SyntheticProviderTests.swift */,
 				NANOGPTTESTFR1111111111 /* NanoGptProviderTests.swift */,
+				MINIMAXTESTFR11111111111 /* MiniMaxProviderTests.swift */,
 				TOKENTESTFR1111111111111 /* TokenManagerTests.swift */,
 			);
 			path = CopilotMonitorTests;
@@ -418,6 +427,7 @@
 				T66666666666666666666666 /* codex_response.json */,
 				T88888888888888888888888 /* copilot_response.json */,
 				TAAAAAAAAAAAAAAAAAAAAAAA /* gemini_response.json */,
+				MINIMAXJSONFR11111111111 /* minimax_response.json */,
 				OR5555555555555555555555 /* openrouter_credits_response.json */,
 				OR7777777777777777777777 /* openrouter_key_response.json */,
 			);
@@ -544,6 +554,7 @@
 				T55555555555555555555555 /* codex_response.json in Resources */,
 				T77777777777777777777777 /* copilot_response.json in Resources */,
 				T99999999999999999999999 /* gemini_response.json in Resources */,
+				MINIMAXJSONBF11111111111 /* minimax_response.json in Resources */,
 				OR6666666666666666666666 /* openrouter_credits_response.json in Resources */,
 				OR8888888888888888888888 /* openrouter_key_response.json in Resources */,
 			);
@@ -570,6 +581,7 @@
 			CLIANTIGRAVITY11111111 /* AntigravityProvider.swift in Sources */,
 			CLIOPENCZEN1111111111111 /* OpenCodeZenProvider.swift in Sources */,
 			CLIKIMI1111111111111111 /* KimiProvider.swift in Sources */,
+			CLIMINIMAX11111111111111 /* MiniMaxProvider.swift in Sources */,
 			CLIZAI11111111111111111 /* ZaiCodingPlanProvider.swift in Sources */,
 			NANOGPTCLI11111111111111 /* NanoGptProvider.swift in Sources */,
 			283349022F313176004DADE1 /* ChutesProvider.swift in Sources */,
@@ -612,6 +624,7 @@
 				390C3E920A03C8890AAA1CEE /* AntigravityProvider.swift in Sources */,
 				OZ1111111111111111111111 /* OpenCodeZenProvider.swift in Sources */,
 				KI1111111111111111111111 /* KimiProvider.swift in Sources */,
+				MINIMAXAPP11111111111111 /* MiniMaxProvider.swift in Sources */,
 				283349012F313176004DADE1 /* ChutesProvider.swift in Sources */,
 				TAVILYAPP111111111111111 /* TavilySearchProvider.swift in Sources */,
 				BRAVEAPP1111111111111111 /* BraveSearchProvider.swift in Sources */,
@@ -641,6 +654,7 @@
 			B58BAD3BFD97973070A2A892 /* MenuResultBuilderTests.swift in Sources */,
 			SYNTHTEST2222222222222222 /* SyntheticProviderTests.swift in Sources */,
 			NANOGPTTESTBF1111111111 /* NanoGptProviderTests.swift in Sources */,
+			MINIMAXTESTBF11111111111 /* MiniMaxProviderTests.swift in Sources */,
 			TOKENTESTBF1111111111111 /* TokenManagerTests.swift in Sources */,
 		);
 			runOnlyForDeploymentPostprocessing = 0;

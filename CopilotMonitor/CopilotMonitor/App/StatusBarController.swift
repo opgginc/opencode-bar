@@ -936,6 +936,9 @@ final class StatusBarController: NSObject {
         case .kimi:
             add(details?.sevenDayUsage, priority: .weekly)
             add(details?.fiveHourUsage, priority: .hourly)
+        case .minimaxCodingPlan:
+            add(details?.sevenDayUsage, priority: .weekly)
+            add(details?.fiveHourUsage, priority: .hourly)
         case .codex:
             add(details?.secondaryUsage, priority: .weekly)
             add(details?.sparkSecondaryUsage, priority: .weekly)
@@ -1808,6 +1811,7 @@ final class StatusBarController: NSObject {
         let quotaOrder: [ProviderIdentifier] = [
             .claude,
             .kimi,
+            .minimaxCodingPlan,
             .codex,
             .zaiCodingPlan,
             .nanoGpt,
@@ -1915,6 +1919,10 @@ final class StatusBarController: NSObject {
                                 percents.append(sonnetUsage)
                             }
                             usedPercents = percents
+                        } else if identifier == .minimaxCodingPlan,
+                                  let fiveHour = account.details?.fiveHourUsage,
+                                  let sevenDay = account.details?.sevenDayUsage {
+                            usedPercents = [fiveHour, sevenDay]
                         } else if identifier == .kimi,
                                   let fiveHour = account.details?.fiveHourUsage,
                                   let sevenDay = account.details?.sevenDayUsage {
@@ -1975,6 +1983,10 @@ final class StatusBarController: NSObject {
                             percents.append(sonnetUsage)
                         }
                         usedPercents = percents
+                    } else if identifier == .minimaxCodingPlan,
+                              let fiveHour = result.details?.fiveHourUsage,
+                              let sevenDay = result.details?.sevenDayUsage {
+                        usedPercents = [fiveHour, sevenDay]
                     } else if identifier == .kimi,
                               let fiveHour = result.details?.fiveHourUsage,
                               let sevenDay = result.details?.sevenDayUsage {
@@ -2814,6 +2826,8 @@ final class StatusBarController: NSObject {
             image = NSImage(named: "OpencodeIcon")
         case .kimi:
             image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
+        case .minimaxCodingPlan:
+            image = NSImage(named: "MinimaxIcon")
         case .zaiCodingPlan:
             image = NSImage(named: "ZaiIcon")
         case .nanoGpt:
@@ -3963,6 +3977,16 @@ extension StatusBarController {
                 details: DetailedUsage(
                     fiveHourUsage: 26.0,
                     fiveHourReset: fiveHoursFromNow,
+                    authSource: "OpenCode"
+                )
+            ),
+            .minimaxCodingPlan: ProviderResult(
+                usage: .quotaBased(remaining: 8, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    fiveHourUsage: 92.0,
+                    fiveHourReset: fiveHoursFromNow,
+                    sevenDayUsage: 68.0,
+                    sevenDayReset: sevenDaysFromNow,
                     authSource: "OpenCode"
                 )
             ),

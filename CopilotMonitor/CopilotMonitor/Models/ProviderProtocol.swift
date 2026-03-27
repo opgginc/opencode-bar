@@ -19,6 +19,7 @@ enum ProviderIdentifier: String, CaseIterable {
     case antigravity
     case openCodeZen = "opencode_zen"
     case kimi
+    case minimaxCodingPlan = "minimax_coding_plan"
     case zaiCodingPlan = "zai_coding_plan"
     case nanoGpt = "nano_gpt"
     case synthetic
@@ -46,6 +47,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "OpenCode Zen"
         case .kimi:
             return "Kimi for Coding"
+        case .minimaxCodingPlan:
+            return "MiniMax Coding Plan"
         case .zaiCodingPlan:
             return "Z.AI Coding Plan"
         case .nanoGpt:
@@ -81,6 +84,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Zen"
         case .kimi:
             return "Kimi"
+        case .minimaxCodingPlan:
+            return "MiniMax"
         case .zaiCodingPlan:
             return "Z.AI"
         case .nanoGpt:
@@ -116,6 +121,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "moon.stars"
         case .kimi:
             return "k.circle"
+        case .minimaxCodingPlan:
+            return "MinimaxIcon"
         case .zaiCodingPlan:
             return "globe"
         case .nanoGpt:

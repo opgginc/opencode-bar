@@ -38,6 +38,22 @@ final class OpenCodeAuthDecodingTests: XCTestCase {
         XCTAssertEqual(auth.openrouter?.key, "or-raw-string-key")
     }
 
+    func testMiniMaxCodingPlanAPIKeyDecodes() throws {
+        let json = """
+        {
+            "minimax-coding-plan": {
+                "type": "api",
+                "key": "minimax-test-key"
+            }
+        }
+        """
+
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let auth = try JSONDecoder().decode(OpenCodeAuth.self, from: data)
+
+        XCTAssertEqual(auth.minimaxCodingPlan?.key, "minimax-test-key")
+    }
+
     func testOAuthDecodesWithFlexibleExpiresAndAccountIdTypes() throws {
         let json = """
         {

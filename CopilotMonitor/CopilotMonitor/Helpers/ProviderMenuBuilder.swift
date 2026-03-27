@@ -458,6 +458,31 @@ extension StatusBarController {
             // === Subscription ===
             addSubscriptionItems(to: submenu, provider: .kimi, accountId: accountId)
 
+        case .minimaxCodingPlan:
+            if let fiveHour = details.fiveHourUsage {
+                let items = createUsageWindowRow(
+                    label: "5h",
+                    usagePercent: fiveHour,
+                    resetDate: details.fiveHourReset,
+                    windowHours: 5
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if details.fiveHourUsage != nil, details.sevenDayUsage != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let weekly = details.sevenDayUsage {
+                let items = createUsageWindowRow(
+                    label: "Weekly",
+                    usagePercent: weekly,
+                    resetDate: details.sevenDayReset,
+                    windowHours: 168
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+
+            addSubscriptionItems(to: submenu, provider: .minimaxCodingPlan, accountId: accountId)
+
         case .zaiCodingPlan:
             // === Token Usage ===
             if let tokenUsage = details.tokenUsagePercent {

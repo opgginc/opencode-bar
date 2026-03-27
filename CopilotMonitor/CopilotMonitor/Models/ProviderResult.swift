@@ -482,6 +482,15 @@ struct JSONFormatter {
                 providerDict["usagePercentage"] = entitlement == Int.max ? 0.0 : result.usage.usagePercentage
             }
 
+            if identifier == .minimaxCodingPlan {
+                if let fiveHourUsage = result.details?.fiveHourUsage {
+                    providerDict["fiveHourUsage"] = fiveHourUsage
+                }
+                if let sevenDayUsage = result.details?.sevenDayUsage {
+                    providerDict["sevenDayUsage"] = sevenDayUsage
+                }
+            }
+
             // Z.AI: include both token and MCP usage percentages
             if identifier == .zaiCodingPlan {
                 if let tokenPercent = result.details?.tokenUsagePercent {
@@ -758,6 +767,12 @@ struct TableFormatter {
             // Pay-as-you-go doesn't have meaningful usage percentage - show dash
             return "-"
         case .quotaBased:
+            if identifier == .minimaxCodingPlan {
+                let percents = [result.details?.fiveHourUsage, result.details?.sevenDayUsage].compactMap { $0 }
+                if percents.count == 2 {
+                    return percents.map { String(format: "%.0f%%", $0) }.joined(separator: ",")
+                }
+            }
             // Z.AI: show both token and MCP percentages when both are available
             if identifier == .zaiCodingPlan {
                 let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }

@@ -12,6 +12,7 @@ final class CLIFormatterTests: XCTestCase {
         XCTAssertEqual(ProviderIdentifier.claude.rawValue, "claude")
         XCTAssertEqual(ProviderIdentifier.codex.rawValue, "codex")
         XCTAssertEqual(ProviderIdentifier.kimi.rawValue, "kimi")
+        XCTAssertEqual(ProviderIdentifier.minimaxCodingPlan.rawValue, "minimax_coding_plan")
         XCTAssertEqual(ProviderIdentifier.antigravity.rawValue, "antigravity")
         XCTAssertEqual(ProviderIdentifier.copilot.rawValue, "copilot")
         XCTAssertEqual(ProviderIdentifier.nanoGpt.rawValue, "nano_gpt")
@@ -23,6 +24,7 @@ final class CLIFormatterTests: XCTestCase {
         XCTAssertEqual(ProviderIdentifier.geminiCLI.displayName, "Gemini CLI")
         XCTAssertEqual(ProviderIdentifier.claude.displayName, "Claude")
         XCTAssertEqual(ProviderIdentifier.kimi.displayName, "Kimi for Coding")
+        XCTAssertEqual(ProviderIdentifier.minimaxCodingPlan.displayName, "MiniMax Coding Plan")
         XCTAssertEqual(ProviderIdentifier.nanoGpt.displayName, "Nano-GPT")
     }
     
