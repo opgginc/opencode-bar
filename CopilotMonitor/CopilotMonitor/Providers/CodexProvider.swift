@@ -462,7 +462,7 @@ final class CodexProvider: ProviderProtocol {
             if account.source == .codexLB {
                 return account.externalUsageAccountId ?? account.accountId
             }
-            return account.externalUsageAccountId ?? account.accountId
+            return account.accountId
         }
     }
 

@@ -229,4 +229,38 @@ final class TokenManagerTests: XCTestCase {
 
         XCTAssertEqual(accountID, "direct-account-id")
     }
+
+    func testCodexProviderKeepsRegularAccountIDForNonCodexLBExternalMode() {
+        let provider = CodexProvider()
+        let account = OpenAIAuthAccount(
+            accessToken: "token",
+            accountId: "openai-account-id",
+            externalUsageAccountId: nil,
+            email: "user@example.com",
+            authSource: "opencode-auth",
+            sourceLabels: ["OpenCode"],
+            source: .opencodeAuth
+        )
+
+        let accountID = provider.codexRequestAccountID(
+            for: account,
+            endpointMode: .external(usageURL: URL(string: "https://codex.example.com/api/codex/usage")!)
+        )
+
+        XCTAssertEqual(accountID, "openai-account-id")
+    }
+
+    func testCodexProviderDoesNotInventExternalUsageIDForNonCodexSources() {
+        let account = OpenAIAuthAccount(
+            accessToken: "token",
+            accountId: "openai-account-id",
+            externalUsageAccountId: nil,
+            email: nil,
+            authSource: "opencode-auth",
+            sourceLabels: ["OpenCode"],
+            source: .opencodeAuth
+        )
+
+        XCTAssertNil(account.externalUsageAccountId)
+    }
 }

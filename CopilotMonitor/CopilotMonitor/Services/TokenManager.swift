@@ -1137,7 +1137,7 @@ final class TokenManager: @unchecked Sendable {
                 throw CodexLBError.sqliteStepFailed(stepStatus)
             }
 
-            guard let accessTokenEncrypted = sqliteColumnData(statement, index: 4), !accessTokenEncrypted.isEmpty else {
+            guard let accessTokenEncrypted = sqliteColumnData(statement, index: 5), !accessTokenEncrypted.isEmpty else {
                 continue
             }
 
@@ -2493,7 +2493,7 @@ final class TokenManager: @unchecked Sendable {
                 OpenAIAuthAccount(
                     accessToken: access,
                     accountId: auth.openai?.accountId,
-                    externalUsageAccountId: auth.openai?.accountId,
+                    externalUsageAccountId: nil,
                     email: nil,
                     authSource: authSource,
                     sourceLabels: [openAISourceLabel(for: .opencodeAuth)],
@@ -2521,7 +2521,7 @@ final class TokenManager: @unchecked Sendable {
                 OpenAIAuthAccount(
                     accessToken: access,
                     accountId: codexAuth.tokens?.accountId,
-                    externalUsageAccountId: codexAuth.tokens?.accountId,
+                    externalUsageAccountId: nil,
                     email: codexEmail,
                     authSource: authSource,
                     sourceLabels: [openAISourceLabel(for: .codexAuth)],
