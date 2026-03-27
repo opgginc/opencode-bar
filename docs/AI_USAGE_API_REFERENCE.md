@@ -7,7 +7,7 @@
 | Provider | Token File |
 |----------|-----------|
 | Claude | `~/.config/opencode/opencode-anthropic-auth/accounts.json`, `~/.local/share/opencode/auth.json`, `~/.config/claude-code/auth.json`, macOS Keychain (`Claude Code-credentials`, `Claude Code`) |
-| Codex, Copilot, Nano-GPT | `~/.local/share/opencode/auth.json` |
+| Codex, Copilot, Nano-GPT, MiniMax | `~/.local/share/opencode/auth.json` |
 | Antigravity (Gemini) | `~/.config/opencode/antigravity-accounts.json` |
 | Antigravity (Local cache) | `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb` |
 
@@ -207,7 +207,62 @@ curl -s -X POST "https://nano-gpt.com/api/check-balance" \
 
 ---
 
-## 5. Antigravity (Dual Quota System)
+## 5. MiniMax Coding Plan
+
+**Endpoint:** `GET https://api.minimax.io/v1/api/openplatform/coding_plan/remains`
+
+MiniMax Coding Plan credentials are typically stored in the OpenCode auth entry `minimax-coding-plan`.
+
+```bash
+API_KEY=$(jq -r '."minimax-coding-plan".key' ~/.local/share/opencode/auth.json)
+
+curl -s "https://api.minimax.io/v1/api/openplatform/coding_plan/remains" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Accept: application/json"
+```
+
+The bundled [`scripts/query-minimax.sh`](/Users/kargnas/projects/opencode-bar/scripts/query-minimax.sh) reads the same auth entry and prints both used and left values for the 5-hour and weekly windows.
+
+**Response:**
+```json
+{
+  "base_resp": {
+    "status_code": 0,
+    "status_msg": ""
+  },
+  "model_remains": [
+    {
+      "model": "MiniMax-M*",
+      "current_interval_total_count": 1500,
+      "current_interval_usage_count": 1500,
+      "end_time": 1774604131794,
+      "remains_time": 17391979,
+      "current_weekly_total_count": 15000,
+      "current_weekly_usage_count": 15000,
+      "weekly_end_time": 1775136534203,
+      "weekly_remains_time": 549141512
+    }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `model_remains[].model` | Coding Plan quota bucket label |
+| `current_interval_total_count` | Total 5-hour allowance |
+| `current_interval_usage_count` | Remaining 5-hour allowance despite the `usage` name |
+| `end_time` | 5-hour reset time in epoch milliseconds |
+| `remains_time` | Milliseconds left until the 5-hour reset |
+| `current_weekly_total_count` | Total weekly allowance |
+| `current_weekly_usage_count` | Remaining weekly allowance despite the `usage` name |
+| `weekly_end_time` | Weekly reset time in epoch milliseconds |
+| `weekly_remains_time` | Milliseconds left until the weekly reset |
+
+**Important:** MiniMax field names are misleading. OpenCode Bar and the CLI calculate used percent as `(total - remaining) / total * 100`, not `remaining / total`.
+
+---
+
+## 6. Antigravity (Dual Quota System)
 
 Antigravity has **two independent quota systems**:
 
@@ -216,7 +271,7 @@ Antigravity has **two independent quota systems**:
 | **Gemini CLI** | `cloudcode-pa.googleapis.com` | gemini-2.0/2.5-flash/pro | ~17 hours |
 | **Antigravity Local** | Local cache reverse parsing (`state.vscdb`) | Claude 4.6, Gemini 3, GPT-OSS | ~7 days |
 
-### 5a. Gemini CLI Quota
+### 6a. Gemini CLI Quota
 
 **Token:** `~/.config/opencode/antigravity-accounts.json`
 
@@ -250,7 +305,7 @@ curl -s -X POST "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuot
 }
 ```
 
-### 5b. Antigravity Local Quota (Cache Reverse Parsing)
+### 6b. Antigravity Local Quota (Cache Reverse Parsing)
 
 **Source files:**
 - `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb`
@@ -350,6 +405,10 @@ Client Secret: Set GEMINI_CLIENT_SECRET environment variable
     "access": "gho_...",
     "refresh": "gho_...",
     "expires": 0
+  },
+  "minimax-coding-plan": {
+    "type": "apiKey",
+    "key": "sk-..."
   }
 }
 ```
@@ -386,6 +445,7 @@ Test scripts are located in the `scripts/` folder:
 | `query-claude.sh` | Claude (Anthropic) |
 | `query-codex.sh` | Codex (OpenAI) |
 | `query-copilot.sh` | GitHub Copilot |
+| `query-minimax.sh` | MiniMax Coding Plan |
 | `query-gemini-cli.sh` | Antigravity - Gemini CLI quota |
 | `query-gemini-oauth-creds.sh` | Gemini CLI oauth_creds identity/token inspection |
 | `query-antigravity-local.sh` | Antigravity - Local quota (cache reverse parsing alias) |

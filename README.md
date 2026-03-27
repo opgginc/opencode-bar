@@ -48,6 +48,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 | **Gemini CLI** | Quota-based | Per-model quotas, multi-account support with email labels and account ID details |
 | **Nano-GPT** | Quota-based | Weekly input tokens quota, USD/NANO balance |
 | **Kimi for Coding (Kimi K2.5)** | Quota-based | Usage limits, membership level, reset time |
+| **MiniMax Coding Plan** | Quota-based | 5h/weekly quotas, Anthropic-style dual-window submenu, OpenCode auth |
 | **Z.AI Coding Plan** | Quota-based | Token/MCP quotas, model usage, tool usage (24h) |
 | **Brave Search** | Quota-based | Monthly search quota, reset schedule |
 | **Tavily** | Quota-based | Monthly search quota, plan usage |
@@ -168,10 +169,12 @@ opencodebar list
 # Get detailed info for a specific provider
 opencodebar provider claude
 opencodebar provider gemini_cli
+opencodebar provider minimax_coding_plan
 
 # Output as JSON (for scripting)
 opencodebar status --json
 opencodebar provider claude --json
+opencodebar provider minimax_coding_plan --json
 opencodebar list --json
 ```
 
@@ -188,9 +191,16 @@ Copilot (user2)       Quota-based      12%         880/1000 remaining
 Gemini CLI (user1@gmail.com) Quota-based      0%          100% remaining
 Gemini CLI (user2@company.com) Quota-based    15%         85% remaining
 Kimi for Coding       Quota-based      26%         74/100 remaining
+MiniMax Coding Plan   Quota-based      0%,0%      100/100 remaining
 OpenCode Zen          Pay-as-you-go    -           $12.50 spent
 OpenRouter            Pay-as-you-go    -           $37.42 spent
 ```
+
+#### MiniMax Notes
+
+- MiniMax Coding Plan is resolved from the OpenCode auth entry `minimax-coding-plan` in `auth.json`.
+- OpenCode Bar uses the Coding Plan remains endpoint and converts it into used percentages for the menu bar app and CLI.
+- MiniMax response fields `current_interval_usage_count` and `current_weekly_usage_count` behave as remaining counts despite their names, so OpenCode Bar calculates used percent as `total - remaining`.
 
 #### JSON Output Example
 
@@ -296,6 +306,7 @@ Quota Status: $219/m
   Copilot          0%        ▸
   Claude: 60%, 100%          ▸
   Codex            100%      ▸
+  MiniMax Coding Plan 0%, 0% ▸
   Z.AI Coding Plan 99%       ▸
   Gemini CLI (user1@gmail.com) 100% ▸
 ─────────────────────────────
@@ -348,6 +359,8 @@ Quit (⌘Q)
 3. **Parallel Fetching**: Queries all provider APIs simultaneously using TaskGroup
 4. **Smart Caching**: Falls back to cached data on network errors
 5. **Graceful Degradation**: Shows available providers even if some fail
+
+MiniMax Coding Plan uses `https://api.minimax.io/v1/api/openplatform/coding_plan/remains` and is displayed with explicit 5h used and weekly used windows in the provider submenu.
 
 ### Privacy & Security
 
