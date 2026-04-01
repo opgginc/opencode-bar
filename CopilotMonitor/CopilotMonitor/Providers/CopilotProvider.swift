@@ -447,6 +447,7 @@ final class CopilotProvider: ProviderProtocol {
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
                     logger.warning("CopilotProvider: Billing page auth failed (HTTP \(httpResponse.statusCode))")
+                    TokenManager.shared.invalidateCopilotKeychainCaches()
                     return nil
                 }
             }
@@ -511,6 +512,7 @@ final class CopilotProvider: ProviderProtocol {
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
                     logger.warning("CopilotProvider: Usage API auth failed (HTTP \(httpResponse.statusCode))")
+                    TokenManager.shared.invalidateCopilotKeychainCaches()
                     return nil
                 }
 

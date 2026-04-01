@@ -2188,7 +2188,92 @@ final class TokenManager: @unchecked Sendable {
         return bytes
     }
 
+    // MARK: - Keychain Data Cache
+
+    // Caches third-party keychain data in our own keychain to avoid repeated
+    // macOS password prompts. Third-party apps (Claude Code, Copilot CLI) may
+    // reset partition_id on token refresh, which wipes our "Always Allow" grant.
+    private let keychainDataCacheService = "com.copilotmonitor.KeychainDataCache"
+
+    private func readCachedKeychainData(forOriginalService service: String) -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainDataCacheService,
+            kSecAttrAccount as String: service,
+            kSecReturnData as String: true
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return data
+    }
+
+    private func cacheKeychainData(_ data: Data, forOriginalService service: String) {
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainDataCacheService,
+            kSecAttrAccount as String: service
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        // kSecAttrAccessibleAfterFirstUnlock: available even when screen is locked (menu bar app may refresh in background)
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainDataCacheService,
+            kSecAttrAccount as String: service,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            kSecValueData as String: data
+        ]
+        SecItemAdd(addQuery as CFDictionary, nil)
+    }
+
+    func invalidateKeychainCache(forOriginalService service: String) {
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainDataCacheService,
+            kSecAttrAccount as String: service
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+        logger.debug("Invalidated keychain cache for service \(service)")
+    }
+
+    func invalidateAllKeychainCaches() {
+        for service in ["Claude Code-credentials", "Claude Code", copilotCliCacheKey] {
+            invalidateKeychainCache(forOriginalService: service)
+        }
+        queue.sync {
+            cachedClaudeAccounts = nil
+            claudeAccountsCacheTimestamp = nil
+            cachedCopilotAccounts = nil
+            copilotAccountsCacheTimestamp = nil
+        }
+        logger.debug("Invalidated all keychain and memory caches")
+    }
+
+    func invalidateClaudeKeychainCaches() {
+        invalidateKeychainCache(forOriginalService: "Claude Code-credentials")
+        invalidateKeychainCache(forOriginalService: "Claude Code")
+        queue.sync {
+            cachedClaudeAccounts = nil
+            claudeAccountsCacheTimestamp = nil
+        }
+    }
+
+    func invalidateCopilotKeychainCaches() {
+        invalidateKeychainCache(forOriginalService: copilotCliCacheKey)
+        queue.sync {
+            cachedCopilotAccounts = nil
+            copilotAccountsCacheTimestamp = nil
+        }
+    }
+
     private func readKeychainJSON(service: String) -> [String: Any]? {
+        if let cachedData = readCachedKeychainData(forOriginalService: service),
+           let parsed = parseKeychainPayload(cachedData, service: service) {
+            logger.debug("Using cached keychain data for service \(service)")
+            return parsed
+        }
+
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -2211,6 +2296,13 @@ final class TokenManager: @unchecked Sendable {
             return nil
         }
 
+        cacheKeychainData(data, forOriginalService: service)
+        logger.debug("Cached keychain data for service \(service)")
+
+        return parseKeychainPayload(data, service: service)
+    }
+
+    private func parseKeychainPayload(_ data: Data, service: String) -> [String: Any]? {
         if let dict = parseJSONDictionary(from: data) {
             return dict
         }
@@ -2612,7 +2704,21 @@ final class TokenManager: @unchecked Sendable {
     private func readCopilotCliKeychainAccounts() -> [CopilotAuthAccount] {
         let service = "copilot-cli"
 
-        // Step 1: Query for all matching items to get their accounts
+        if let cached = readCachedCopilotCliAccounts() {
+            logger.debug("[CopilotKeychain] Using cached accounts")
+            return cached
+        }
+
+        let accounts = readCopilotCliKeychainAccountsFromKeychain(service: service)
+
+        if !accounts.isEmpty {
+            cacheCopilotCliAccounts(accounts)
+        }
+
+        return accounts
+    }
+
+    private func readCopilotCliKeychainAccountsFromKeychain(service: String) -> [CopilotAuthAccount] {
         let listQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -2632,7 +2738,6 @@ final class TokenManager: @unchecked Sendable {
             return []
         }
 
-        // Get array of account attributes
         let items: [[String: Any]]
         if let dict = listResult as? [String: Any] {
             items = [dict]
@@ -2645,13 +2750,11 @@ final class TokenManager: @unchecked Sendable {
 
         var accounts: [CopilotAuthAccount] = []
 
-        // Step 2: For each item, query individually to get the password data
         for item in items {
             guard let account = item[kSecAttrAccount as String] as? String else {
                 continue
             }
 
-            // Query individually for this account to get the password
             let dataQuery: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service,
@@ -2671,7 +2774,6 @@ final class TokenManager: @unchecked Sendable {
                 continue
             }
 
-            // Parse username from account field (format: "https://github.com:username")
             var login: String?
             if let lastColon = account.lastIndex(of: ":") {
                 let afterColon = account.index(after: lastColon)
@@ -2693,6 +2795,37 @@ final class TokenManager: @unchecked Sendable {
         }
 
         return accounts
+    }
+
+    private let copilotCliCacheKey = "copilot-cli-accounts"
+
+    private func readCachedCopilotCliAccounts() -> [CopilotAuthAccount]? {
+        guard let data = readCachedKeychainData(forOriginalService: copilotCliCacheKey) else {
+            return nil
+        }
+        guard let entries = try? JSONDecoder().decode([[String: String]].self, from: data) else {
+            return nil
+        }
+        return entries.compactMap { entry in
+            guard let token = entry["token"], !token.isEmpty else { return nil }
+            return CopilotAuthAccount(
+                accessToken: token,
+                accountId: nil,
+                login: entry["login"],
+                authSource: "Keychain (copilot-cli)",
+                source: .copilotCliKeychain
+            )
+        }
+    }
+
+    private func cacheCopilotCliAccounts(_ accounts: [CopilotAuthAccount]) {
+        let entries = accounts.map { account -> [String: String] in
+            var entry: [String: String] = ["token": account.accessToken]
+            if let login = account.login { entry["login"] = login }
+            return entry
+        }
+        guard let data = try? JSONEncoder().encode(entries) else { return }
+        cacheKeychainData(data, forOriginalService: copilotCliCacheKey)
     }
 
     /// Gets all GitHub Copilot token accounts (OpenCode auth + Copilot CLI Keychain + VS Code Copilot tokens)
