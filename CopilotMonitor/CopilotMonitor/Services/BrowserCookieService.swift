@@ -91,21 +91,42 @@ class BrowserCookieService {
 
     // MARK: - Keychain Access
 
+    // Uses /usr/bin/security instead of SecItemCopyMatching to read
+    // third-party keychain items. The security binary is Apple-signed and
+    // matches the `apple-tool:` partition_id present on all keychain items,
+    // so it never triggers a password prompt — even after app updates.
     private func getEncryptionKey(for browser: SupportedBrowser) throws -> String {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: browser.keychainService,
-            kSecAttrAccount as String: browser.keychainAccount,
-            kSecReturnData as String: true
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "find-generic-password",
+            "-s", browser.keychainService,
+            "-a", browser.keychainAccount,
+            "-w"
         ]
 
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
 
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let password = String(data: data, encoding: .utf8) else {
-            logger.error("Failed to get encryption key from Keychain for \(browser.displayName), status: \(status)")
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            logger.error("Failed to run security command for \(browser.displayName): \(error)")
+            throw BrowserCookieError.keychainAccessFailed
+        }
+
+        guard process.terminationStatus == 0 else {
+            logger.error("security find-generic-password failed for \(browser.displayName), exit: \(process.terminationStatus)")
+            throw BrowserCookieError.keychainAccessFailed
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let password = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !password.isEmpty else {
+            logger.error("Empty encryption key from Keychain for \(browser.displayName)")
             throw BrowserCookieError.keychainAccessFailed
         }
 

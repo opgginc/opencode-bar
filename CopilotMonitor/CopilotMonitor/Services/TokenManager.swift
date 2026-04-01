@@ -2188,26 +2188,44 @@ final class TokenManager: @unchecked Sendable {
         return bytes
     }
 
-    private func readKeychainJSON(service: String) -> [String: Any]? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
+    // Uses /usr/bin/security instead of SecItemCopyMatching to avoid keychain
+    // password prompts. The security binary matches `apple-tool:` partition_id.
+    private func readKeychainPasswordData(service: String, account: String? = nil) -> Data? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        var args = ["find-generic-password", "-s", service]
+        if let account = account {
+            args += ["-a", account]
+        }
+        args.append("-w")
+        process.arguments = args
 
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
 
-        guard status == errSecSuccess else {
-            if status != errSecItemNotFound {
-                logger.warning("Keychain lookup failed for service \(service), status: \(status)")
-            }
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
             return nil
         }
 
-        guard let data = result as? Data else {
-            logger.warning("Keychain payload for service \(service) is not valid JSON")
+        guard process.terminationStatus == 0 else {
+            return nil
+        }
+
+        let rawData = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let rawString = String(data: rawData, encoding: .utf8) else {
+            return rawData
+        }
+        let trimmed = rawString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.data(using: .utf8)
+    }
+
+    private func readKeychainJSON(service: String) -> [String: Any]? {
+        guard let data = readKeychainPasswordData(service: service) else {
             return nil
         }
 
@@ -2645,29 +2663,15 @@ final class TokenManager: @unchecked Sendable {
 
         var accounts: [CopilotAuthAccount] = []
 
-        // Step 2: For each item, query individually to get the password data
         for item in items {
             guard let account = item[kSecAttrAccount as String] as? String else {
                 continue
             }
 
-            // Query individually for this account to get the password
-            let dataQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: account,
-                kSecReturnData as String: true,
-                kSecMatchLimit as String: kSecMatchLimitOne
-            ]
-
-            var dataResult: AnyObject?
-            let dataStatus = SecItemCopyMatching(dataQuery as CFDictionary, &dataResult)
-
-            guard dataStatus == errSecSuccess,
-                  let passwordData = dataResult as? Data,
+            guard let passwordData = readKeychainPasswordData(service: service, account: account),
                   let token = String(data: passwordData, encoding: .utf8),
                   !token.isEmpty else {
-                logger.debug("[CopilotKeychain] Failed to get token for account '\(account)' (status: \(dataStatus))")
+                logger.debug("[CopilotKeychain] Failed to get token for account '\(account)'")
                 continue
             }
 
