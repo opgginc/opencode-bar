@@ -1688,18 +1688,25 @@ final class StatusBarController: NSObject {
          var deferredUnavailableItems: [NSMenuItem] = []
          var deferredUnavailableProviders: [ProviderIdentifier] = []
 
-            if let copilotResult = providerResults[.copilot],
-               let accounts = copilotResult.accounts,
-               !accounts.isEmpty {
-                let copilotAuthLabels = Set(
+         if let copilotResult = providerResults[.copilot],
+            let accounts = copilotResult.accounts,
+            !accounts.isEmpty {
+             let copilotAuthLabels = Set(
                     accounts.map { account in
                         authSourceLabel(for: account.details?.authSource, provider: .copilot) ?? "Unknown"
                     }
-                )
-                let showCopilotAuthLabel = copilotAuthLabels.count > 1
-                let baseName = multiAccountBaseName(for: .copilot)
-                for account in accounts {
-                    hasQuota = true
+             )
+             let showCopilotAuthLabel = copilotAuthLabels.count > 1
+             let baseName = multiAccountBaseName(for: .copilot)
+             if accounts.count > 1 {
+                 let headerItem = NSMenuItem()
+                 headerItem.view = createHeaderView(title: "\(baseName) Accounts (\(accounts.count))")
+                 headerItem.tag = 999
+                 menu.insertItem(headerItem, at: insertIndex)
+                 insertIndex += 1
+             }
+             for account in accounts {
+                 hasQuota = true
                     // Use accountId (login) when available, otherwise fall back to index
                     let accountIdentifier: String
                     if let accountId = account.accountId?.trimmingCharacters(in: .whitespacesAndNewlines), !accountId.isEmpty {
@@ -1734,8 +1741,8 @@ final class StatusBarController: NSObject {
 
                     menu.insertItem(quotaItem, at: insertIndex)
                     insertIndex += 1
-                }
-            } else if let copilotUsage = currentUsage {
+             }
+         } else if let copilotUsage = currentUsage {
                 hasQuota = true
                 let limit = copilotUsage.userPremiumRequestEntitlement
                 let used = copilotUsage.usedRequests

@@ -589,6 +589,13 @@ struct GeminiTokenResponse: Codable {
     let token_type: String?
 }
 
+private extension String {
+    var nilIfEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 // MARK: - TokenManager Singleton
 
 final class TokenManager: @unchecked Sendable {
@@ -3580,6 +3587,43 @@ final class TokenManager: @unchecked Sendable {
 
     // MARK: - Debug Environment Info
 
+    private func gitHubCopilotTokenStatusLine() -> String {
+        let discovered = getGitHubCopilotAccounts()
+        if !discovered.isEmpty {
+            var labels: [String] = []
+            for account in discovered {
+                let raw =
+                    account.login?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? account.accountId?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? account.authSource
+                if !raw.isEmpty, !labels.contains(raw) {
+                    labels.append(raw)
+                }
+            }
+            let suffix = labels.isEmpty ? "" : ": " + labels.joined(separator: ", ")
+            return "  [GitHub Copilot] CONFIGURED (\(discovered.count) account(s)\(suffix))"
+        }
+        if let auth = readOpenCodeAuth(),
+           let token = auth.githubCopilot?.access.trimmingCharacters(in: .whitespacesAndNewlines),
+           !token.isEmpty {
+            return "  [GitHub Copilot] CONFIGURED (auth.json)"
+        }
+        return "  [GitHub Copilot] NOT CONFIGURED"
+    }
+
+    private func effectiveGitHubCopilotDiscoverySummary() -> String {
+        let discovered = getGitHubCopilotAccounts()
+        guard !discovered.isEmpty else { return "NOT FOUND" }
+        let parts = discovered.map { account in
+            let id =
+                account.login?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? account.accountId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? "unknown"
+            return "\(id) via \(account.source.description)"
+        }
+        return "FOUND (\(discovered.count) account(s): \(parts.joined(separator: ", ")))"
+    }
+
     private func authDiscoverySummaryLines() -> [String] {
         let fileManager = FileManager.default
         let homeDir = fileManager.homeDirectoryForCurrentUser
@@ -3749,6 +3793,7 @@ final class TokenManager: @unchecked Sendable {
         lines.append("  VS Code hosts.json (\(shortPath(copilotHosts.path))): \(copilotFileStatus(path: copilotHosts))")
         lines.append("  VS Code apps.json (\(shortPath(copilotApps.path))): \(copilotFileStatus(path: copilotApps))")
         lines.append("  Browser Cookies: \(browserCookieStatus())")
+        lines.append("  Effective Copilot Discovery: \(effectiveGitHubCopilotDiscoverySummary())")
 
         lines.append("")
         lines.append("[Gemini CLI]")
@@ -3881,7 +3926,7 @@ final class TokenManager: @unchecked Sendable {
         if let auth = readOpenCodeAuth() {
             debugLines.append("  [Anthropic] \(auth.anthropic != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [OpenAI] \(auth.openai != nil ? "CONFIGURED" : "NOT CONFIGURED")")
-            debugLines.append("  [GitHub Copilot] \(auth.githubCopilot != nil ? "CONFIGURED" : "NOT CONFIGURED")")
+            debugLines.append(gitHubCopilotTokenStatusLine())
             debugLines.append("  [OpenRouter] \(auth.openrouter != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [OpenCode] \(auth.opencode != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [Kimi] \(auth.kimiForCoding != nil ? "CONFIGURED" : "NOT CONFIGURED")")
@@ -4143,15 +4188,18 @@ final class TokenManager: @unchecked Sendable {
             }
 
             // GitHub Copilot
-            if let copilot = auth.githubCopilot {
-                debugLines.append("[GitHub Copilot] OAuth Present")
-                debugLines.append("  - Access Token: \(copilot.access.count) chars")
-                debugLines.append("  - Refresh Token: \(copilot.refresh.count) chars")
-                let expiresDate = Date(timeIntervalSince1970: TimeInterval(copilot.expires))
-                let isExpired = expiresDate < Date()
-                debugLines.append("  - Expires: \(expiresDate) (\(isExpired ? "EXPIRED" : "valid"))")
-            } else {
-                debugLines.append("[GitHub Copilot] NOT CONFIGURED")
+            let discoveredCopilotAccounts = getGitHubCopilotAccounts()
+            let copilotStatusLine = gitHubCopilotTokenStatusLine().trimmingCharacters(in: .whitespaces)
+            debugLines.append(copilotStatusLine)
+            if !discoveredCopilotAccounts.isEmpty {
+                for account in discoveredCopilotAccounts {
+                    let accountLabel =
+                        account.login?.nilIfEmpty
+                        ?? account.accountId?.nilIfEmpty
+                        ?? "unknown"
+                    debugLines.append("  - Account: \(accountLabel)")
+                    debugLines.append("  - Source: \(account.source.description)")
+                }
             }
 
             // OpenRouter
