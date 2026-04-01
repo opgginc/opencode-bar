@@ -300,7 +300,7 @@ actor CopilotCLIProvider: ProviderProtocol {
         let merged = CandidateDedupe.merge(
             candidates,
             accountId: { $0.accountId },
-            isSameUsage: isSameUsage,
+            isSameUsage: { _, _ in false },
             priority: { $0.sourcePriority }
         )
         let sorted = merged.sorted { $0.sourcePriority > $1.sourcePriority }
@@ -340,34 +340,13 @@ actor CopilotCLIProvider: ProviderProtocol {
 
         let primaryDetails = cookieCandidate?.details ?? accountResults.first?.details
 
+        logger.info("CopilotCLIProvider: Finalized \(accountResults.count) account row(s)")
+
         return ProviderResult(
             usage: aggregateUsage,
             details: primaryDetails,
             accounts: accountResults
         )
-    }
-
-    private func isSameUsage(_ lhs: CopilotAccountCandidate, _ rhs: CopilotAccountCandidate) -> Bool {
-        guard let leftUsed = lhs.details.copilotUsedRequests,
-              let rightUsed = rhs.details.copilotUsedRequests,
-              let leftLimit = lhs.details.copilotLimitRequests,
-              let rightLimit = rhs.details.copilotLimitRequests else {
-            return false
-        }
-
-        let resetMatch = sameDate(lhs.details.copilotQuotaResetDateUTC, rhs.details.copilotQuotaResetDateUTC)
-        return leftUsed == rightUsed && leftLimit == rightLimit && resetMatch
-    }
-
-    private func sameDate(_ lhs: Date?, _ rhs: Date?) -> Bool {
-        switch (lhs, rhs) {
-        case (nil, nil):
-            return true
-        case let (left?, right?):
-            return Int(left.timeIntervalSince1970) == Int(right.timeIntervalSince1970)
-        default:
-            return false
-        }
     }
 
     // MARK: - Cookie-based Fetching (fallback)

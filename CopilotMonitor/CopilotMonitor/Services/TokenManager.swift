@@ -3593,9 +3593,9 @@ final class TokenManager: @unchecked Sendable {
             var labels: [String] = []
             for account in discovered {
                 let raw =
-                    account.login?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ?? account.accountId?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ?? account.authSource
+                    account.login?.nilIfEmpty
+                    ?? account.accountId?.nilIfEmpty
+                    ?? "unknown"
                 if !raw.isEmpty, !labels.contains(raw) {
                     labels.append(raw)
                 }
@@ -3616,8 +3616,8 @@ final class TokenManager: @unchecked Sendable {
         guard !discovered.isEmpty else { return "NOT FOUND" }
         let parts = discovered.map { account in
             let id =
-                account.login?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-                ?? account.accountId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                account.login?.nilIfEmpty
+                ?? account.accountId?.nilIfEmpty
                 ?? "unknown"
             return "\(id) via \(account.source.description)"
         }

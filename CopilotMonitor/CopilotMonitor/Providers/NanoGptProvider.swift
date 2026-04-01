@@ -336,11 +336,8 @@ final class NanoGptProvider: ProviderProtocol {
             throw ProviderError.authenticationFailed("Nano-GPT API key not available")
         }
 
-        async let usageResponseTask = fetchSubscriptionUsage(apiKey: apiKey)
-        async let balanceResponseTask = fetchBalance(apiKey: apiKey)
-
-        let usageResponse = try await usageResponseTask
-        let balanceResponse = try? await balanceResponseTask
+        let usageResponse = try await fetchSubscriptionUsage(apiKey: apiKey)
+        let balanceResponse = try? await fetchBalance(apiKey: apiKey)
 
         guard let weeklyLimit = usageResponse.limits?.weeklyInputTokens,
               weeklyLimit > 0 else {

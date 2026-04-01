@@ -1698,13 +1698,6 @@ final class StatusBarController: NSObject {
              )
              let showCopilotAuthLabel = copilotAuthLabels.count > 1
              let baseName = multiAccountBaseName(for: .copilot)
-             if accounts.count > 1 {
-                 let headerItem = NSMenuItem()
-                 headerItem.view = createHeaderView(title: "\(baseName) Accounts (\(accounts.count))")
-                 headerItem.tag = 999
-                 menu.insertItem(headerItem, at: insertIndex)
-                 insertIndex += 1
-             }
              for account in accounts {
                  hasQuota = true
                     // Use accountId (login) when available, otherwise fall back to index
