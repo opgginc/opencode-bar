@@ -22,6 +22,7 @@ final class OpenCodeAuthDecodingTests: XCTestCase {
         let auth = try JSONDecoder().decode(OpenCodeAuth.self, from: data)
 
         XCTAssertNil(auth.openai, "OpenAI entry is not OAuth, so it should be ignored instead of failing decoding")
+        XCTAssertEqual(auth.openaiAPIKey?.key, "sk-test-openai")
         XCTAssertEqual(auth.openrouter?.key, "or-test-key")
         XCTAssertEqual(auth.githubCopilot?.access, "gho_test")
     }
@@ -71,6 +72,7 @@ final class OpenCodeAuthDecodingTests: XCTestCase {
         let auth = try JSONDecoder().decode(OpenCodeAuth.self, from: data)
 
         XCTAssertEqual(auth.openai?.access, "eyJ.test")
+        XCTAssertNil(auth.openaiAPIKey)
         XCTAssertEqual(auth.openai?.expires, 1_770_563_557_150)
         XCTAssertEqual(auth.openai?.accountId, "123")
     }

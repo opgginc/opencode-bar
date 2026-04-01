@@ -169,6 +169,11 @@ struct OpenCodeAuth: Codable {
 
     let anthropic: OAuth?
     let openai: OAuth?
+    /// When `openai` in auth.json is not a valid OAuth object, it may be stored
+    /// as an API key object (e.g. `{"type":"apiKey","key":"sk-..."}`).  This field
+    /// captures that alternative representation so CodexProvider can still send
+    /// `Authorization: Bearer <key>` without requiring OAuth or ~/.codex/auth.json.
+    let openaiAPIKey: APIKey?
     let githubCopilot: OAuth?
     let openrouter: APIKey?
     let opencode: APIKey?
@@ -191,6 +196,7 @@ struct OpenCodeAuth: Codable {
     init(
         anthropic: OAuth?,
         openai: OAuth?,
+        openaiAPIKey: APIKey?,
         githubCopilot: OAuth?,
         openrouter: APIKey?,
         opencode: APIKey?,
@@ -203,6 +209,7 @@ struct OpenCodeAuth: Codable {
     ) {
         self.anthropic = anthropic
         self.openai = openai
+        self.openaiAPIKey = openaiAPIKey
         self.githubCopilot = githubCopilot
         self.openrouter = openrouter
         self.opencode = opencode
@@ -218,6 +225,10 @@ struct OpenCodeAuth: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         anthropic = Self.decodeLossyIfPresent(OAuth.self, from: container, forKey: .anthropic)
         openai = Self.decodeLossyIfPresent(OAuth.self, from: container, forKey: .openai)
+        // When openai is not a valid OAuth object, try decoding it as an API key.
+        openaiAPIKey = (openai == nil)
+            ? Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .openai)
+            : nil
         githubCopilot = Self.decodeLossyIfPresent(OAuth.self, from: container, forKey: .githubCopilot)
         openrouter = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .openrouter)
         opencode = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .opencode)
@@ -230,6 +241,7 @@ struct OpenCodeAuth: Codable {
 
         if anthropic == nil,
            openai == nil,
+           openaiAPIKey == nil,
            githubCopilot == nil,
            openrouter == nil,
            opencode == nil,
@@ -264,6 +276,8 @@ struct OpenCodeAuth: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(anthropic, forKey: .anthropic)
         try container.encodeIfPresent(openai, forKey: .openai)
+        // Encode openaiAPIKey only when OAuth openai is nil to avoid duplicate key
+        if openai == nil { try container.encodeIfPresent(openaiAPIKey, forKey: .openai) }
         try container.encodeIfPresent(githubCopilot, forKey: .githubCopilot)
         try container.encodeIfPresent(openrouter, forKey: .openrouter)
         try container.encodeIfPresent(opencode, forKey: .opencode)
@@ -2814,6 +2828,25 @@ final class TokenManager: @unchecked Sendable {
             )
         }
 
+        // When openai in auth.json is stored as an API key (not OAuth), produce
+        // an account that CodexProvider can use with Authorization: Bearer <key>.
+        if let auth = readOpenCodeAuth(),
+           let apiKey = auth.openaiAPIKey,
+           !apiKey.key.isEmpty {
+            let authSource = lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            accounts.append(
+                OpenAIAuthAccount(
+                    accessToken: apiKey.key,
+                    accountId: nil,
+                    externalUsageAccountId: nil,
+                    email: nil,
+                    authSource: authSource,
+                    sourceLabels: ["OpenCode (API Key)"],
+                    source: .opencodeAuth
+                )
+            )
+        }
+
         let codexLBAccounts = readCodexLBOpenAIAccounts()
         if !codexLBAccounts.isEmpty {
             accounts.append(contentsOf: codexLBAccounts)
@@ -3034,6 +3067,9 @@ final class TokenManager: @unchecked Sendable {
         // Primary: OpenCode auth
         if let auth = readOpenCodeAuth(), let access = auth.openai?.access {
             return access
+        }
+        if let auth = readOpenCodeAuth(), let apiKey = auth.openaiAPIKey?.key {
+            return apiKey
         }
         // Fallback: Codex CLI native auth (~/.codex/auth.json)
         if let codexAuth = readCodexAuth(), let access = codexAuth.tokens?.accessToken {
@@ -3716,7 +3752,12 @@ final class TokenManager: @unchecked Sendable {
         }
 
         lines.append("[ChatGPT]")
-        lines.append("  OpenCode auth.json (\(shortPath(openCodePath))): \(tokenStatus(hasAuth: openCodeAuth != nil, token: openCodeAuth?.openai?.access, accountId: openCodeAuth?.openai?.accountId))")
+        let openAIStatus = tokenStatus(
+            hasAuth: openCodeAuth?.openai != nil || openCodeAuth?.openaiAPIKey != nil,
+            token: openCodeAuth?.openai?.access ?? openCodeAuth?.openaiAPIKey?.key,
+            accountId: openCodeAuth?.openai?.accountId
+        )
+        lines.append("  OpenCode auth.json (\(shortPath(openCodePath))): \(openAIStatus)")
 
         let codexAuthPath = homeDir.appendingPathComponent(".codex").appendingPathComponent("auth.json")
         if fileManager.fileExists(atPath: codexAuthPath.path) {
@@ -3949,7 +3990,7 @@ final class TokenManager: @unchecked Sendable {
         debugLines.append("Token Status:")
         if let auth = readOpenCodeAuth() {
             debugLines.append("  [Anthropic] \(auth.anthropic != nil ? "CONFIGURED" : "NOT CONFIGURED")")
-            debugLines.append("  [OpenAI] \(auth.openai != nil ? "CONFIGURED" : "NOT CONFIGURED")")
+            debugLines.append("  [OpenAI] \((auth.openai != nil || auth.openaiAPIKey != nil) ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append(gitHubCopilotTokenStatusLine())
             debugLines.append("  [OpenRouter] \(auth.openrouter != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [OpenCode] \(auth.opencode != nil ? "CONFIGURED" : "NOT CONFIGURED")")
@@ -4207,6 +4248,10 @@ final class TokenManager: @unchecked Sendable {
                 let expiresDate = Date(timeIntervalSince1970: TimeInterval(openai.expires))
                 let isExpired = expiresDate < Date()
                 debugLines.append("  - Expires: \(expiresDate) (\(isExpired ? "EXPIRED" : "valid"))")
+            } else if let openaiAPIKey = auth.openaiAPIKey {
+                debugLines.append("[OpenAI] API Key Present")
+                debugLines.append("  - Key Length: \(openaiAPIKey.key.count) chars")
+                debugLines.append("  - Key Preview: \(maskToken(openaiAPIKey.key))")
             } else {
                 debugLines.append("[OpenAI] NOT CONFIGURED")
             }
