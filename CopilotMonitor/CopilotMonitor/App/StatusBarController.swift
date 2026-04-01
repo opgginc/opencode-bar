@@ -1384,10 +1384,13 @@ final class StatusBarController: NSObject {
                !geminiAccounts.isEmpty {
                 for account in geminiAccounts {
                     let subscriptionAccountId: String?
-                    if let accountId = account.accountId, !accountId.isEmpty {
+                    let trimmedEmail = account.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    if !trimmedEmail.isEmpty {
+                        subscriptionAccountId = trimmedEmail
+                    } else if let accountId = account.accountId, !accountId.isEmpty {
                         subscriptionAccountId = accountId
                     } else {
-                        subscriptionAccountId = account.email
+                        subscriptionAccountId = nil
                     }
                     let key = SubscriptionSettingsManager.shared.subscriptionKey(
                         for: .geminiCLI,
@@ -1400,8 +1403,8 @@ final class StatusBarController: NSObject {
 
             if let accounts = result.accounts, !accounts.isEmpty {
                 for account in accounts {
-                    if let accountId = account.accountId, !accountId.isEmpty {
-                        keys.insert(SubscriptionSettingsManager.shared.subscriptionKey(for: identifier, accountId: accountId))
+                    if let subId = account.subscriptionId, !subId.isEmpty {
+                        keys.insert(SubscriptionSettingsManager.shared.subscriptionKey(for: identifier, accountId: subId))
                     } else {
                         keys.insert(SubscriptionSettingsManager.shared.subscriptionKey(for: identifier))
                     }
@@ -1729,7 +1732,7 @@ final class StatusBarController: NSObject {
                     if quotaItem.isEnabled,
                        let details = account.details,
                        details.hasAnyValue {
-                        quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot, accountId: account.accountId)
+                        quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot, accountId: account.subscriptionId)
                     }
 
                     menu.insertItem(quotaItem, at: insertIndex)
@@ -1985,7 +1988,7 @@ final class StatusBarController: NSObject {
                         if item.isEnabled,
                            let details = account.details,
                            details.hasAnyValue {
-                            item.submenu = createDetailSubmenu(details, identifier: identifier, accountId: account.accountId)
+                            item.submenu = createDetailSubmenu(details, identifier: identifier, accountId: account.subscriptionId)
                         }
 
                         menu.insertItem(item, at: insertIndex)

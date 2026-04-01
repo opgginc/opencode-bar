@@ -448,7 +448,10 @@ final class ClaudeProvider: ProviderProtocol {
             dedupeKey = "token:\(tokenFingerprint(account.accessToken))"
         }
 
-        let displayAccountId = resolvedAccountId ?? resolvedEmail ?? dedupeKey
+        // Prefer email over UUID for stable subscription key derivation.
+        // UUID (resolvedAccountId) depends on identity API success, so it can
+        // flip between UUID and email across fetches, causing orphaned subscriptions.
+        let displayAccountId = resolvedEmail ?? resolvedAccountId ?? dedupeKey
         return ClaudeResolvedIdentity(
             dedupeKey: dedupeKey,
             accountId: resolvedAccountId,

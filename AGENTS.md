@@ -652,5 +652,13 @@ func buildProviderSubmenu() -> [NSMenuItem] {
   - Behavior: Use the access token from auth.json as-is. If it is expired (401), surface the error to the user without attempting a refresh.
   - Removed: `ClaudeOAuthRefreshResponse`, `claudeOAuthRefreshEndpoint`, `claudeOAuthClientID`, `isAccessTokenExpired()`, `isTokenExpiredError()`, `refreshClaudeAccessToken()` were all removed from `ClaudeProvider.swift`.
   - Anti-Pattern: NEVER add back token refresh logic for Claude OAuth — it breaks OpenCode authentication for the user.
+- **Subscription Key Stability (Email-First Rule)**:
+  - Problem: Subscription keys stored in UserDefaults as `subscription_v2.{provider}.{accountId}` become orphaned when `accountId` changes between fetches (e.g., identity API returns UUID on success but falls back to email on failure)
+  - Rule: ALL subscription key derivation MUST prefer email over accountId/UUID
+  - Priority: `email.lowercased()` → `accountId` → provider-only key (no account suffix)
+  - Where: `ProviderAccountResult.subscriptionId` (computed property), `collectVisibleSubscriptionKeys()`, all `addSubscriptionItems()` call sites, Gemini special cases
+  - Anti-Pattern: NEVER use API-resolved UUIDs as the primary subscription key — they depend on API availability
+  - Pattern: `let stableKey = email?.lowercased() ?? accountId` for every subscription key derivation point
+  - Applies To: All providers universally (Claude, Codex, Copilot, Gemini, etc.)
 
 <!-- opencode:reflection:end -->

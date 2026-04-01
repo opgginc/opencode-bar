@@ -40,6 +40,18 @@ struct ProviderAccountResult {
     let accountId: String?
     let usage: ProviderUsage
     let details: DetailedUsage?
+
+    /// Stable identifier for subscription key derivation.
+    /// Prefers email over accountId because email is invariant across API
+    /// success/failure, while accountId (e.g. UUID) may only resolve when
+    /// the identity API responds successfully.
+    var subscriptionId: String? {
+        if let email = details?.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           !email.isEmpty {
+            return email
+        }
+        return accountId
+    }
 }
 
 struct GeminiAccountQuota: Codable {

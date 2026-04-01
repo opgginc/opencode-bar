@@ -396,7 +396,7 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
-            addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: accountId ?? details.email)
+            addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: details.email ?? accountId)
 
         case .antigravity:
             // modelBreakdown stores remaining% — convert to used% at display layer
@@ -880,7 +880,8 @@ extension StatusBarController {
         }
         createAccountInfoSection(items: accountItems).forEach { submenu.addItem($0) }
 
-        let subscriptionAccountId = (account.accountId?.isEmpty == false) ? account.accountId : account.email
+        let emailNormalized = account.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let subscriptionAccountId = emailNormalized.isEmpty ? account.accountId : emailNormalized
         addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: subscriptionAccountId)
 
         return submenu
