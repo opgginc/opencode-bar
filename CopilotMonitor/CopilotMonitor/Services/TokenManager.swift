@@ -705,13 +705,28 @@ final class TokenManager: @unchecked Sendable {
         )
     }
 
-    /// Possible opencode.json locations in priority order:
-    /// 1. $XDG_CONFIG_HOME/opencode/opencode.json (if XDG_CONFIG_HOME is set)
-    /// 2. ~/.config/opencode/opencode.json (XDG default on macOS/Linux)
-    /// 3. ~/.local/share/opencode/opencode.json (fallback)
-    /// 4. ~/Library/Application Support/opencode/opencode.json (macOS fallback)
+    /// Possible opencode.json/opencode.jsonc locations in priority order.
+    /// For each directory, opencode.jsonc is preferred over opencode.json
+    /// (matching copilothydra behavior):
+    /// 1. $XDG_CONFIG_HOME/opencode/opencode.jsonc (if XDG_CONFIG_HOME is set)
+    /// 2. $XDG_CONFIG_HOME/opencode/opencode.json  (if XDG_CONFIG_HOME is set)
+    /// 3. ~/.config/opencode/opencode.jsonc (XDG default on macOS/Linux)
+    /// 4. ~/.config/opencode/opencode.json  (XDG default on macOS/Linux)
+    /// 5. ~/.local/share/opencode/opencode.jsonc (fallback)
+    /// 6. ~/.local/share/opencode/opencode.json  (fallback)
+    /// 7. ~/Library/Application Support/opencode/opencode.jsonc (macOS fallback)
+    /// 8. ~/Library/Application Support/opencode/opencode.json  (macOS fallback)
     func getOpenCodeConfigFilePaths() -> [URL] {
-        return buildOpenCodeFilePaths(
+        let jsoncPaths = buildOpenCodeFilePaths(
+            envVarName: "XDG_CONFIG_HOME",
+            envRelativePathComponents: ["opencode", "opencode.jsonc"],
+            fallbackRelativePathComponents: [
+                [".config", "opencode", "opencode.jsonc"],
+                [".local", "share", "opencode", "opencode.jsonc"],
+                ["Library", "Application Support", "opencode", "opencode.jsonc"]
+            ]
+        )
+        let jsonPaths = buildOpenCodeFilePaths(
             envVarName: "XDG_CONFIG_HOME",
             envRelativePathComponents: ["opencode", "opencode.json"],
             fallbackRelativePathComponents: [
@@ -720,6 +735,8 @@ final class TokenManager: @unchecked Sendable {
                 ["Library", "Application Support", "opencode", "opencode.json"]
             ]
         )
+
+        return zip(jsoncPaths, jsonPaths).flatMap { [$0, $1] }
     }
 
     /// Possible search-keys.json locations in priority order:
@@ -810,7 +827,7 @@ final class TokenManager: @unchecked Sendable {
         }
     }
 
-    private func stripJSONComments(from data: Data) -> Data {
+    func stripJSONComments(from data: Data) -> Data {
         guard let text = String(data: data, encoding: .utf8) else {
             return data
         }

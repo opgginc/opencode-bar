@@ -263,4 +263,106 @@ final class TokenManagerTests: XCTestCase {
 
         XCTAssertNil(account.externalUsageAccountId)
     }
+
+    // MARK: - opencode.jsonc Precedence Tests
+
+    func testOpenCodeConfigFilePathsReturnsJSONCBeforeJSONForEachLocation() {
+        let paths = TokenManager.shared.getOpenCodeConfigFilePaths()
+        let pathStrings = paths.map { $0.path }
+
+        // Each .jsonc path must appear before its corresponding .json path
+        // for the same directory. Verify by checking every .json path has a
+        // .jsonc counterpart earlier in the array.
+        for (index, path) in pathStrings.enumerated() where path.hasSuffix(".json") && !path.hasSuffix(".jsonc") {
+            let jsoncVariant = path.replacingOccurrences(of: ".json", with: ".jsonc")
+            if let jsoncIndex = pathStrings.firstIndex(of: jsoncVariant) {
+                XCTAssertLessThan(
+                    jsoncIndex,
+                    index,
+                    "opencode.jsonc (\(jsoncVariant)) should appear before opencode.json (\(path)) in search order"
+                )
+            }
+        }
+    }
+
+    func testOpenCodeConfigFilePathsContainsBothExtensions() {
+        let paths = TokenManager.shared.getOpenCodeConfigFilePaths()
+        let pathStrings = paths.map { $0.path }
+
+        let jsoncCount = pathStrings.filter { $0.hasSuffix(".jsonc") }.count
+        let jsonCount = pathStrings.filter { $0.hasSuffix(".json") && !$0.hasSuffix(".jsonc") }.count
+
+        XCTAssertGreaterThan(jsoncCount, 0, "Expected at least one .jsonc path")
+        XCTAssertGreaterThan(jsonCount, 0, "Expected at least one .json path")
+        XCTAssertEqual(jsoncCount, jsonCount, "Expected equal number of .jsonc and .json paths")
+    }
+
+    func testOpenCodeConfigFilePathsContainsExpectedDirectories() {
+        let paths = TokenManager.shared.getOpenCodeConfigFilePaths()
+        let pathStrings = paths.map { $0.path }
+
+        // Verify the three expected config directories are covered for each extension.
+        // Use hasSuffix instead of contains to avoid .json matching .jsonc paths.
+        let expectedSuffixes = [
+            "/.config/opencode/opencode.jsonc",
+            "/.config/opencode/opencode.json",
+            "/.local/share/opencode/opencode.jsonc",
+            "/.local/share/opencode/opencode.json",
+            "/Application Support/opencode/opencode.jsonc",
+            "/Application Support/opencode/opencode.json"
+        ]
+
+        for suffix in expectedSuffixes {
+            let matches = pathStrings.filter { $0.hasSuffix(suffix) }
+            XCTAssertEqual(
+                matches.count,
+                1,
+                "Expected exactly one path ending with '\(suffix)', found \(matches.count): \(matches)"
+            )
+        }
+    }
+
+    func testStripJSONCommentsProducesValidJSONFromJSONCInput() throws {
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        // Create .jsonc content that includes comments.
+        let jsoncContent = """
+        {
+            // JSONC-specific comment
+            "provider": {
+                "openai": {
+                    "options": {
+                        "baseURL": "https://from-jsonc.example.com/v1"
+                    }
+                }
+            }
+        }
+        """
+
+        let jsoncPath = tempDirectory.appendingPathComponent("opencode.jsonc")
+        try Data(jsoncContent.utf8).write(to: jsoncPath)
+
+        let jsoncData = try Data(contentsOf: jsoncPath)
+        let normalizedData = TokenManager.shared.stripJSONComments(from: jsoncData)
+        let jsonObject = try JSONSerialization.jsonObject(with: normalizedData)
+        let dict = try XCTUnwrap(jsonObject as? [String: Any])
+
+        let configuration = TokenManager.shared.codexEndpointConfiguration(
+            from: dict,
+            sourcePath: jsoncPath.path
+        )
+
+        XCTAssertEqual(
+            configuration,
+            CodexEndpointConfiguration(
+                mode: .external(usageURL: URL(string: "https://from-jsonc.example.com/api/codex/usage")!),
+                source: jsoncPath.path
+            ),
+            "Expected JSONC input to remain valid after stripping comments"
+        )
+    }
 }
