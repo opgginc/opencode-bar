@@ -2217,7 +2217,10 @@ final class TokenManager: @unchecked Sendable {
 
         let rawData = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let rawString = String(data: rawData, encoding: .utf8) else {
-            return rawData
+            // /usr/bin/security outputs text; non-UTF-8 data is unusable for
+            // token/JSON consumers, so return nil instead of raw bytes.
+            logger.debug("[Keychain] Output was not valid UTF-8 for service '\(service)'")
+            return nil
         }
         let trimmed = rawString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
