@@ -396,7 +396,7 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
-            addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: details.email ?? accountId)
+            addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: details.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? accountId)
 
         case .antigravity:
             // modelBreakdown stores remaining% — convert to used% at display layer
