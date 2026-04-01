@@ -68,9 +68,6 @@ class BrowserCookieService {
             throw BrowserCookieError.cookieDBNotFound
         }
 
-        // Check cache BEFORE getEncryptionKey() populates it, otherwise
-        // hadCachedKey is always true after the first successful run.
-        let hadCachedKey = getCachedEncryptionKey(for: browser) != nil
         let encryptionKey = try getEncryptionKey(for: browser)
         let aesKey = try deriveAESKey(from: encryptionKey)
 
@@ -89,60 +86,12 @@ class BrowserCookieService {
             }
         }
 
-        // Only retry if we actually used a cached key (not a freshly fetched one).
-        // The browser may have rotated its encryption key since we last cached it.
-        if hadCachedKey {
-            deleteCachedEncryptionKey(for: browser)
-            let freshKey = try getEncryptionKeyFromBrowser(for: browser)
-
-            // Skip retry if browser returned the same key — cookies are genuinely absent
-            guard freshKey != encryptionKey else {
-                debugLog("Fresh key matches cached key for \(browser.displayName), cookies are genuinely unavailable")
-                throw BrowserCookieError.noBrowserFound
-            }
-
-            debugLog("Key changed for \(browser.displayName), retrying with fresh key")
-            let freshAesKey = try deriveAESKey(from: freshKey)
-            cacheEncryptionKey(freshKey, for: browser)
-
-            for path in cookieDBPaths {
-                do {
-                    let cookies = try readCookies(from: path, aesKey: freshAesKey)
-                    if cookies.isValid {
-                        debugLog("Found valid cookies with fresh key at: \(path)")
-                        return cookies
-                    }
-                } catch {
-                    continue
-                }
-            }
-        }
-
         throw BrowserCookieError.noBrowserFound
     }
 
     // MARK: - Keychain Access
 
-    // Items stored under our own bundle ID never trigger keychain prompts,
-    // even after app updates, because the ACL trusts the same Developer ID identity.
-    private let cacheKeychainService = "com.copilotmonitor.BrowserEncryptionKeyCache"
-
     private func getEncryptionKey(for browser: SupportedBrowser) throws -> String {
-        if let cachedKey = getCachedEncryptionKey(for: browser) {
-            debugLog("Using cached encryption key for \(browser.displayName)")
-            return cachedKey
-        }
-
-        let key = try getEncryptionKeyFromBrowser(for: browser)
-        cacheEncryptionKey(key, for: browser)
-        debugLog("Cached encryption key for \(browser.displayName)")
-
-        return key
-    }
-
-    // Reading the browser's keychain item triggers the macOS password prompt.
-    private func getEncryptionKeyFromBrowser(for browser: SupportedBrowser) throws -> String {
-        debugLog("Reading encryption key from browser keychain for \(browser.displayName)")
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: browser.keychainService,
@@ -161,62 +110,6 @@ class BrowserCookieService {
         }
 
         return password
-    }
-
-    // MARK: - Encryption Key Cache
-
-    private func getCachedEncryptionKey(for browser: SupportedBrowser) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: cacheKeychainService,
-            kSecAttrAccount as String: browser.keychainService,
-            kSecReturnData as String: true
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let key = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-
-        return key
-    }
-
-    private func cacheEncryptionKey(_ key: String, for browser: SupportedBrowser) {
-        guard let data = key.data(using: .utf8) else { return }
-
-        let deleteQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: cacheKeychainService,
-            kSecAttrAccount as String: browser.keychainService
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
-
-        // kSecAttrAccessibleAfterFirstUnlock: available even when screen is locked (menu bar app may refresh in background)
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: cacheKeychainService,
-            kSecAttrAccount as String: browser.keychainService,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-            kSecValueData as String: data
-        ]
-        let status = SecItemAdd(addQuery as CFDictionary, nil)
-        if status != errSecSuccess {
-            debugLog("Failed to cache encryption key for \(browser.displayName), status: \(status)")
-        }
-    }
-
-    private func deleteCachedEncryptionKey(for browser: SupportedBrowser) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: cacheKeychainService,
-            kSecAttrAccount as String: browser.keychainService
-        ]
-        SecItemDelete(query as CFDictionary)
-        debugLog("Deleted cached encryption key for \(browser.displayName)")
     }
 
     // MARK: - Key Derivation (PBKDF2)

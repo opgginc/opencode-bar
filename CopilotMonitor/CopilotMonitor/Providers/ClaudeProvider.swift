@@ -388,7 +388,6 @@ final class ClaudeProvider: ProviderProtocol {
 
                 if httpResponse.statusCode == 401 {
                     logger.warning("Claude identity endpoint unauthorized: \(endpoint)")
-                    TokenManager.shared.invalidateClaudeKeychainCaches()
                     return nil
                 }
 
@@ -523,7 +522,6 @@ final class ClaudeProvider: ProviderProtocol {
 
         if httpResponse.statusCode == 401 {
             logger.warning("Claude API returned 401 - token expired")
-            TokenManager.shared.invalidateClaudeKeychainCaches()
             throw ProviderError.authenticationFailed("Token expired or invalid")
         }
 
