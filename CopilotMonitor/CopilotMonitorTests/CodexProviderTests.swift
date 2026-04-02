@@ -231,6 +231,55 @@ final class CodexProviderTests: XCTestCase {
         XCTAssertEqual(url.absoluteString, "https://codex.example.com/proxy/v1/usage")
     }
 
+    func testCodexUsageURLDoesNotDoubleInjectV1ForAlreadyVersionedPath() throws {
+        let account = OpenAIAuthAccount(
+            accessToken: "sk-clb-test",
+            accountId: nil,
+            externalUsageAccountId: nil,
+            email: nil,
+            authSource: "auth.json",
+            sourceLabels: ["OpenCode (API Key)"],
+            source: .opencodeAuth,
+            credentialType: .apiKey
+        )
+        // URL whose path ends in /v1/usage but has an extra prefix segment.
+        // The old code would strip just "/usage" and append "/v1/usage", producing
+        // the incorrect "/api/v1/v1/usage". The fix preserves the path as-is because
+        // it already terminates with /v1/usage.
+        let configuration = CodexEndpointConfiguration(
+            mode: .external(usageURL: URL(string: "https://codex.example.com/api/v1/usage")!),
+            source: "test",
+            usesOpenAIProviderBaseURL: true
+        )
+
+        let url = try provider.codexUsageURL(for: configuration, account: account)
+
+        XCTAssertEqual(url.absoluteString, "https://codex.example.com/api/v1/usage")
+        XCTAssertFalse(url.path.contains("/v1/v1"), "Path must not contain a double /v1 injection")
+    }
+
+    func testCodexUsageURLPreservesAlreadySelfServiceEndpoint() throws {
+        let account = OpenAIAuthAccount(
+            accessToken: "sk-clb-test",
+            accountId: nil,
+            externalUsageAccountId: nil,
+            email: nil,
+            authSource: "auth.json",
+            sourceLabels: ["OpenCode (API Key)"],
+            source: .opencodeAuth,
+            credentialType: .apiKey
+        )
+        let configuration = CodexEndpointConfiguration(
+            mode: .external(usageURL: URL(string: "https://codex.example.com/v1/usage")!),
+            source: "test",
+            usesOpenAIProviderBaseURL: true
+        )
+
+        let url = try provider.codexUsageURL(for: configuration, account: account)
+
+        XCTAssertEqual(url.absoluteString, "https://codex.example.com/v1/usage")
+    }
+
     func testCodexUsageURLRejectsDirectChatGPTModeForAPIKey() {
         let account = OpenAIAuthAccount(
             accessToken: "sk-clb-test",
@@ -358,6 +407,40 @@ final class CodexProviderTests: XCTestCase {
         XCTAssertEqual(payload.details.sparkPrimaryWindowLabel, "5h")
         XCTAssertEqual(payload.details.sparkSecondaryWindowLabel, "Weekly")
         XCTAssertEqual(payload.details.monthlyCost, 11.75, accuracy: 0.001)
+    }
+
+    func testDecodeUsagePayloadHandlesMissingLimitsKeyGracefully() throws {
+        let json = """
+        {
+          "request_count": 100,
+          "total_cost_usd": 5.0
+        }
+        """
+        let account = OpenAIAuthAccount(
+            accessToken: "sk-clb-test",
+            accountId: nil,
+            externalUsageAccountId: nil,
+            email: "user@example.com",
+            authSource: "auth.json",
+            sourceLabels: ["OpenCode (API Key)"],
+            source: .opencodeAuth,
+            credentialType: .apiKey
+        )
+        let configuration = CodexEndpointConfiguration(
+            mode: .external(usageURL: URL(string: "https://codex.example.com/api/codex/usage")!),
+            source: "test",
+            usesOpenAIProviderBaseURL: true
+        )
+
+        let payload = try provider.decodeUsagePayload(
+            data: XCTUnwrap(json.data(using: .utf8)),
+            account: account,
+            endpointConfiguration: configuration
+        )
+
+        // No limits → no used percentage; provider shows 0% used (100 remaining)
+        XCTAssertEqual(payload.usage.remainingQuota, 100)
+        XCTAssertEqual(payload.details.monthlyCost, 5.0, accuracy: 0.001)
     }
 
     private func loadFixture(named: String) throws -> Any {

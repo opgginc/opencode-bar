@@ -197,6 +197,15 @@ final class CodexProvider: ProviderProtocol {
             case totalCostUSD = "total_cost_usd"
             case limits
         }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            requestCount = try container.decodeIfPresent(Int.self, forKey: .requestCount)
+            totalTokens = try container.decodeIfPresent(Int.self, forKey: .totalTokens)
+            cachedInputTokens = try container.decodeIfPresent(Int.self, forKey: .cachedInputTokens)
+            totalCostUSD = try container.decodeIfPresent(Double.self, forKey: .totalCostUSD)
+            limits = (try? container.decodeIfPresent([SelfServiceLimit].self, forKey: .limits)) ?? []
+        }
     }
 
     private struct SelfServiceLimit: Decodable {
@@ -511,6 +520,9 @@ final class CodexProvider: ProviderProtocol {
                 let currentPath = components.path
                 if currentPath.hasSuffix("/api/codex/usage") {
                     components.path = String(currentPath.dropLast("/api/codex/usage".count)) + "/v1/usage"
+                } else if currentPath.hasSuffix("/v1/usage") {
+                    // Already points at the self-service endpoint; use as-is.
+                    components.path = currentPath
                 } else if currentPath.hasSuffix("/usage") {
                     components.path = String(currentPath.dropLast("/usage".count)) + "/v1/usage"
                 } else {
