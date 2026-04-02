@@ -41,10 +41,6 @@ struct ProviderAccountResult {
     let usage: ProviderUsage
     let details: DetailedUsage?
 
-    /// Stable identifier for subscription key derivation.
-    /// Prefers email over accountId because email is invariant across API
-    /// success/failure, while accountId (e.g. UUID) may only resolve when
-    /// the identity API responds successfully.
     var subscriptionId: String? {
         if let email = details?.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
            !email.isEmpty {
@@ -122,11 +118,19 @@ struct DetailedUsage {
     let secondaryUsage: Double?
     let secondaryReset: Date?
     let primaryReset: Date?
+    let codexPrimaryWindowLabel: String?
+    let codexPrimaryWindowHours: Int?
+    let codexSecondaryWindowLabel: String?
+    let codexSecondaryWindowHours: Int?
     let sparkUsage: Double?
     let sparkReset: Date?
     let sparkSecondaryUsage: Double?
     let sparkSecondaryReset: Date?
     let sparkWindowLabel: String?
+    let sparkPrimaryWindowLabel: String?
+    let sparkPrimaryWindowHours: Int?
+    let sparkSecondaryWindowLabel: String?
+    let sparkSecondaryWindowHours: Int?
 
     // Codex/Antigravity plan info
     let creditsBalance: Double?
@@ -212,11 +216,19 @@ struct DetailedUsage {
         secondaryUsage: Double? = nil,
         secondaryReset: Date? = nil,
         primaryReset: Date? = nil,
+        codexPrimaryWindowLabel: String? = nil,
+        codexPrimaryWindowHours: Int? = nil,
+        codexSecondaryWindowLabel: String? = nil,
+        codexSecondaryWindowHours: Int? = nil,
         sparkUsage: Double? = nil,
         sparkReset: Date? = nil,
         sparkSecondaryUsage: Double? = nil,
         sparkSecondaryReset: Date? = nil,
         sparkWindowLabel: String? = nil,
+        sparkPrimaryWindowLabel: String? = nil,
+        sparkPrimaryWindowHours: Int? = nil,
+        sparkSecondaryWindowLabel: String? = nil,
+        sparkSecondaryWindowHours: Int? = nil,
         creditsBalance: Double? = nil,
         planType: String? = nil,
         chutesMonthlyValueCapUSD: Double? = nil,
@@ -278,11 +290,19 @@ struct DetailedUsage {
         self.secondaryUsage = secondaryUsage
         self.secondaryReset = secondaryReset
         self.primaryReset = primaryReset
+        self.codexPrimaryWindowLabel = codexPrimaryWindowLabel
+        self.codexPrimaryWindowHours = codexPrimaryWindowHours
+        self.codexSecondaryWindowLabel = codexSecondaryWindowLabel
+        self.codexSecondaryWindowHours = codexSecondaryWindowHours
         self.sparkUsage = sparkUsage
         self.sparkReset = sparkReset
         self.sparkSecondaryUsage = sparkSecondaryUsage
         self.sparkSecondaryReset = sparkSecondaryReset
         self.sparkWindowLabel = sparkWindowLabel
+        self.sparkPrimaryWindowLabel = sparkPrimaryWindowLabel
+        self.sparkPrimaryWindowHours = sparkPrimaryWindowHours
+        self.sparkSecondaryWindowLabel = sparkSecondaryWindowLabel
+        self.sparkSecondaryWindowHours = sparkSecondaryWindowHours
         self.creditsBalance = creditsBalance
         self.planType = planType
         self.chutesMonthlyValueCapUSD = chutesMonthlyValueCapUSD
@@ -332,7 +352,9 @@ extension DetailedUsage: Codable {
         case fiveHourUsage, fiveHourReset, sevenDayUsage, sevenDayReset
         case sonnetUsage, sonnetReset, opusUsage, opusReset, modelBreakdown, modelResetTimes
         case secondaryUsage, secondaryReset, primaryReset
+        case codexPrimaryWindowLabel, codexPrimaryWindowHours, codexSecondaryWindowLabel, codexSecondaryWindowHours
         case sparkUsage, sparkReset, sparkSecondaryUsage, sparkSecondaryReset, sparkWindowLabel
+        case sparkPrimaryWindowLabel, sparkPrimaryWindowHours, sparkSecondaryWindowLabel, sparkSecondaryWindowHours
         case creditsBalance, planType
         case chutesMonthlyValueCapUSD, chutesMonthlyValueUsedUSD, chutesMonthlyValueUsedPercent
         case extraUsageEnabled
@@ -370,11 +392,19 @@ extension DetailedUsage: Codable {
         secondaryUsage = try container.decodeIfPresent(Double.self, forKey: .secondaryUsage)
         secondaryReset = try container.decodeIfPresent(Date.self, forKey: .secondaryReset)
         primaryReset = try container.decodeIfPresent(Date.self, forKey: .primaryReset)
+        codexPrimaryWindowLabel = try container.decodeIfPresent(String.self, forKey: .codexPrimaryWindowLabel)
+        codexPrimaryWindowHours = try container.decodeIfPresent(Int.self, forKey: .codexPrimaryWindowHours)
+        codexSecondaryWindowLabel = try container.decodeIfPresent(String.self, forKey: .codexSecondaryWindowLabel)
+        codexSecondaryWindowHours = try container.decodeIfPresent(Int.self, forKey: .codexSecondaryWindowHours)
         sparkUsage = try container.decodeIfPresent(Double.self, forKey: .sparkUsage)
         sparkReset = try container.decodeIfPresent(Date.self, forKey: .sparkReset)
         sparkSecondaryUsage = try container.decodeIfPresent(Double.self, forKey: .sparkSecondaryUsage)
         sparkSecondaryReset = try container.decodeIfPresent(Date.self, forKey: .sparkSecondaryReset)
         sparkWindowLabel = try container.decodeIfPresent(String.self, forKey: .sparkWindowLabel)
+        sparkPrimaryWindowLabel = try container.decodeIfPresent(String.self, forKey: .sparkPrimaryWindowLabel)
+        sparkPrimaryWindowHours = try container.decodeIfPresent(Int.self, forKey: .sparkPrimaryWindowHours)
+        sparkSecondaryWindowLabel = try container.decodeIfPresent(String.self, forKey: .sparkSecondaryWindowLabel)
+        sparkSecondaryWindowHours = try container.decodeIfPresent(Int.self, forKey: .sparkSecondaryWindowHours)
         creditsBalance = try container.decodeIfPresent(Double.self, forKey: .creditsBalance)
         planType = try container.decodeIfPresent(String.self, forKey: .planType)
         chutesMonthlyValueCapUSD = try container.decodeIfPresent(Double.self, forKey: .chutesMonthlyValueCapUSD)
@@ -439,11 +469,19 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(secondaryUsage, forKey: .secondaryUsage)
         try container.encodeIfPresent(secondaryReset, forKey: .secondaryReset)
         try container.encodeIfPresent(primaryReset, forKey: .primaryReset)
+        try container.encodeIfPresent(codexPrimaryWindowLabel, forKey: .codexPrimaryWindowLabel)
+        try container.encodeIfPresent(codexPrimaryWindowHours, forKey: .codexPrimaryWindowHours)
+        try container.encodeIfPresent(codexSecondaryWindowLabel, forKey: .codexSecondaryWindowLabel)
+        try container.encodeIfPresent(codexSecondaryWindowHours, forKey: .codexSecondaryWindowHours)
         try container.encodeIfPresent(sparkUsage, forKey: .sparkUsage)
         try container.encodeIfPresent(sparkReset, forKey: .sparkReset)
         try container.encodeIfPresent(sparkSecondaryUsage, forKey: .sparkSecondaryUsage)
         try container.encodeIfPresent(sparkSecondaryReset, forKey: .sparkSecondaryReset)
         try container.encodeIfPresent(sparkWindowLabel, forKey: .sparkWindowLabel)
+        try container.encodeIfPresent(sparkPrimaryWindowLabel, forKey: .sparkPrimaryWindowLabel)
+        try container.encodeIfPresent(sparkPrimaryWindowHours, forKey: .sparkPrimaryWindowHours)
+        try container.encodeIfPresent(sparkSecondaryWindowLabel, forKey: .sparkSecondaryWindowLabel)
+        try container.encodeIfPresent(sparkSecondaryWindowHours, forKey: .sparkSecondaryWindowHours)
         try container.encodeIfPresent(creditsBalance, forKey: .creditsBalance)
         try container.encodeIfPresent(planType, forKey: .planType)
         try container.encodeIfPresent(chutesMonthlyValueCapUSD, forKey: .chutesMonthlyValueCapUSD)

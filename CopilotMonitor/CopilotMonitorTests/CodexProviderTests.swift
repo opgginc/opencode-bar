@@ -187,6 +187,179 @@ final class CodexProviderTests: XCTestCase {
         XCTAssertEqual(auth.openaiAPIKey, "sk-only-key")
     }
 
+    func testCodexUsageURLUsesSelfServiceEndpointForExternalAPIKey() throws {
+        let account = OpenAIAuthAccount(
+            accessToken: "sk-clb-test",
+            accountId: nil,
+            externalUsageAccountId: nil,
+            email: nil,
+            authSource: "auth.json",
+            sourceLabels: ["OpenCode (API Key)"],
+            source: .opencodeAuth,
+            credentialType: .apiKey
+        )
+        let configuration = CodexEndpointConfiguration(
+            mode: .external(usageURL: URL(string: "https://codex.example.com/api/codex/usage")!),
+            source: "test",
+            usesOpenAIProviderBaseURL: true
+        )
+
+        let url = try provider.codexUsageURL(for: configuration, account: account)
+
+        XCTAssertEqual(url.absoluteString, "https://codex.example.com/v1/usage")
+    }
+
+    func testCodexUsageURLPreservesURLPrefixForSelfServiceEndpoint() throws {
+        let account = OpenAIAuthAccount(
+            accessToken: "sk-clb-test",
+            accountId: nil,
+            externalUsageAccountId: nil,
+            email: nil,
+            authSource: "auth.json",
+            sourceLabels: ["OpenCode (API Key)"],
+            source: .opencodeAuth,
+            credentialType: .apiKey
+        )
+        let configuration = CodexEndpointConfiguration(
+            mode: .external(usageURL: URL(string: "https://codex.example.com/proxy/api/codex/usage")!),
+            source: "test",
+            usesOpenAIProviderBaseURL: false
+        )
+
+        let url = try provider.codexUsageURL(for: configuration, account: account)
+
+        XCTAssertEqual(url.absoluteString, "https://codex.example.com/proxy/v1/usage")
+    }
+
+    func testCodexUsageURLRejectsDirectChatGPTModeForAPIKey() {
+        let account = OpenAIAuthAccount(
+            accessToken: "sk-clb-test",
+            accountId: nil,
+            externalUsageAccountId: nil,
+            email: nil,
+            authSource: "auth.json",
+            sourceLabels: ["OpenCode (API Key)"],
+            source: .opencodeAuth,
+            credentialType: .apiKey
+        )
+        let configuration = CodexEndpointConfiguration(
+            mode: .directChatGPT,
+            source: "test",
+            usesOpenAIProviderBaseURL: false
+        )
+
+        XCTAssertThrowsError(try provider.codexUsageURL(for: configuration, account: account)) { error in
+            guard case let ProviderError.authenticationFailed(message) = error else {
+                return XCTFail("Expected authenticationFailed, got \(error)")
+            }
+            XCTAssertEqual(message, "Codex API key requires an external codex-lb endpoint")
+        }
+    }
+
+    func testCodexRequestAccountIDOmittedForAPIKeySelfService() {
+        let account = OpenAIAuthAccount(
+            accessToken: "sk-clb-test",
+            accountId: "should-not-be-used",
+            externalUsageAccountId: "chatgpt-account-id",
+            email: nil,
+            authSource: "auth.json",
+            sourceLabels: ["OpenCode (API Key)"],
+            source: .opencodeAuth,
+            credentialType: .apiKey
+        )
+
+        let accountID = provider.codexRequestAccountID(
+            for: account,
+            endpointMode: .external(usageURL: URL(string: "https://codex.example.com/api/codex/usage")!)
+        )
+
+        XCTAssertNil(accountID)
+    }
+
+    func testDecodeUsagePayloadMapsSelfServiceLimitsToCodexWindows() throws {
+        let json = """
+        {
+          "request_count": 321,
+          "total_tokens": 654321,
+          "cached_input_tokens": 12345,
+          "total_cost_usd": 11.75,
+          "limits": [
+            {
+              "limit_type": "requests",
+              "limit_window": "5h",
+              "max_value": 200,
+              "current_value": 50,
+              "remaining_value": 150,
+              "model_filter": null,
+              "reset_at": "2026-04-02T12:00:00Z"
+            },
+            {
+              "limit_type": "requests",
+              "limit_window": "7d",
+              "max_value": 1000,
+              "current_value": 300,
+              "remaining_value": 700,
+              "model_filter": null,
+              "reset_at": "2026-04-09T12:00:00Z"
+            },
+            {
+              "limit_type": "requests",
+              "limit_window": "5h",
+              "max_value": 400,
+              "current_value": 40,
+              "remaining_value": 360,
+              "model_filter": "gpt-5.3-codex-spark",
+              "reset_at": "2026-04-02T13:00:00Z"
+            },
+            {
+              "limit_type": "requests",
+              "limit_window": "7d",
+              "max_value": 1400,
+              "current_value": 140,
+              "remaining_value": 1260,
+              "model_filter": "gpt-5.3-codex-spark",
+              "reset_at": "2026-04-09T13:00:00Z"
+            }
+          ]
+        }
+        """
+        let account = OpenAIAuthAccount(
+            accessToken: "sk-clb-test",
+            accountId: nil,
+            externalUsageAccountId: nil,
+            email: "user@example.com",
+            authSource: "auth.json",
+            sourceLabels: ["OpenCode (API Key)"],
+            source: .opencodeAuth,
+            credentialType: .apiKey
+        )
+        let configuration = CodexEndpointConfiguration(
+            mode: .external(usageURL: URL(string: "https://codex.example.com/api/codex/usage")!),
+            source: "test",
+            usesOpenAIProviderBaseURL: true
+        )
+
+        let payload = try provider.decodeUsagePayload(
+            data: XCTUnwrap(json.data(using: .utf8)),
+            account: account,
+            endpointConfiguration: configuration
+        )
+
+        XCTAssertEqual(payload.usage.usagePercentage, 25.0, accuracy: 0.001)
+        XCTAssertEqual(payload.details.dailyUsage, 25.0, accuracy: 0.001)
+        XCTAssertEqual(payload.details.secondaryUsage, 30.0, accuracy: 0.001)
+        XCTAssertEqual(payload.details.codexPrimaryWindowLabel, "5h")
+        XCTAssertEqual(payload.details.codexSecondaryWindowLabel, "Weekly")
+        XCTAssertEqual(payload.details.codexPrimaryWindowHours, 5)
+        XCTAssertEqual(payload.details.codexSecondaryWindowHours, 168)
+        XCTAssertEqual(payload.details.sparkUsage, 10.0, accuracy: 0.001)
+        XCTAssertEqual(payload.details.sparkSecondaryUsage, 10.0, accuracy: 0.001)
+        XCTAssertEqual(payload.details.sparkWindowLabel, "Gpt 5.3 Codex Spark")
+        XCTAssertEqual(payload.details.sparkPrimaryWindowLabel, "5h")
+        XCTAssertEqual(payload.details.sparkSecondaryWindowLabel, "Weekly")
+        XCTAssertEqual(payload.details.monthlyCost, 11.75, accuracy: 0.001)
+    }
+
     private func loadFixture(named: String) throws -> Any {
         let testBundle = Bundle(for: type(of: self))
         

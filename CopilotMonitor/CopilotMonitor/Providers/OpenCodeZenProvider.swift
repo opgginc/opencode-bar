@@ -147,6 +147,13 @@ final class OpenCodeZenProvider: ProviderProtocol {
         let modelCosts: [String: Double]
     }
 
+    struct DisplayStatsAdjustment {
+        let totalCost: Double
+        let avgCostPerDay: Double
+        let modelCosts: [String: Double]
+        let excludedCost: Double
+    }
+
     func fetch() async throws -> ProviderResult {
         guard let binaryPath = opencodePath else {
             logger.error("OpenCode CLI not found in PATH or standard locations")
@@ -161,22 +168,34 @@ final class OpenCodeZenProvider: ProviderProtocol {
         debugLog("Fetching current stats only (history tracking disabled)")
         let output = try await runOpenCodeStats(days: 7)
         let stats = try parseStats(output)
+        let endpointConfiguration = TokenManager.shared.getCodexEndpointConfiguration()
+        let displayStats = Self.adjustStatsForDisplay(
+            totalCost: stats.totalCost,
+            avgCostPerDay: stats.avgCostPerDay,
+            modelCosts: stats.modelCosts,
+            codexEndpointConfiguration: endpointConfiguration
+        )
 
         let monthlyLimit = 1000.0
-        let utilization = min((stats.totalCost / monthlyLimit) * 100, 100)
-        logger.info("OpenCode Zen: $\(String(format: "%.2f", stats.totalCost)) (\(String(format: "%.1f", utilization))% of $\(monthlyLimit) limit)")
+        let utilization = min((displayStats.totalCost / monthlyLimit) * 100, 100)
+        logger.info("OpenCode Zen: $\(String(format: "%.2f", displayStats.totalCost)) (\(String(format: "%.1f", utilization))% of $\(monthlyLimit) limit)")
+        if displayStats.excludedCost > 0 {
+            let excludedSummary = String(format: "%.2f", displayStats.excludedCost)
+            logger.info("OpenCode Zen: Excluded $\(excludedSummary) of externally routed OpenAI usage from pay-as-you-go totals")
+            debugLog("Excluded $\(excludedSummary) of externally routed OpenAI usage from OpenCode Zen totals")
+        }
 
         let details = DetailedUsage(
-            modelBreakdown: stats.modelCosts,
+            modelBreakdown: displayStats.modelCosts,
             sessions: stats.sessions > 0 ? stats.sessions : nil,
             messages: stats.messages > 0 ? stats.messages : nil,
-            avgCostPerDay: stats.avgCostPerDay > 0 ? stats.avgCostPerDay : nil,
-            monthlyCost: stats.totalCost,
+            avgCostPerDay: displayStats.avgCostPerDay > 0 ? displayStats.avgCostPerDay : nil,
+            monthlyCost: displayStats.totalCost,
             authSource: "opencode CLI via \(binarySourceDescription)"
         )
 
         return ProviderResult(
-            usage: .payAsYouGo(utilization: utilization, cost: stats.totalCost, resetsAt: nil),
+            usage: .payAsYouGo(utilization: utilization, cost: displayStats.totalCost, resetsAt: nil),
             details: details
         )
     }
@@ -189,7 +208,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
         return try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = binaryPath
-            process.arguments = ["stats", "--days", "\(days)", "--models", "10"]
+            process.arguments = ["stats", "--days", "\(days)", "--models"]
 
             let pipe = Pipe()
             process.standardOutput = pipe
@@ -232,6 +251,60 @@ final class OpenCodeZenProvider: ProviderProtocol {
                 continuation.resume(throwing: ProviderError.networkError("Failed to execute CLI: \(error.localizedDescription)"))
             }
         }
+    }
+
+    static func adjustStatsForDisplay(
+        totalCost: Double,
+        avgCostPerDay: Double,
+        modelCosts: [String: Double],
+        codexEndpointConfiguration: CodexEndpointConfiguration
+    ) -> DisplayStatsAdjustment {
+        guard codexEndpointConfiguration.usesOpenAIProviderBaseURL,
+              case .external = codexEndpointConfiguration.mode else {
+            return DisplayStatsAdjustment(
+                totalCost: totalCost,
+                avgCostPerDay: avgCostPerDay,
+                modelCosts: modelCosts,
+                excludedCost: 0
+            )
+        }
+
+        let excludedCost = modelCosts
+            .filter { isOpenAIModelRoutedThroughCodex($0.key) }
+            .reduce(0.0) { partialResult, item in
+                partialResult + max(item.value, 0)
+            }
+
+        guard excludedCost > 0 else {
+            return DisplayStatsAdjustment(
+                totalCost: totalCost,
+                avgCostPerDay: avgCostPerDay,
+                modelCosts: modelCosts,
+                excludedCost: 0
+            )
+        }
+
+        let adjustedTotalCost = max(0, totalCost - excludedCost)
+        let adjustedAvgCostPerDay: Double
+        if totalCost > 0, avgCostPerDay > 0 {
+            adjustedAvgCostPerDay = max(0, avgCostPerDay * (adjustedTotalCost / totalCost))
+        } else {
+            adjustedAvgCostPerDay = 0
+        }
+
+        let adjustedModelCosts = modelCosts.filter { !isOpenAIModelRoutedThroughCodex($0.key) }
+
+        return DisplayStatsAdjustment(
+            totalCost: adjustedTotalCost,
+            avgCostPerDay: adjustedAvgCostPerDay,
+            modelCosts: adjustedModelCosts,
+            excludedCost: excludedCost
+        )
+    }
+
+    static func isOpenAIModelRoutedThroughCodex(_ modelName: String) -> Bool {
+        let normalized = modelName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.hasPrefix("openai/")
     }
 
     /// Parses opencode stats output using regex patterns.

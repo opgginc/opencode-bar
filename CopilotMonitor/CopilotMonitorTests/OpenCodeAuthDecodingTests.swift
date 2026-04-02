@@ -22,6 +22,7 @@ final class OpenCodeAuthDecodingTests: XCTestCase {
         let auth = try JSONDecoder().decode(OpenCodeAuth.self, from: data)
 
         XCTAssertNil(auth.openai, "OpenAI entry is not OAuth, so it should be ignored instead of failing decoding")
+        XCTAssertEqual(auth.openaiAPIKey?.key, "sk-test-openai")
         XCTAssertEqual(auth.openrouter?.key, "or-test-key")
         XCTAssertEqual(auth.githubCopilot?.access, "gho_test")
     }
@@ -36,6 +37,20 @@ final class OpenCodeAuthDecodingTests: XCTestCase {
         let data = try XCTUnwrap(json.data(using: .utf8))
         let auth = try JSONDecoder().decode(OpenCodeAuth.self, from: data)
         XCTAssertEqual(auth.openrouter?.key, "or-raw-string-key")
+    }
+
+    func testOpenAIAPIKeyCanDecodeFromStringValue() throws {
+        let json = """
+        {
+            "openai": "sk-raw-openai-key"
+        }
+        """
+
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let auth = try JSONDecoder().decode(OpenCodeAuth.self, from: data)
+
+        XCTAssertNil(auth.openai)
+        XCTAssertEqual(auth.openaiAPIKey?.key, "sk-raw-openai-key")
     }
 
     func testMiniMaxCodingPlanAPIKeyDecodes() throws {

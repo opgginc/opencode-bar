@@ -7,6 +7,11 @@ final class CodexProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .codex
     let type: ProviderType = .quotaBased
 
+    struct DecodedUsagePayload {
+        let usage: ProviderUsage
+        let details: DetailedUsage
+    }
+
     private struct RateLimitWindow: Codable {
         let used_percent: Double
         let limit_window_seconds: Int?
@@ -178,6 +183,110 @@ final class CodexProvider: ProviderProtocol {
         let credits: CreditsInfo?
     }
 
+    private struct SelfServiceUsageResponse: Decodable {
+        let requestCount: Int?
+        let totalTokens: Int?
+        let cachedInputTokens: Int?
+        let totalCostUSD: Double?
+        let limits: [SelfServiceLimit]
+
+        enum CodingKeys: String, CodingKey {
+            case requestCount = "request_count"
+            case totalTokens = "total_tokens"
+            case cachedInputTokens = "cached_input_tokens"
+            case totalCostUSD = "total_cost_usd"
+            case limits
+        }
+    }
+
+    private struct SelfServiceLimit: Decodable {
+        let limitType: String?
+        let limitWindow: String?
+        let maxValue: Double?
+        let currentValue: Double?
+        let remainingValue: Double?
+        let modelFilter: String?
+        let resetAt: Date?
+
+        enum CodingKeys: String, CodingKey {
+            case limitType = "limit_type"
+            case limitWindow = "limit_window"
+            case maxValue = "max_value"
+            case currentValue = "current_value"
+            case remainingValue = "remaining_value"
+            case modelFilter = "model_filter"
+            case resetAt = "reset_at"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            limitType = try container.decodeIfPresent(String.self, forKey: .limitType)
+            limitWindow = try container.decodeIfPresent(String.self, forKey: .limitWindow)
+            maxValue = Self.decodeFlexibleDouble(from: container, forKey: .maxValue)
+            currentValue = Self.decodeFlexibleDouble(from: container, forKey: .currentValue)
+            remainingValue = Self.decodeFlexibleDouble(from: container, forKey: .remainingValue)
+            modelFilter = try container.decodeIfPresent(String.self, forKey: .modelFilter)
+            resetAt = Self.decodeFlexibleDate(from: container, forKey: .resetAt)
+        }
+
+        private static func decodeFlexibleDouble(from container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) -> Double? {
+            if let value = try? container.decode(Double.self, forKey: key) {
+                return value
+            }
+            if let value = try? container.decode(Int.self, forKey: key) {
+                return Double(value)
+            }
+            if let value = try? container.decode(String.self, forKey: key) {
+                return Double(value.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            return nil
+        }
+
+        private static func decodeFlexibleDate(from container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) -> Date? {
+            if let value = try? container.decode(Double.self, forKey: key) {
+                return value > 2_000_000_000_000
+                    ? Date(timeIntervalSince1970: value / 1000.0)
+                    : Date(timeIntervalSince1970: value)
+            }
+            if let value = try? container.decode(Int.self, forKey: key) {
+                return value > 2_000_000_000_000
+                    ? Date(timeIntervalSince1970: TimeInterval(value) / 1000.0)
+                    : Date(timeIntervalSince1970: TimeInterval(value))
+            }
+            if let value = try? container.decode(String.self, forKey: key) {
+                return Self.parseFlexibleDateString(value)
+            }
+            return nil
+        }
+
+        private static func parseFlexibleDateString(_ value: String) -> Date? {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            if let timestamp = Double(trimmed) {
+                return timestamp > 2_000_000_000_000
+                    ? Date(timeIntervalSince1970: timestamp / 1000.0)
+                    : Date(timeIntervalSince1970: timestamp)
+            }
+
+            let formatterWithFractional = ISO8601DateFormatter()
+            formatterWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatterWithFractional.date(from: trimmed) {
+                return date
+            }
+
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            return formatter.date(from: trimmed)
+        }
+    }
+
+    private struct ResolvedUsageWindow {
+        let label: String
+        let windowHours: Int?
+        let usagePercent: Double
+        let resetDate: Date?
+    }
+
     func fetch() async throws -> ProviderResult {
         let accounts = TokenManager.shared.getOpenAIAccounts()
 
@@ -303,23 +412,20 @@ final class CodexProvider: ProviderProtocol {
 
     private func fetchUsageForAccount(_ account: OpenAIAuthAccount) async throws -> CodexAccountCandidate {
         let endpointConfiguration = TokenManager.shared.getCodexEndpointConfiguration()
-        let url = try codexUsageURL(for: endpointConfiguration)
+        let url = try codexUsageURL(for: endpointConfiguration, account: account)
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
         let requestAccountId = codexRequestAccountID(for: account, endpointMode: endpointConfiguration.mode)
+        let usesSelfServiceEndpoint = usesSelfServiceUsageEndpoint(account: account, endpointConfiguration: endpointConfiguration)
         if let accountId = requestAccountId, !accountId.isEmpty {
             request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
-        } else {
+        } else if !usesSelfServiceEndpoint {
             logger.warning(
                 "Codex account ID missing for \(account.authSource, privacy: .public) using endpoint source \(endpointConfiguration.source, privacy: .public); sending request without account header"
             )
         }
-
-        logger.debug(
-            "Codex endpoint resolved: url=\(url.absoluteString, privacy: .public), source=\(endpointConfiguration.source, privacy: .public), external_mode=\(self.isExternalEndpointMode(endpointConfiguration.mode) ? "YES" : "NO"), account_header=\(requestAccountId != nil ? "YES" : "NO")"
-        )
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -333,10 +439,35 @@ final class CodexProvider: ProviderProtocol {
             throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
         }
 
+        let decodedPayload = try decodeUsagePayload(
+            data: data,
+            account: account,
+            endpointConfiguration: endpointConfiguration
+        )
+        return CodexAccountCandidate(
+            accountId: account.accountId,
+            usage: decodedPayload.usage,
+            details: decodedPayload.details,
+            sourceLabels: account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels,
+            source: account.source
+        )
+    }
+
+    func decodeUsagePayload(
+        data: Data,
+        account: OpenAIAuthAccount,
+        endpointConfiguration: CodexEndpointConfiguration
+    ) throws -> DecodedUsagePayload {
         let decoder = JSONDecoder()
-        let codexResponse: CodexResponse
+
         do {
-            codexResponse = try decoder.decode(CodexResponse.self, from: data)
+            if usesSelfServiceUsageEndpoint(account: account, endpointConfiguration: endpointConfiguration) {
+                let response = try decoder.decode(SelfServiceUsageResponse.self, from: data)
+                return buildSelfServicePayload(response: response, account: account)
+            }
+
+            let response = try decoder.decode(CodexResponse.self, from: data)
+            return buildStandardPayload(response: response, account: account)
         } catch {
             logger.error("Failed to decode Codex API response: \(error.localizedDescription)")
             if let jsonString = String(data: data, encoding: .utf8) {
@@ -353,13 +484,116 @@ final class CodexProvider: ProviderProtocol {
             }
             throw ProviderError.decodingError(error.localizedDescription)
         }
+    }
 
-        guard let baseWindows = codexResponse.rate_limit.resolvedWindows(excludingSpark: true) else {
-            logger.error("Codex response missing usable rate-limit window")
-            throw ProviderError.decodingError("Missing rate-limit window")
+    func codexUsageURL(for configuration: CodexEndpointConfiguration) throws -> URL {
+        switch configuration.mode {
+        case .directChatGPT:
+            guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else {
+                logger.error("Default Codex usage URL is invalid; aborting request")
+                throw ProviderError.providerError("Default Codex usage URL is invalid")
+            }
+            return url
+        case .external(let usageURL):
+            return usageURL
         }
-        let primaryWindow = baseWindows.shortWindow
-        let secondaryWindow = baseWindows.longWindow
+    }
+
+    func codexUsageURL(for configuration: CodexEndpointConfiguration, account: OpenAIAuthAccount) throws -> URL {
+        if account.credentialType == .apiKey {
+            switch configuration.mode {
+            case .directChatGPT:
+                throw ProviderError.authenticationFailed("Codex API key requires an external codex-lb endpoint")
+            case .external(let usageURL):
+                guard var components = URLComponents(url: usageURL, resolvingAgainstBaseURL: false) else {
+                    throw ProviderError.providerError("External Codex usage URL is invalid")
+                }
+                let currentPath = components.path
+                if currentPath.hasSuffix("/api/codex/usage") {
+                    components.path = String(currentPath.dropLast("/api/codex/usage".count)) + "/v1/usage"
+                } else if currentPath.hasSuffix("/usage") {
+                    components.path = String(currentPath.dropLast("/usage".count)) + "/v1/usage"
+                } else {
+                    let trimmedPath = currentPath.hasSuffix("/") ? String(currentPath.dropLast()) : currentPath
+                    components.path = trimmedPath + "/v1/usage"
+                }
+                guard let selfServiceURL = components.url else {
+                    throw ProviderError.providerError("Self-service Codex usage URL is invalid")
+                }
+                return selfServiceURL
+            }
+        }
+
+        return try codexUsageURL(for: configuration)
+    }
+
+    func codexRequestAccountID(for account: OpenAIAuthAccount, endpointMode: CodexEndpointMode) -> String? {
+        if account.credentialType == .apiKey {
+            return nil
+        }
+        switch endpointMode {
+        case .directChatGPT:
+            return account.accountId
+        case .external:
+            if account.source == .codexLB {
+                return account.externalUsageAccountId ?? account.accountId
+            }
+            return account.accountId
+        }
+    }
+
+    func usesSelfServiceUsageEndpoint(account: OpenAIAuthAccount, endpointConfiguration: CodexEndpointConfiguration) -> Bool {
+        account.credentialType == .apiKey && isExternalEndpointMode(endpointConfiguration.mode)
+    }
+
+    func isExternalEndpointMode(_ mode: CodexEndpointMode) -> Bool {
+        if case .external = mode {
+            return true
+        }
+        return false
+    }
+
+    private func isSameUsage(_ lhs: CodexAccountCandidate, _ rhs: CodexAccountCandidate) -> Bool {
+        let primaryMatch = lhs.details.dailyUsage == rhs.details.dailyUsage
+        let secondaryMatch = lhs.details.secondaryUsage == rhs.details.secondaryUsage
+        let primaryResetMatch = sameDate(lhs.details.primaryReset, rhs.details.primaryReset)
+        let secondaryResetMatch = sameDate(lhs.details.secondaryReset, rhs.details.secondaryReset)
+        let primaryLabelMatch = lhs.details.codexPrimaryWindowLabel == rhs.details.codexPrimaryWindowLabel
+        let secondaryLabelMatch = lhs.details.codexSecondaryWindowLabel == rhs.details.codexSecondaryWindowLabel
+        let primaryHoursMatch = lhs.details.codexPrimaryWindowHours == rhs.details.codexPrimaryWindowHours
+        let secondaryHoursMatch = lhs.details.codexSecondaryWindowHours == rhs.details.codexSecondaryWindowHours
+        let sparkUsageMatch = lhs.details.sparkUsage == rhs.details.sparkUsage
+        let sparkResetMatch = sameDate(lhs.details.sparkReset, rhs.details.sparkReset)
+        let sparkSecondaryUsageMatch = lhs.details.sparkSecondaryUsage == rhs.details.sparkSecondaryUsage
+        let sparkSecondaryResetMatch = sameDate(lhs.details.sparkSecondaryReset, rhs.details.sparkSecondaryReset)
+        let sparkWindowLabelMatch = lhs.details.sparkWindowLabel == rhs.details.sparkWindowLabel
+        let sparkPrimaryLabelMatch = lhs.details.sparkPrimaryWindowLabel == rhs.details.sparkPrimaryWindowLabel
+        let sparkSecondaryLabelMatch = lhs.details.sparkSecondaryWindowLabel == rhs.details.sparkSecondaryWindowLabel
+        let sparkPrimaryHoursMatch = lhs.details.sparkPrimaryWindowHours == rhs.details.sparkPrimaryWindowHours
+        let sparkSecondaryHoursMatch = lhs.details.sparkSecondaryWindowHours == rhs.details.sparkSecondaryWindowHours
+        return primaryMatch
+            && secondaryMatch
+            && primaryResetMatch
+            && secondaryResetMatch
+            && primaryLabelMatch
+            && secondaryLabelMatch
+            && primaryHoursMatch
+            && secondaryHoursMatch
+            && sparkUsageMatch
+            && sparkResetMatch
+            && sparkSecondaryUsageMatch
+            && sparkSecondaryResetMatch
+            && sparkWindowLabelMatch
+            && sparkPrimaryLabelMatch
+            && sparkSecondaryLabelMatch
+            && sparkPrimaryHoursMatch
+            && sparkSecondaryHoursMatch
+    }
+
+    private func buildStandardPayload(response codexResponse: CodexResponse, account: OpenAIAuthAccount) -> DecodedUsagePayload {
+        let baseWindows = codexResponse.rate_limit.resolvedWindows(excludingSpark: true)
+        let primaryWindow = baseWindows?.shortWindow ?? codexResponse.rate_limit.primaryWindow ?? RateLimitWindow(used_percent: 0, limit_window_seconds: nil, reset_after_seconds: nil, reset_at: nil)
+        let secondaryWindow = baseWindows?.longWindow
         let additionalSparkLimit = codexResponse.additional_rate_limits?.first { limit in
             let name = limit.limit_name ?? ""
             return name.range(of: "spark", options: .caseInsensitive) != nil
@@ -385,7 +619,7 @@ final class CodexProvider: ProviderProtocol {
         let sparkSecondaryResetDate = inlineSparkSecondary.flatMap { resolveResetDate(now: now, window: $0.1) }
             ?? (inlineSparkPrimary == nil ? additionalSparkWindows?.longWindow.flatMap { resolveResetDate(now: now, window: $0) } : nil)
 
-        let remaining = Int(100 - primaryUsedPercent)
+        let remaining = max(0, Int(100 - primaryUsedPercent))
         let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
         let authUsageSummary = sourceSummary(sourceLabels, fallback: "Unknown")
         let details = DetailedUsage(
@@ -393,11 +627,19 @@ final class CodexProvider: ProviderProtocol {
             secondaryUsage: secondaryUsedPercent,
             secondaryReset: secondaryResetDate,
             primaryReset: primaryResetDate,
+            codexPrimaryWindowLabel: "5h",
+            codexPrimaryWindowHours: 5,
+            codexSecondaryWindowLabel: secondaryWindow != nil ? "Weekly" : nil,
+            codexSecondaryWindowHours: secondaryWindow != nil ? 168 : nil,
             sparkUsage: sparkUsedPercent,
             sparkReset: sparkResetDate,
             sparkSecondaryUsage: sparkSecondaryUsedPercent,
             sparkSecondaryReset: sparkSecondaryResetDate,
             sparkWindowLabel: sparkWindowLabel,
+            sparkPrimaryWindowLabel: sparkUsedPercent != nil ? "5h" : nil,
+            sparkPrimaryWindowHours: sparkUsedPercent != nil ? 5 : nil,
+            sparkSecondaryWindowLabel: sparkSecondaryUsedPercent != nil ? "Weekly" : nil,
+            sparkSecondaryWindowHours: sparkSecondaryUsedPercent != nil ? 168 : nil,
             creditsBalance: codexResponse.credits?.balanceAsDouble,
             planType: codexResponse.plan_type,
             email: account.email,
@@ -420,9 +662,9 @@ final class CodexProvider: ProviderProtocol {
             """
             Codex usage fetched (\(authUsageSummary)): \
             email=\(account.email ?? "unknown"), \
-            base_short=\(primaryUsedPercent)%(\(baseWindows.shortKey)), \
-            base_long=\(secondarySummary)(\(baseWindows.longKey ?? "none")), \
-            base_source=\(baseWindows.source), \
+            base_short=\(primaryUsedPercent)%(\(baseWindows?.shortKey ?? "primary_window")), \
+            base_long=\(secondarySummary)(\(baseWindows?.longKey ?? "none")), \
+            base_source=\(baseWindows?.source ?? "fallback"), \
             spark_primary=\(sparkSummary), \
             spark_secondary=\(sparkWeeklySummary), \
             spark_source=\(sparkSource), \
@@ -431,67 +673,183 @@ final class CodexProvider: ProviderProtocol {
             """
         )
 
-        let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: 100, overagePermitted: false)
-        return CodexAccountCandidate(
-            accountId: account.accountId,
-            usage: usage,
-            details: details,
-            sourceLabels: sourceLabels,
-            source: account.source
+        return DecodedUsagePayload(
+            usage: ProviderUsage.quotaBased(remaining: remaining, entitlement: 100, overagePermitted: false),
+            details: details
         )
     }
 
-    func codexUsageURL(for configuration: CodexEndpointConfiguration) throws -> URL {
-        switch configuration.mode {
-        case .directChatGPT:
-            guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else {
-                logger.error("Default Codex usage URL is invalid; aborting request")
-                throw ProviderError.providerError("Default Codex usage URL is invalid")
+    private func buildSelfServicePayload(response: SelfServiceUsageResponse, account: OpenAIAuthAccount) -> DecodedUsagePayload {
+        let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
+        let authUsageSummary = sourceSummary(sourceLabels, fallback: "Unknown")
+
+        let grouped = partitionSelfServiceLimits(response.limits)
+        let primary = resolveUsageWindow(from: grouped.base.first)
+        let secondary = grouped.base.count > 1 ? resolveUsageWindow(from: grouped.base.last) : nil
+        let sparkPrimary = resolveUsageWindow(from: grouped.spark.first)
+        let sparkSecondary = grouped.spark.count > 1 ? resolveUsageWindow(from: grouped.spark.last) : nil
+        let sparkLabel = normalizeSparkWindowLabel(grouped.spark.first?.modelFilter ?? grouped.spark.first?.limitType)
+
+        let primaryPercent = primary?.usagePercent ?? 0
+        let remaining = max(0, Int(100 - primaryPercent))
+        let details = DetailedUsage(
+            dailyUsage: primary?.usagePercent,
+            secondaryUsage: secondary?.usagePercent,
+            secondaryReset: secondary?.resetDate,
+            primaryReset: primary?.resetDate,
+            codexPrimaryWindowLabel: primary?.label,
+            codexPrimaryWindowHours: primary?.windowHours,
+            codexSecondaryWindowLabel: secondary?.label,
+            codexSecondaryWindowHours: secondary?.windowHours,
+            sparkUsage: sparkPrimary?.usagePercent,
+            sparkReset: sparkPrimary?.resetDate,
+            sparkSecondaryUsage: sparkSecondary?.usagePercent,
+            sparkSecondaryReset: sparkSecondary?.resetDate,
+            sparkWindowLabel: sparkLabel,
+            sparkPrimaryWindowLabel: sparkPrimary?.label,
+            sparkPrimaryWindowHours: sparkPrimary?.windowHours,
+            sparkSecondaryWindowLabel: sparkSecondary?.label,
+            sparkSecondaryWindowHours: sparkSecondary?.windowHours,
+            email: account.email,
+            monthlyCost: response.totalCostUSD,
+            authSource: account.authSource,
+            authUsageSummary: authUsageSummary
+        )
+
+        logger.debug(
+            """
+            Codex self-service usage fetched (\(authUsageSummary)): \
+            email=\(account.email ?? "unknown"), \
+            base_primary=\(primary.map { String(format: "%.1f%%(%@)", $0.usagePercent, $0.label) } ?? "none"), \
+            base_secondary=\(secondary.map { String(format: "%.1f%%(%@)", $0.usagePercent, $0.label) } ?? "none"), \
+            spark_primary=\(sparkPrimary.map { String(format: "%.1f%%(%@)", $0.usagePercent, $0.label) } ?? "none"), \
+            spark_secondary=\(sparkSecondary.map { String(format: "%.1f%%(%@)", $0.usagePercent, $0.label) } ?? "none"), \
+            total_cost_usd=\(response.totalCostUSD.map { String(format: "%.2f", $0) } ?? "none")
+            """
+        )
+
+        return DecodedUsagePayload(
+            usage: ProviderUsage.quotaBased(remaining: remaining, entitlement: 100, overagePermitted: false),
+            details: details
+        )
+    }
+
+    private func partitionSelfServiceLimits(_ limits: [SelfServiceLimit]) -> (base: [SelfServiceLimit], spark: [SelfServiceLimit]) {
+        let usable = limits.filter { limit in
+            guard let maxValue = limit.maxValue, maxValue > 0 else { return false }
+            return limit.currentValue != nil || limit.remainingValue != nil
+        }
+
+        let spark = usable
+            .filter(isSparkLimit)
+            .sorted(by: compareSelfServiceLimits)
+        let base = usable
+            .filter { !isSparkLimit($0) }
+            .sorted(by: compareSelfServiceLimits)
+        return (base: base, spark: spark)
+    }
+
+    private func compareSelfServiceLimits(_ lhs: SelfServiceLimit, _ rhs: SelfServiceLimit) -> Bool {
+        let lhsHours = normalizedWindowHours(from: lhs.limitWindow)
+        let rhsHours = normalizedWindowHours(from: rhs.limitWindow)
+        if let lhsHours, let rhsHours, lhsHours != rhsHours {
+            return lhsHours < rhsHours
+        }
+        if lhs.limitWindow != rhs.limitWindow {
+            return (lhs.limitWindow ?? "").localizedStandardCompare(rhs.limitWindow ?? "") == .orderedAscending
+        }
+        return (lhs.modelFilter ?? lhs.limitType ?? "").localizedStandardCompare(rhs.modelFilter ?? rhs.limitType ?? "") == .orderedAscending
+    }
+
+    private func isSparkLimit(_ limit: SelfServiceLimit) -> Bool {
+        let haystack = [limit.modelFilter, limit.limitType]
+            .compactMap { $0?.lowercased() }
+            .joined(separator: " ")
+        return haystack.contains("spark")
+    }
+
+    private func resolveUsageWindow(from limit: SelfServiceLimit?) -> ResolvedUsageWindow? {
+        guard let limit,
+              let maxValue = limit.maxValue,
+              maxValue > 0 else {
+            return nil
+        }
+
+        let currentValue: Double
+        if let explicitCurrent = limit.currentValue {
+            currentValue = explicitCurrent
+        } else if let remainingValue = limit.remainingValue {
+            currentValue = max(0, maxValue - remainingValue)
+        } else {
+            return nil
+        }
+
+        let rawPercent = (currentValue / maxValue) * 100.0
+        let usagePercent = min(max(rawPercent, 0), 100)
+        return ResolvedUsageWindow(
+            label: formatCodexWindowLabel(limit.limitWindow),
+            windowHours: normalizedWindowHours(from: limit.limitWindow),
+            usagePercent: usagePercent,
+            resetDate: limit.resetAt
+        )
+    }
+
+    private func formatCodexWindowLabel(_ rawLabel: String?) -> String {
+        let normalized = rawLabel?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        guard !normalized.isEmpty else { return "Usage" }
+
+        if normalized == "weekly" || normalized == "7d" || normalized == "7day" || normalized == "7days" {
+            return "Weekly"
+        }
+        if normalized == "monthly" || normalized == "30d" || normalized == "30days" || normalized == "31d" || normalized == "31days" {
+            return "Monthly"
+        }
+        if normalized == "daily" || normalized == "1d" || normalized == "1day" || normalized == "1days" || normalized == "24h" {
+            return "Daily"
+        }
+
+        if let hours = normalizedWindowHours(from: rawLabel), hours > 0 {
+            if hours % 24 == 0 {
+                let days = hours / 24
+                if days == 7 { return "Weekly" }
+                if days >= 28 { return "Monthly" }
+                if days == 1 { return "Daily" }
+                return "\(days)d"
             }
-            return url
-        case .external(let usageURL):
-            return usageURL
+            return "\(hours)h"
         }
+
+        return rawLabel?
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .capitalized ?? "Usage"
     }
 
-    func codexRequestAccountID(for account: OpenAIAuthAccount, endpointMode: CodexEndpointMode) -> String? {
-        switch endpointMode {
-        case .directChatGPT:
-            return account.accountId
-        case .external:
-            if account.source == .codexLB {
-                return account.externalUsageAccountId ?? account.accountId
-            }
-            return account.accountId
-        }
-    }
+    private func normalizedWindowHours(from rawLabel: String?) -> Int? {
+        guard let rawLabel else { return nil }
+        let normalized = rawLabel.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return nil }
+        if normalized == "weekly" { return 24 * 7 }
+        if normalized == "monthly" { return 24 * 30 }
+        if normalized == "daily" { return 24 }
 
-    func isExternalEndpointMode(_ mode: CodexEndpointMode) -> Bool {
-        if case .external = mode {
-            return true
+        let compact = normalized.replacingOccurrences(of: " ", with: "")
+        let pattern = #"^(\d+)([hdw])$"#
+        guard let match = compact.range(of: pattern, options: .regularExpression) else {
+            return nil
         }
-        return false
-    }
-
-    private func isSameUsage(_ lhs: CodexAccountCandidate, _ rhs: CodexAccountCandidate) -> Bool {
-        let primaryMatch = lhs.details.dailyUsage == rhs.details.dailyUsage
-        let secondaryMatch = lhs.details.secondaryUsage == rhs.details.secondaryUsage
-        let primaryResetMatch = sameDate(lhs.details.primaryReset, rhs.details.primaryReset)
-        let secondaryResetMatch = sameDate(lhs.details.secondaryReset, rhs.details.secondaryReset)
-        let sparkUsageMatch = lhs.details.sparkUsage == rhs.details.sparkUsage
-        let sparkResetMatch = sameDate(lhs.details.sparkReset, rhs.details.sparkReset)
-        let sparkSecondaryUsageMatch = lhs.details.sparkSecondaryUsage == rhs.details.sparkSecondaryUsage
-        let sparkSecondaryResetMatch = sameDate(lhs.details.sparkSecondaryReset, rhs.details.sparkSecondaryReset)
-        let sparkWindowLabelMatch = lhs.details.sparkWindowLabel == rhs.details.sparkWindowLabel
-        return primaryMatch
-            && secondaryMatch
-            && primaryResetMatch
-            && secondaryResetMatch
-            && sparkUsageMatch
-            && sparkResetMatch
-            && sparkSecondaryUsageMatch
-            && sparkSecondaryResetMatch
-            && sparkWindowLabelMatch
+        let matched = String(compact[match])
+        let unit = matched.last
+        let valueString = String(matched.dropLast())
+        guard let value = Int(valueString), value > 0 else { return nil }
+        switch unit {
+        case "h": return value
+        case "d": return value * 24
+        case "w": return value * 24 * 7
+        default: return nil
+        }
     }
 
     private func normalizeSparkWindowLabel(_ rawLabel: String?) -> String? {
