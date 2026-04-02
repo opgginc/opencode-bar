@@ -102,6 +102,61 @@ final class TokenManagerTests: XCTestCase {
         ))
     }
 
+    func testGetOpenAIAccountsIncludesOpenCodeAPIKeyAccount() throws {
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let xdgDataHome = tempDirectory.path
+        let authDirectory = tempDirectory
+            .appendingPathComponent("opencode", isDirectory: true)
+        let authPath = authDirectory.appendingPathComponent("auth.json")
+
+        try fileManager.createDirectory(at: authDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let originalXDGDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
+        if let originalXDGDataHome {
+            setenv("XDG_DATA_HOME", originalXDGDataHome, 1)
+        } else {
+            unsetenv("XDG_DATA_HOME")
+        }
+        defer {
+            if let originalXDGDataHome {
+                setenv("XDG_DATA_HOME", originalXDGDataHome, 1)
+            } else {
+                unsetenv("XDG_DATA_HOME")
+            }
+            TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+        }
+
+        let json = """
+        {
+          "openai": {
+            "type": "apiKey",
+            "key": "sk-openai-api-key"
+          }
+        }
+        """
+        try XCTUnwrap(json.data(using: .utf8)).write(to: authPath)
+
+        setenv("XDG_DATA_HOME", xdgDataHome, 1)
+        TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+
+        let accounts = TokenManager.shared.getOpenAIAccounts()
+        let apiKeyAccount = try XCTUnwrap(
+            accounts.first(where: {
+                $0.accessToken == "sk-openai-api-key" &&
+                    $0.authSource == authPath.path &&
+                    $0.sourceLabels == ["OpenCode (API Key)"]
+            })
+        )
+
+        XCTAssertNil(apiKeyAccount.accountId)
+        XCTAssertNil(apiKeyAccount.externalUsageAccountId)
+        XCTAssertNil(apiKeyAccount.email)
+        XCTAssertEqual(apiKeyAccount.source, .opencodeAuth)
+    }
+
     func testReadClaudeAnthropicAuthFilesIncludesDisabledAccounts() throws {
         let fileManager = FileManager.default
         let tempDirectory = fileManager.temporaryDirectory

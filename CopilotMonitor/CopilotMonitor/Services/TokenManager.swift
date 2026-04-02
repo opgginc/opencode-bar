@@ -1109,6 +1109,14 @@ final class TokenManager: @unchecked Sendable {
         }
     }
 
+    func clearOpenCodeAuthCacheForTesting() {
+        queue.sync {
+            cachedAuth = nil
+            cacheTimestamp = nil
+            lastFoundAuthPath = nil
+        }
+    }
+
     // MARK: - Codex Native Auth File Reading
 
     private var cachedCodexAuth: CodexAuth?
