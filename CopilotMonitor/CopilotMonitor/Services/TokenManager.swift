@@ -750,6 +750,11 @@ final class TokenManager: @unchecked Sendable {
             ]
         )
 
+        assert(
+            jsoncPaths.count == jsonPaths.count,
+            "OpenCode jsonc/json path arrays must remain equal length for correct interleaving"
+        )
+
         return zip(jsoncPaths, jsonPaths).flatMap { [$0, $1] }
     }
 
