@@ -208,6 +208,8 @@ final class OpenCodeZenProvider: ProviderProtocol {
         return try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = binaryPath
+            // Use the unlimited --models form so filtering can inspect every
+            // reported openai/* model instead of truncating the stats table.
             process.arguments = ["stats", "--days", "\(days)", "--models"]
 
             let pipe = Pipe()

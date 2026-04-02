@@ -12,6 +12,9 @@ final class CodexProvider: ProviderProtocol {
         let details: DetailedUsage
     }
 
+    // Intentionally internal for @testable unit coverage of endpoint routing
+    // and payload decoding across standard and self-service Codex responses.
+
     private struct RateLimitWindow: Codable {
         let used_percent: Double
         let limit_window_seconds: Int?
@@ -566,17 +569,17 @@ final class CodexProvider: ProviderProtocol {
     }
 
     private func isSameUsage(_ lhs: CodexAccountCandidate, _ rhs: CodexAccountCandidate) -> Bool {
-        let primaryMatch = lhs.details.dailyUsage == rhs.details.dailyUsage
-        let secondaryMatch = lhs.details.secondaryUsage == rhs.details.secondaryUsage
+        let primaryMatch = sameUsageValue(lhs.details.dailyUsage, rhs.details.dailyUsage)
+        let secondaryMatch = sameUsageValue(lhs.details.secondaryUsage, rhs.details.secondaryUsage)
         let primaryResetMatch = sameDate(lhs.details.primaryReset, rhs.details.primaryReset)
         let secondaryResetMatch = sameDate(lhs.details.secondaryReset, rhs.details.secondaryReset)
         let primaryLabelMatch = lhs.details.codexPrimaryWindowLabel == rhs.details.codexPrimaryWindowLabel
         let secondaryLabelMatch = lhs.details.codexSecondaryWindowLabel == rhs.details.codexSecondaryWindowLabel
         let primaryHoursMatch = lhs.details.codexPrimaryWindowHours == rhs.details.codexPrimaryWindowHours
         let secondaryHoursMatch = lhs.details.codexSecondaryWindowHours == rhs.details.codexSecondaryWindowHours
-        let sparkUsageMatch = lhs.details.sparkUsage == rhs.details.sparkUsage
+        let sparkUsageMatch = sameUsageValue(lhs.details.sparkUsage, rhs.details.sparkUsage)
         let sparkResetMatch = sameDate(lhs.details.sparkReset, rhs.details.sparkReset)
-        let sparkSecondaryUsageMatch = lhs.details.sparkSecondaryUsage == rhs.details.sparkSecondaryUsage
+        let sparkSecondaryUsageMatch = sameUsageValue(lhs.details.sparkSecondaryUsage, rhs.details.sparkSecondaryUsage)
         let sparkSecondaryResetMatch = sameDate(lhs.details.sparkSecondaryReset, rhs.details.sparkSecondaryReset)
         let sparkWindowLabelMatch = lhs.details.sparkWindowLabel == rhs.details.sparkWindowLabel
         let sparkPrimaryLabelMatch = lhs.details.sparkPrimaryWindowLabel == rhs.details.sparkPrimaryWindowLabel
@@ -630,6 +633,16 @@ final class CodexProvider: ProviderProtocol {
             ?? additionalSparkWindows.flatMap { resolveResetDate(now: now, window: $0.shortWindow) }
         let sparkSecondaryResetDate = inlineSparkSecondary.flatMap { resolveResetDate(now: now, window: $0.1) }
             ?? (inlineSparkPrimary == nil ? additionalSparkWindows?.longWindow.flatMap { resolveResetDate(now: now, window: $0) } : nil)
+        let primaryWindowMetadata = codexWindowMetadata(for: primaryWindow, fallbackLabel: "5h")
+        let secondaryWindowMetadata = secondaryWindow.flatMap { codexWindowMetadata(for: $0, fallbackLabel: "Weekly") }
+        let sparkPrimaryWindowMetadata = sparkUsedPercent != nil
+            ? (inlineSparkPrimary.map { codexWindowMetadata(for: $0.1, fallbackLabel: "5h") }
+                ?? additionalSparkWindows.map { codexWindowMetadata(for: $0.shortWindow, fallbackLabel: "5h") })
+            : nil
+        let sparkSecondaryWindowMetadata = sparkSecondaryUsedPercent != nil
+            ? (inlineSparkSecondary.map { codexWindowMetadata(for: $0.1, fallbackLabel: "Weekly") }
+                ?? additionalSparkWindows?.longWindow.map { codexWindowMetadata(for: $0, fallbackLabel: "Weekly") })
+            : nil
 
         let remaining = max(0, Int(100 - primaryUsedPercent))
         let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
@@ -639,19 +652,19 @@ final class CodexProvider: ProviderProtocol {
             secondaryUsage: secondaryUsedPercent,
             secondaryReset: secondaryResetDate,
             primaryReset: primaryResetDate,
-            codexPrimaryWindowLabel: "5h",
-            codexPrimaryWindowHours: 5,
-            codexSecondaryWindowLabel: secondaryWindow != nil ? "Weekly" : nil,
-            codexSecondaryWindowHours: secondaryWindow != nil ? 168 : nil,
+            codexPrimaryWindowLabel: primaryWindowMetadata.label,
+            codexPrimaryWindowHours: primaryWindowMetadata.hours,
+            codexSecondaryWindowLabel: secondaryWindowMetadata?.label,
+            codexSecondaryWindowHours: secondaryWindowMetadata?.hours,
             sparkUsage: sparkUsedPercent,
             sparkReset: sparkResetDate,
             sparkSecondaryUsage: sparkSecondaryUsedPercent,
             sparkSecondaryReset: sparkSecondaryResetDate,
             sparkWindowLabel: sparkWindowLabel,
-            sparkPrimaryWindowLabel: sparkUsedPercent != nil ? "5h" : nil,
-            sparkPrimaryWindowHours: sparkUsedPercent != nil ? 5 : nil,
-            sparkSecondaryWindowLabel: sparkSecondaryUsedPercent != nil ? "Weekly" : nil,
-            sparkSecondaryWindowHours: sparkSecondaryUsedPercent != nil ? 168 : nil,
+            sparkPrimaryWindowLabel: sparkPrimaryWindowMetadata?.label,
+            sparkPrimaryWindowHours: sparkPrimaryWindowMetadata?.hours,
+            sparkSecondaryWindowLabel: sparkSecondaryWindowMetadata?.label,
+            sparkSecondaryWindowHours: sparkSecondaryWindowMetadata?.hours,
             creditsBalance: codexResponse.credits?.balanceAsDouble,
             planType: codexResponse.plan_type,
             email: account.email,
@@ -864,6 +877,34 @@ final class CodexProvider: ProviderProtocol {
         }
     }
 
+    private func codexWindowMetadata(for window: RateLimitWindow, fallbackLabel: String) -> (label: String, hours: Int?) {
+        if let seconds = window.limit_window_seconds,
+           seconds > 0 {
+            let rawLabel = compactWindowLabel(from: seconds)
+            return (
+                label: formatCodexWindowLabel(rawLabel),
+                hours: normalizedWindowHours(from: rawLabel)
+            )
+        }
+
+        return (
+            label: formatCodexWindowLabel(fallbackLabel),
+            hours: normalizedWindowHours(from: fallbackLabel)
+        )
+    }
+
+    private func compactWindowLabel(from seconds: Int) -> String {
+        guard seconds > 0 else { return "Usage" }
+        if seconds % 604_800 == 0 {
+            return "\(seconds / 604_800)w"
+        }
+        if seconds % 86_400 == 0 {
+            return "\(seconds / 86_400)d"
+        }
+        let roundedHours = max(1, Int(round(Double(seconds) / 3600.0)))
+        return "\(roundedHours)h"
+    }
+
     private func normalizeSparkWindowLabel(_ rawLabel: String?) -> String? {
         guard let rawLabel else { return nil }
         let normalized = rawLabel
@@ -897,6 +938,17 @@ final class CodexProvider: ProviderProtocol {
             return true
         case let (left?, right?):
             return Int(left.timeIntervalSince1970) == Int(right.timeIntervalSince1970)
+        default:
+            return false
+        }
+    }
+
+    private func sameUsageValue(_ lhs: Double?, _ rhs: Double?, tolerance: Double = 0.0001) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+        case let (left?, right?):
+            return abs(left - right) <= tolerance
         default:
             return false
         }

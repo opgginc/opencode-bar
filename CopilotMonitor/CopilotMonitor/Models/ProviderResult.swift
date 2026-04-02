@@ -41,6 +41,10 @@ struct ProviderAccountResult {
     let usage: ProviderUsage
     let details: DetailedUsage?
 
+    /// Stable identifier for subscription key derivation.
+    /// Prefers email over accountId because email is invariant across API
+    /// success/failure, while accountId (e.g. UUID) may only resolve when
+    /// the identity API responds successfully.
     var subscriptionId: String? {
         if let email = details?.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
            !email.isEmpty {

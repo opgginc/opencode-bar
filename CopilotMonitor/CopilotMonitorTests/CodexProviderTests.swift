@@ -409,6 +409,66 @@ final class CodexProviderTests: XCTestCase {
         XCTAssertEqual(payload.details.monthlyCost, 11.75, accuracy: 0.001)
     }
 
+    func testDecodeUsagePayloadDerivesStandardWindowLabelsFromLimitSeconds() throws {
+        let json = """
+        {
+          "plan_type": "plus",
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 20,
+              "limit_window_seconds": 21600,
+              "reset_after_seconds": 3600
+            },
+            "secondary_window": {
+              "used_percent": 35,
+              "limit_window_seconds": 1209600,
+              "reset_after_seconds": 86400
+            },
+            "spark_primary_window": {
+              "used_percent": 10,
+              "limit_window_seconds": 43200,
+              "reset_after_seconds": 1800
+            },
+            "spark_secondary_window": {
+              "used_percent": 12,
+              "limit_window_seconds": 2419200,
+              "reset_after_seconds": 7200
+            }
+          }
+        }
+        """
+        let account = OpenAIAuthAccount(
+            accessToken: "oauth-token",
+            accountId: "account-id",
+            externalUsageAccountId: nil,
+            email: "user@example.com",
+            authSource: "auth.json",
+            sourceLabels: ["Codex Auth"],
+            source: .codexAuth,
+            credentialType: .oauthBearer
+        )
+        let configuration = CodexEndpointConfiguration(
+            mode: .directChatGPT,
+            source: "test",
+            usesOpenAIProviderBaseURL: false
+        )
+
+        let payload = try provider.decodeUsagePayload(
+            data: XCTUnwrap(json.data(using: .utf8)),
+            account: account,
+            endpointConfiguration: configuration
+        )
+
+        XCTAssertEqual(payload.details.codexPrimaryWindowLabel, "6h")
+        XCTAssertEqual(payload.details.codexPrimaryWindowHours, 6)
+        XCTAssertEqual(payload.details.codexSecondaryWindowLabel, "14d")
+        XCTAssertEqual(payload.details.codexSecondaryWindowHours, 336)
+        XCTAssertEqual(payload.details.sparkPrimaryWindowLabel, "12h")
+        XCTAssertEqual(payload.details.sparkPrimaryWindowHours, 12)
+        XCTAssertEqual(payload.details.sparkSecondaryWindowLabel, "28d")
+        XCTAssertEqual(payload.details.sparkSecondaryWindowHours, 672)
+    }
+
     func testDecodeUsagePayloadHandlesMissingLimitsKeyGracefully() throws {
         let json = """
         {
