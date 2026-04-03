@@ -7,7 +7,8 @@
 | Provider | Token File |
 |----------|-----------|
 | Claude | `~/.config/opencode/opencode-anthropic-auth/accounts.json`, `~/.local/share/opencode/auth.json`, `~/.config/claude-code/auth.json`, macOS Keychain (`Claude Code-credentials`, `Claude Code`) |
-| Codex, Copilot, Nano-GPT, MiniMax | `~/.local/share/opencode/auth.json` |
+| Codex / ChatGPT | `~/.local/share/opencode/auth.json`, `~/.opencode/auth/openai.json`, `~/.opencode/openai-codex-accounts.json`, `~/.opencode/projects/*/openai-codex-accounts.json`, `~/.codex/auth.json`, `~/.codex-lb/` |
+| Copilot, Nano-GPT, MiniMax | `~/.local/share/opencode/auth.json` |
 | Antigravity (Gemini) | `~/.config/opencode/antigravity-accounts.json` |
 | Antigravity (Local cache) | `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb` |
 
@@ -69,14 +70,22 @@ The bundled [`scripts/query-claude.sh`](/Users/kargnas/projects/opencode-bar/scr
 
 **Endpoint:** `GET https://chatgpt.com/backend-api/wham/usage`
 
+OpenCode Bar uses the direct ChatGPT usage endpoint by default. If `oc-chatgpt-multi-auth` sets OpenCode's `provider.openai.options.baseURL` to a localhost proxy, that proxy is ignored for usage requests unless `opencode-bar.codex.usageURL` is explicitly configured.
+
 ```bash
 ACCESS=$(jq -r '.openai.access' ~/.local/share/opencode/auth.json)
-ACCOUNT_ID=$(jq -r '.openai.accountId' ~/.local/share/opencode/auth.json)
+ACCOUNT_ID=$(jq -r '
+  .openai.accountIdOverride
+  // .openai.organizationIdOverride
+  // .openai.accountId
+' ~/.local/share/opencode/auth.json)
 
 curl -s "https://chatgpt.com/backend-api/wham/usage" \
   -H "Authorization: Bearer $ACCESS" \
   -H "ChatGPT-Account-Id: $ACCOUNT_ID"
 ```
+
+For `oc-chatgpt-multi-auth` account files, prefer the canonical ChatGPT account ID from the access token claims when present. The plugin's `accountId` may be an organization ID (`org-*`) for the selected workspace, while the JWT claim `https://api.openai.com/auth.chatgpt_account_id` is the stable per-account identifier.
 
 **Response:**
 ```json
@@ -398,7 +407,13 @@ Client Secret: Set GEMINI_CLIENT_SECRET environment variable
     "access": "eyJ...",
     "refresh": "rt_...",
     "expires": 1770563557150,
-    "accountId": "uuid"
+    "accountId": "uuid",
+    "idToken": "eyJ...",
+    "multiAccount": true,
+    "accountIdOverride": "org-selected-account",
+    "organizationIdOverride": "org-selected-account",
+    "accountIdSource": "org",
+    "accountLabel": "Personal [id:abc123]"
   },
   "github-copilot": {
     "type": "oauth",
@@ -412,6 +427,44 @@ Client Secret: Set GEMINI_CLIENT_SECRET environment variable
   }
 }
 ```
+
+`oc-chatgpt-multi-auth` may leave `accountId` unset in `auth.json` and instead store the selected workspace in `accountIdOverride` / `organizationIdOverride`. OpenCode Bar derives the canonical ChatGPT account ID from the OpenAI JWT claims and keeps the override value as additional metadata when needed.
+
+### OpenCode ChatGPT Multi-Auth (`~/.opencode/projects/*/openai-codex-accounts.json`)
+
+```json
+{
+  "version": 3,
+  "accounts": [
+    {
+      "accountId": "org-example-account",
+      "organizationId": "org-example-account",
+      "accountIdSource": "org",
+      "accountLabel": "Personal [id:abc123]",
+      "email": "user@example.com",
+      "refreshToken": "oaistb_rt_...",
+      "accessToken": "eyJ...",
+      "expiresAt": 1776088595278
+    },
+    {
+      "accountId": "058af373-bff1-4490-98b7-2a71290ae604",
+      "accountIdSource": "token",
+      "accountLabel": "Token account [id:0ae604]",
+      "email": "user@example.com",
+      "refreshToken": "oaistb_rt_...",
+      "accessToken": "eyJ...",
+      "expiresAt": 1776088595278
+    }
+  ],
+  "activeIndex": 0,
+  "activeIndexByFamily": {
+    "gpt-5.4": 0,
+    "gpt-5.4-mini": 0
+  }
+}
+```
+
+OpenCode Bar reads every entry in these files, canonicalizes account IDs from the JWT claims, and merges duplicates with the OpenCode auth, Codex native auth, and `codex-lb` sources.
 
 ### Antigravity Accounts (`~/.config/opencode/antigravity-accounts.json`)
 
