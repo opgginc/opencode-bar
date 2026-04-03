@@ -169,6 +169,10 @@ struct OpenCodeAuth: Codable {
 
     let anthropic: OAuth?
     let openai: OAuth?
+    /// When `openai` in auth.json is not a valid OAuth object, it may be stored
+    /// as an API key object (e.g. `{"type":"apiKey","key":"sk-..."}`). This field
+    /// captures that alternative representation so CodexProvider can still send
+    /// `Authorization: Bearer <key>` without requiring OAuth or ~/.codex/auth.json.
     let openaiAPIKey: APIKey?
     let githubCopilot: OAuth?
     let openrouter: APIKey?
@@ -221,7 +225,10 @@ struct OpenCodeAuth: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         anthropic = Self.decodeLossyIfPresent(OAuth.self, from: container, forKey: .anthropic)
         openai = Self.decodeLossyIfPresent(OAuth.self, from: container, forKey: .openai)
-        openaiAPIKey = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .openai)
+        // When openai is not a valid OAuth object, try decoding it as an API key.
+        openaiAPIKey = (openai == nil)
+            ? Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .openai)
+            : nil
         githubCopilot = Self.decodeLossyIfPresent(OAuth.self, from: container, forKey: .githubCopilot)
         openrouter = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .openrouter)
         opencode = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .opencode)
@@ -269,6 +276,7 @@ struct OpenCodeAuth: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(anthropic, forKey: .anthropic)
         try container.encodeIfPresent(openai, forKey: .openai)
+        // Encode openaiAPIKey only when OAuth openai is nil to avoid duplicate key
         if openai == nil { try container.encodeIfPresent(openaiAPIKey, forKey: .openai) }
         try container.encodeIfPresent(githubCopilot, forKey: .githubCopilot)
         try container.encodeIfPresent(openrouter, forKey: .openrouter)
@@ -718,13 +726,28 @@ final class TokenManager: @unchecked Sendable {
         )
     }
 
-    /// Possible opencode.json locations in priority order:
-    /// 1. $XDG_CONFIG_HOME/opencode/opencode.json (if XDG_CONFIG_HOME is set)
-    /// 2. ~/.config/opencode/opencode.json (XDG default on macOS/Linux)
-    /// 3. ~/.local/share/opencode/opencode.json (fallback)
-    /// 4. ~/Library/Application Support/opencode/opencode.json (macOS fallback)
+    /// Possible opencode.json/opencode.jsonc locations in priority order.
+    /// For each directory, opencode.jsonc is preferred over opencode.json
+    /// (matching copilothydra behavior):
+    /// 1. $XDG_CONFIG_HOME/opencode/opencode.jsonc (if XDG_CONFIG_HOME is set)
+    /// 2. $XDG_CONFIG_HOME/opencode/opencode.json  (if XDG_CONFIG_HOME is set)
+    /// 3. ~/.config/opencode/opencode.jsonc (XDG default on macOS/Linux)
+    /// 4. ~/.config/opencode/opencode.json  (XDG default on macOS/Linux)
+    /// 5. ~/.local/share/opencode/opencode.jsonc (fallback)
+    /// 6. ~/.local/share/opencode/opencode.json  (fallback)
+    /// 7. ~/Library/Application Support/opencode/opencode.jsonc (macOS fallback)
+    /// 8. ~/Library/Application Support/opencode/opencode.json  (macOS fallback)
     func getOpenCodeConfigFilePaths() -> [URL] {
-        return buildOpenCodeFilePaths(
+        let jsoncPaths = buildOpenCodeFilePaths(
+            envVarName: "XDG_CONFIG_HOME",
+            envRelativePathComponents: ["opencode", "opencode.jsonc"],
+            fallbackRelativePathComponents: [
+                [".config", "opencode", "opencode.jsonc"],
+                [".local", "share", "opencode", "opencode.jsonc"],
+                ["Library", "Application Support", "opencode", "opencode.jsonc"]
+            ]
+        )
+        let jsonPaths = buildOpenCodeFilePaths(
             envVarName: "XDG_CONFIG_HOME",
             envRelativePathComponents: ["opencode", "opencode.json"],
             fallbackRelativePathComponents: [
@@ -733,6 +756,13 @@ final class TokenManager: @unchecked Sendable {
                 ["Library", "Application Support", "opencode", "opencode.json"]
             ]
         )
+
+        assert(
+            jsoncPaths.count == jsonPaths.count,
+            "OpenCode jsonc/json path arrays must remain equal length for correct interleaving"
+        )
+
+        return zip(jsoncPaths, jsonPaths).flatMap { [$0, $1] }
     }
 
     /// Possible search-keys.json locations in priority order:
@@ -823,7 +853,7 @@ final class TokenManager: @unchecked Sendable {
         }
     }
 
-    private func stripJSONComments(from data: Data) -> Data {
+    func stripJSONComments(from data: Data) -> Data {
         guard let text = String(data: data, encoding: .utf8) else {
             return data
         }
@@ -1086,6 +1116,14 @@ final class TokenManager: @unchecked Sendable {
             cacheTimestamp = nil
             logger.error("No valid auth.json found in any location")
             return nil
+        }
+    }
+
+    func clearOpenCodeAuthCacheForTesting() {
+        queue.sync {
+            cachedAuth = nil
+            cacheTimestamp = nil
+            lastFoundAuthPath = nil
         }
     }
 
@@ -3767,7 +3805,12 @@ final class TokenManager: @unchecked Sendable {
         }
 
         lines.append("[ChatGPT]")
-        lines.append("  OpenCode auth.json (\(shortPath(openCodePath))): \(tokenStatus(hasAuth: openCodeAuth != nil, token: openCodeAuth?.openai?.access, accountId: openCodeAuth?.openai?.accountId))")
+        let openAIStatus = tokenStatus(
+            hasAuth: openCodeAuth?.openai != nil || openCodeAuth?.openaiAPIKey != nil,
+            token: openCodeAuth?.openai?.access ?? openCodeAuth?.openaiAPIKey?.key,
+            accountId: openCodeAuth?.openai?.accountId
+        )
+        lines.append("  OpenCode auth.json (\(shortPath(openCodePath))): \(openAIStatus)")
 
         let codexAuthPath = homeDir.appendingPathComponent(".codex").appendingPathComponent("auth.json")
         if fileManager.fileExists(atPath: codexAuthPath.path) {
@@ -4000,7 +4043,7 @@ final class TokenManager: @unchecked Sendable {
         debugLines.append("Token Status:")
         if let auth = readOpenCodeAuth() {
             debugLines.append("  [Anthropic] \(auth.anthropic != nil ? "CONFIGURED" : "NOT CONFIGURED")")
-            debugLines.append("  [OpenAI] \(auth.openai != nil ? "CONFIGURED" : "NOT CONFIGURED")")
+            debugLines.append("  [OpenAI] \((auth.openai != nil || auth.openaiAPIKey != nil) ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append(gitHubCopilotTokenStatusLine())
             debugLines.append("  [OpenRouter] \(auth.openrouter != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [OpenCode] \(auth.opencode != nil ? "CONFIGURED" : "NOT CONFIGURED")")
@@ -4258,6 +4301,10 @@ final class TokenManager: @unchecked Sendable {
                 let expiresDate = Date(timeIntervalSince1970: TimeInterval(openai.expires))
                 let isExpired = expiresDate < Date()
                 debugLines.append("  - Expires: \(expiresDate) (\(isExpired ? "EXPIRED" : "valid"))")
+            } else if let openaiAPIKey = auth.openaiAPIKey {
+                debugLines.append("[OpenAI] API Key Present")
+                debugLines.append("  - Key Length: \(openaiAPIKey.key.count) chars")
+                debugLines.append("  - Key Preview: \(maskToken(openaiAPIKey.key))")
             } else {
                 debugLines.append("[OpenAI] NOT CONFIGURED")
             }
