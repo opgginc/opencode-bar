@@ -16,10 +16,22 @@ struct OpenCodeAuth: Codable {
         let refresh: String
         let expires: Int64
         let accountId: String?
+        let idToken: String?
+        let accountIdOverride: String?
+        let organizationIdOverride: String?
+        let accountIdSource: String?
+        let accountLabel: String?
+        let multiAccount: Bool?
 
         enum CodingKeys: String, CodingKey {
             case type, access, refresh, expires
             case accountId = "accountId"
+            case idToken
+            case accountIdOverride
+            case organizationIdOverride
+            case accountIdSource
+            case accountLabel
+            case multiAccount
         }
 
         init(from decoder: Decoder) throws {
@@ -44,6 +56,12 @@ struct OpenCodeAuth: Codable {
 
             expires = Self.decodeFlexibleInt64(from: container, forKey: .expires) ?? 0
             accountId = Self.decodeFlexibleString(from: container, forKey: .accountId)
+            idToken = Self.decodeFlexibleString(from: container, forKey: .idToken)
+            accountIdOverride = Self.decodeFlexibleString(from: container, forKey: .accountIdOverride)
+            organizationIdOverride = Self.decodeFlexibleString(from: container, forKey: .organizationIdOverride)
+            accountIdSource = Self.decodeFlexibleString(from: container, forKey: .accountIdSource)
+            accountLabel = Self.decodeFlexibleString(from: container, forKey: .accountLabel)
+            multiAccount = Self.decodeFlexibleBool(from: container, forKey: .multiAccount)
         }
 
         private static func decodeFlexibleInt64(
@@ -82,6 +100,29 @@ struct OpenCodeAuth: Codable {
             if let value = decodeLossyIfPresent(Double.self, from: container, forKey: key) {
                 let asInt = Int64(value)
                 return String(asInt)
+            }
+            return nil
+        }
+
+        private static func decodeFlexibleBool(
+            from container: KeyedDecodingContainer<CodingKeys>,
+            forKey key: CodingKeys
+        ) -> Bool? {
+            if let value = decodeLossyIfPresent(Bool.self, from: container, forKey: key) {
+                return value
+            }
+            if let value = decodeLossyIfPresent(Int.self, from: container, forKey: key) {
+                return value != 0
+            }
+            if let value = decodeLossyIfPresent(String.self, from: container, forKey: key) {
+                switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+                case "true", "yes", "1":
+                    return true
+                case "false", "no", "0":
+                    return false
+                default:
+                    return nil
+                }
             }
             return nil
         }
@@ -334,6 +375,7 @@ struct CodexLBEncryptedAccount {
 /// Auth source types for OpenAI (Codex) account discovery
 enum OpenAIAuthSource {
     case opencodeAuth
+    case openCodeMultiAuth
     case codexLB
     case codexAuth
 }
@@ -596,6 +638,28 @@ private struct OpenAIIDTokenPayload: Decodable {
     let email: String?
 }
 
+private struct OpenAIAccessTokenPayload: Decodable {
+    struct AuthClaims: Decodable {
+        let chatGPTAccountId: String?
+
+        enum CodingKeys: String, CodingKey {
+            case chatGPTAccountId = "chatgpt_account_id"
+        }
+    }
+
+    struct ProfileClaims: Decodable {
+        let email: String?
+    }
+
+    let auth: AuthClaims?
+    let profile: ProfileClaims?
+
+    enum CodingKeys: String, CodingKey {
+        case auth = "https://api.openai.com/auth"
+        case profile = "https://api.openai.com/profile"
+    }
+}
+
 /// Gemini OAuth token response structure
 struct GeminiTokenResponse: Codable {
     let access_token: String
@@ -644,6 +708,13 @@ final class TokenManager: @unchecked Sendable {
     /// Cached Claude accounts (OpenCode + Claude Code)
     private var cachedClaudeAccounts: [ClaudeAuthAccount]?
     private var claudeAccountsCacheTimestamp: Date?
+
+    /// Cached oc-chatgpt-multi-auth OpenAI accounts
+    private var cachedOpenCodeMultiAuthAccounts: [OpenAIAuthAccount]?
+    private var openCodeMultiAuthAccountsCacheTimestamp: Date?
+
+    /// Paths where oc-chatgpt-multi-auth account files were found
+    private(set) var lastFoundOpenCodeMultiAuthPaths: [URL] = []
 
     /// Cached GitHub Copilot token accounts (OpenCode + VS Code)
     private var cachedCopilotAccounts: [CopilotAuthAccount]?
@@ -957,6 +1028,20 @@ final class TokenManager: @unchecked Sendable {
         return current as? String
     }
 
+    private func hasPlugin(named pluginIdentifier: String, in configDictionary: [String: Any]) -> Bool {
+        guard let plugins = valueForNormalizedKey("plugin", in: configDictionary) as? [Any] else {
+            return false
+        }
+
+        for plugin in plugins {
+            guard let rawPlugin = plugin as? String else { continue }
+            if rawPlugin.range(of: pluginIdentifier, options: .caseInsensitive) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
     func codexEndpointConfiguration(
         from configDictionary: [String: Any]?,
         sourcePath: String? = nil
@@ -985,6 +1070,13 @@ final class TokenManager: @unchecked Sendable {
 
             logger.warning(
                 "Ignoring invalid Codex usage URL override '\(explicitUsageURL, privacy: .public)' from \(sourcePath ?? "opencode-bar.codex.usageURL", privacy: .public)"
+            )
+        }
+
+        if hasPlugin(named: "oc-chatgpt-multi-auth", in: configDictionary) {
+            return CodexEndpointConfiguration(
+                mode: .directChatGPT,
+                source: "oc-chatgpt-multi-auth direct ChatGPT usage endpoint"
             )
         }
 
@@ -1650,6 +1742,8 @@ final class TokenManager: @unchecked Sendable {
         switch source {
         case .opencodeAuth:
             return "OpenCode"
+        case .openCodeMultiAuth:
+            return "OpenCode Multi Auth"
         case .codexLB:
             return "Codex LB"
         case .codexAuth:
@@ -1697,10 +1791,34 @@ final class TokenManager: @unchecked Sendable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private struct ResolvedOpenAIAuthMetadata {
+        let accountId: String?
+        let overrideAccountId: String?
+        let email: String?
+    }
+
+    private func resolvedOpenAIAuthMetadata(from oauth: OpenCodeAuth.OAuth?) -> ResolvedOpenAIAuthMetadata {
+        let accessTokenPayload = decodeOpenAIAccessTokenPayload(oauth?.access)
+        let idTokenPayload = decodeOpenAIIDTokenPayload(oauth?.idToken)
+        let tokenAccountId = normalizedNonEmpty(accessTokenPayload?.auth?.chatGPTAccountId)
+        let overrideAccountId = normalizedNonEmpty(oauth?.accountIdOverride)
+            ?? normalizedNonEmpty(oauth?.organizationIdOverride)
+            ?? normalizedNonEmpty(oauth?.accountId)
+        let email = normalizedNonEmpty(idTokenPayload?.email)
+            ?? normalizedNonEmpty(accessTokenPayload?.profile?.email)
+
+        return ResolvedOpenAIAuthMetadata(
+            accountId: tokenAccountId ?? overrideAccountId,
+            overrideAccountId: overrideAccountId,
+            email: email
+        )
+    }
+
     private func dedupeOpenAIAccounts(_ accounts: [OpenAIAuthAccount]) -> [OpenAIAuthAccount] {
         func priority(for source: OpenAIAuthSource) -> Int {
             switch source {
-            case .opencodeAuth: return 2
+            case .opencodeAuth: return 3
+            case .openCodeMultiAuth: return 2
             case .codexLB: return 1
             case .codexAuth: return 0
             }
@@ -1971,6 +2089,12 @@ final class TokenManager: @unchecked Sendable {
         let email: String?
     }
 
+    private struct OpenAIMultiAuthPayload {
+        let accessToken: String
+        let accountId: String?
+        let email: String?
+    }
+
     private func valueForNormalizedKey(_ normalizedKeyName: String, in dict: [String: Any]) -> Any? {
         for (key, value) in dict where normalizedKey(key) == normalizedKeyName {
             return value
@@ -2051,6 +2175,140 @@ final class TokenManager: @unchecked Sendable {
         }
 
         return nil
+    }
+
+    private func openCodeMultiAuthPaths() -> [URL] {
+        let fileManager = FileManager.default
+        let homeDir = fileManager.homeDirectoryForCurrentUser
+        let openCodeRoot = homeDir.appendingPathComponent(".opencode", isDirectory: true)
+
+        var paths: [URL] = [
+            openCodeRoot.appendingPathComponent("auth").appendingPathComponent("openai.json"),
+            openCodeRoot.appendingPathComponent("openai-codex-accounts.json")
+        ]
+
+        let projectsDir = openCodeRoot.appendingPathComponent("projects", isDirectory: true)
+        if let projectDirectories = try? fileManager.contentsOfDirectory(
+            at: projectsDir,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            let projectFiles = projectDirectories
+                .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+                .map { $0.appendingPathComponent("openai-codex-accounts.json") }
+            paths.append(contentsOf: projectFiles)
+        }
+
+        var deduped: [URL] = []
+        var visited = Set<String>()
+        for path in paths {
+            let normalizedPath = path.standardizedFileURL.path
+            if visited.insert(normalizedPath).inserted {
+                deduped.append(path)
+            }
+        }
+        return deduped
+    }
+
+    private func decodeOpenAIAccessTokenPayload(_ accessToken: String?) -> OpenAIAccessTokenPayload? {
+        guard let token = normalizedNonEmpty(accessToken) else {
+            return nil
+        }
+
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else {
+            return nil
+        }
+
+        let payload = String(parts[1])
+        do {
+            let data = try decodeBase64URL(payload)
+            return try JSONDecoder().decode(OpenAIAccessTokenPayload.self, from: data)
+        } catch {
+            logger.warning("Failed to decode OpenAI access token payload: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func extractOpenAIMultiAuthPayload(from dict: [String: Any]) -> OpenAIMultiAuthPayload? {
+        let accessKeys: Set<String> = ["accesstoken", "access", "oauthtoken", "token"]
+        let accountKeys: Set<String> = ["accountid", "chatgptaccountid", "userid", "id"]
+        let emailKeys: Set<String> = ["email", "useremail", "login", "username"]
+
+        guard let accessToken = findDirectStringValue(in: dict, matching: accessKeys)
+            ?? findStringValue(in: dict, matching: accessKeys) else {
+            return nil
+        }
+
+        let accessTokenPayload = decodeOpenAIAccessTokenPayload(accessToken)
+        let tokenAccountId = normalizedNonEmpty(accessTokenPayload?.auth?.chatGPTAccountId)
+        let storedAccountId = findDirectStringValue(in: dict, matching: accountKeys)
+            ?? findStringValue(in: dict, matching: accountKeys)
+        let email = normalizedNonEmpty(accessTokenPayload?.profile?.email)
+            ?? normalizedNonEmpty(findDirectStringValue(in: dict, matching: emailKeys)
+            ?? findStringValue(in: dict, matching: emailKeys))
+
+        return OpenAIMultiAuthPayload(
+            accessToken: accessToken,
+            accountId: tokenAccountId ?? normalizedNonEmpty(storedAccountId),
+            email: email
+        )
+    }
+
+    func readOpenAIMultiAuthFiles(at paths: [URL]) -> [OpenAIAuthAccount] {
+        var accounts: [OpenAIAuthAccount] = []
+
+        for path in paths {
+            guard let dict = readJSONDictionary(at: path) else { continue }
+            let rawAccounts = valueForNormalizedKey("accounts", in: dict) as? [Any] ?? [dict]
+            var pathAccounts: [OpenAIAuthAccount] = []
+
+            for rawAccount in rawAccounts {
+                guard let accountDict = rawAccount as? [String: Any],
+                      let payload = extractOpenAIMultiAuthPayload(from: accountDict) else {
+                    continue
+                }
+
+                pathAccounts.append(
+                    OpenAIAuthAccount(
+                        accessToken: payload.accessToken,
+                        accountId: payload.accountId,
+                        externalUsageAccountId: nil,
+                        email: payload.email,
+                        authSource: path.path,
+                        sourceLabels: [openAISourceLabel(for: .openCodeMultiAuth)],
+                        source: .openCodeMultiAuth
+                    )
+                )
+            }
+
+            if !pathAccounts.isEmpty {
+                logger.info("Loaded \(pathAccounts.count) OpenAI account(s) from oc-chatgpt-multi-auth at \(path.path)")
+                accounts.append(contentsOf: pathAccounts)
+            }
+        }
+
+        return accounts
+    }
+
+    private func readOpenAIMultiAuthFiles() -> [OpenAIAuthAccount] {
+        return queue.sync {
+            if let cached = cachedOpenCodeMultiAuthAccounts,
+               let timestamp = openCodeMultiAuthAccountsCacheTimestamp,
+               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+                return cached
+            }
+
+            let fileManager = FileManager.default
+            let paths = openCodeMultiAuthPaths()
+            let accounts = readOpenAIMultiAuthFiles(at: paths)
+            let existingPaths = paths.filter { fileManager.fileExists(atPath: $0.path) }
+
+            cachedOpenCodeMultiAuthAccounts = accounts
+            openCodeMultiAuthAccountsCacheTimestamp = Date()
+            lastFoundOpenCodeMultiAuthPaths = existingPaths
+            return accounts
+        }
     }
 
     private func parseJSONDictionary(from data: Data) -> [String: Any]? {
@@ -2828,12 +3086,13 @@ final class TokenManager: @unchecked Sendable {
            let access = auth.openai?.access,
            !access.isEmpty {
             let authSource = lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            let metadata = resolvedOpenAIAuthMetadata(from: auth.openai)
             accounts.append(
                 OpenAIAuthAccount(
                     accessToken: access,
-                    accountId: auth.openai?.accountId,
-                    externalUsageAccountId: nil,
-                    email: nil,
+                    accountId: metadata.accountId,
+                    externalUsageAccountId: metadata.overrideAccountId != metadata.accountId ? metadata.overrideAccountId : nil,
+                    email: metadata.email,
                     authSource: authSource,
                     sourceLabels: [openAISourceLabel(for: .opencodeAuth)],
                     source: .opencodeAuth
@@ -2858,6 +3117,11 @@ final class TokenManager: @unchecked Sendable {
                     source: .opencodeAuth
                 )
             )
+        }
+
+        let openCodeMultiAuthAccounts = readOpenAIMultiAuthFiles()
+        if !openCodeMultiAuthAccounts.isEmpty {
+            accounts.append(contentsOf: openCodeMultiAuthAccounts)
         }
 
         let codexLBAccounts = readCodexLBOpenAIAccounts()
@@ -3095,7 +3359,8 @@ final class TokenManager: @unchecked Sendable {
     /// Gets OpenAI account ID, first from OpenCode auth, then falling back to Codex CLI native auth
     func getOpenAIAccountId() -> String? {
         // Primary: OpenCode auth
-        if let auth = readOpenCodeAuth(), let accountId = auth.openai?.accountId {
+        if let auth = readOpenCodeAuth(),
+           let accountId = resolvedOpenAIAuthMetadata(from: auth.openai).accountId {
             return accountId
         }
         // Fallback: Codex CLI native auth (~/.codex/auth.json)
@@ -3765,12 +4030,30 @@ final class TokenManager: @unchecked Sendable {
         }
 
         lines.append("[ChatGPT]")
+        let openCodeOpenAIMetadata = resolvedOpenAIAuthMetadata(from: openCodeAuth?.openai)
         let openAIStatus = tokenStatus(
             hasAuth: openCodeAuth?.openai != nil || openCodeAuth?.openaiAPIKey != nil,
             token: openCodeAuth?.openai?.access ?? openCodeAuth?.openaiAPIKey?.key,
-            accountId: openCodeAuth?.openai?.accountId
+            accountId: openCodeOpenAIMetadata.accountId ?? openCodeOpenAIMetadata.overrideAccountId
         )
         lines.append("  OpenCode auth.json (\(shortPath(openCodePath))): \(openAIStatus)")
+
+        let openCodeMultiAuthPaths = openCodeMultiAuthPaths()
+        let existingOpenCodeMultiAuthPaths = openCodeMultiAuthPaths.filter { fileManager.fileExists(atPath: $0.path) }
+        if existingOpenCodeMultiAuthPaths.isEmpty {
+            let defaultOpenCodeAuth = homeDir.appendingPathComponent(".opencode").appendingPathComponent("auth").appendingPathComponent("openai.json")
+            let defaultOpenCodeAccounts = homeDir.appendingPathComponent(".opencode").appendingPathComponent("openai-codex-accounts.json")
+            lines.append("  oc-chatgpt-multi-auth auth (\(shortPath(defaultOpenCodeAuth.path))): NOT FOUND")
+            lines.append("  oc-chatgpt-multi-auth accounts (\(shortPath(defaultOpenCodeAccounts.path))): NOT FOUND")
+        } else {
+            for path in existingOpenCodeMultiAuthPaths {
+                let accountCount = readOpenAIMultiAuthFiles(at: [path]).count
+                let label = path.lastPathComponent == "openai.json"
+                    ? "oc-chatgpt-multi-auth auth"
+                    : "oc-chatgpt-multi-auth accounts"
+                lines.append("  \(label) (\(shortPath(path.path))): FOUND (\(accountCount) account(s))")
+            }
+        }
 
         let codexAuthPath = homeDir.appendingPathComponent(".codex").appendingPathComponent("auth.json")
         if fileManager.fileExists(atPath: codexAuthPath.path) {
@@ -4255,12 +4538,19 @@ final class TokenManager: @unchecked Sendable {
 
             // OpenAI
             if let openai = auth.openai {
+                let metadata = resolvedOpenAIAuthMetadata(from: openai)
                 debugLines.append("[OpenAI] OAuth Present")
                 debugLines.append("  - Access Token: \(openai.access.count) chars")
                 debugLines.append("  - Refresh Token: \(openai.refresh.count) chars")
                 let expiresDate = Date(timeIntervalSince1970: TimeInterval(openai.expires))
                 let isExpired = expiresDate < Date()
                 debugLines.append("  - Expires: \(expiresDate) (\(isExpired ? "EXPIRED" : "valid"))")
+                debugLines.append("  - Account ID: \(metadata.accountId ?? "nil")")
+                if let overrideAccountId = metadata.overrideAccountId,
+                   overrideAccountId != metadata.accountId {
+                    debugLines.append("  - Account Override: \(overrideAccountId)")
+                }
+                debugLines.append("  - Email: \(metadata.email ?? "nil")")
             } else if let openaiAPIKey = auth.openaiAPIKey {
                 debugLines.append("[OpenAI] API Key Present")
                 debugLines.append("  - Key Length: \(openaiAPIKey.key.count) chars")
@@ -4385,7 +4675,23 @@ final class TokenManager: @unchecked Sendable {
             debugLines.append("[Codex Auth] NOT FOUND at \(codexAuthPath.path)")
         }
 
-        // 8. codex-lb auth (~/.codex-lb/store.db + encryption.key)
+        // 8. oc-chatgpt-multi-auth (~/.opencode/*.json)
+        debugLines.append("---------- oc-chatgpt-multi-auth ----------")
+        let openCodeMultiAuthPaths = openCodeMultiAuthPaths()
+        let openCodeMultiAuthAccounts = readOpenAIMultiAuthFiles()
+        let existingOpenCodeMultiAuthPaths = openCodeMultiAuthPaths.filter { fileManager.fileExists(atPath: $0.path) }
+        if existingOpenCodeMultiAuthPaths.isEmpty {
+            debugLines.append("[oc-chatgpt-multi-auth] auth/openai.json: NOT FOUND")
+            debugLines.append("[oc-chatgpt-multi-auth] openai-codex-accounts.json: NOT FOUND")
+        } else {
+            for path in existingOpenCodeMultiAuthPaths {
+                let accountCount = readOpenAIMultiAuthFiles(at: [path]).count
+                debugLines.append("[oc-chatgpt-multi-auth] \(path.path): \(accountCount) account(s)")
+            }
+            debugLines.append("[oc-chatgpt-multi-auth] Total parsed accounts: \(openCodeMultiAuthAccounts.count)")
+        }
+
+        // 9. codex-lb auth (~/.codex-lb/store.db + encryption.key)
         debugLines.append("---------- codex-lb Auth ----------")
         let codexLBAccounts = readCodexLBOpenAIAccounts()
         if let storePath = lastFoundCodexLBStorePath,

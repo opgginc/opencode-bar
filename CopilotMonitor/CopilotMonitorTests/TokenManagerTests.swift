@@ -3,12 +3,46 @@ import XCTest
 
 final class TokenManagerTests: XCTestCase {
 
+    private func makeTestJWT(payload: String) -> String {
+        func encode(_ string: String) -> String {
+            Data(string.utf8)
+                .base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+        }
+
+        let header = #"{"alg":"RS256","typ":"JWT"}"#
+        return "\(encode(header)).\(encode(payload)).signature"
+    }
+
     func testCodexEndpointConfigurationDefaultsToChatGPT() {
         let configuration = TokenManager.shared.codexEndpointConfiguration(from: nil)
 
         XCTAssertEqual(configuration, CodexEndpointConfiguration(
             mode: .directChatGPT,
             source: "Default ChatGPT usage endpoint"
+        ))
+    }
+
+    func testCodexEndpointConfigurationPrefersDirectChatGPTForOcChatGPTMultiAuthPlugin() {
+        let configuration = TokenManager.shared.codexEndpointConfiguration(
+            from: [
+                "plugin": ["oc-chatgpt-multi-auth"],
+                "provider": [
+                    "openai": [
+                        "options": [
+                            "baseURL": "http://127.0.0.1:2455/v1"
+                        ]
+                    ]
+                ]
+            ],
+            sourcePath: "/tmp/opencode.json"
+        )
+
+        XCTAssertEqual(configuration, CodexEndpointConfiguration(
+            mode: .directChatGPT,
+            source: "oc-chatgpt-multi-auth direct ChatGPT usage endpoint"
         ))
     }
 
@@ -157,6 +191,36 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertEqual(apiKeyAccount.source, .opencodeAuth)
     }
 
+    func testOpenCodeAuthDecodesOcChatGPTMultiAuthFields() throws {
+        let json = """
+        {
+          "openai": {
+            "type": "oauth",
+            "refresh": "refresh-token",
+            "access": "access-token",
+            "expires": 1776088671146,
+            "idToken": "id-token",
+            "multiAccount": true,
+            "accountIdOverride": "org-selected-account",
+            "organizationIdOverride": "org-selected-account",
+            "accountIdSource": "org",
+            "accountLabel": "Personal [id:abc123]"
+          }
+        }
+        """
+
+        let auth = try JSONDecoder().decode(OpenCodeAuth.self, from: XCTUnwrap(json.data(using: .utf8)))
+
+        XCTAssertEqual(auth.openai?.access, "access-token")
+        XCTAssertEqual(auth.openai?.refresh, "refresh-token")
+        XCTAssertEqual(auth.openai?.idToken, "id-token")
+        XCTAssertEqual(auth.openai?.accountIdOverride, "org-selected-account")
+        XCTAssertEqual(auth.openai?.organizationIdOverride, "org-selected-account")
+        XCTAssertEqual(auth.openai?.accountIdSource, "org")
+        XCTAssertEqual(auth.openai?.accountLabel, "Personal [id:abc123]")
+        XCTAssertEqual(auth.openai?.multiAccount, true)
+    }
+
     func testReadClaudeAnthropicAuthFilesIncludesDisabledAccounts() throws {
         let fileManager = FileManager.default
         let tempDirectory = fileManager.temporaryDirectory
@@ -218,6 +282,64 @@ final class TokenManagerTests: XCTestCase {
 
         let expiresAt = try XCTUnwrap(primaryAccount.expiresAt)
         XCTAssertEqual(expiresAt.timeIntervalSince1970, 1_770_563_557.15, accuracy: 0.01)
+    }
+
+    func testReadOpenAIMultiAuthFilesCanonicalizesAccountIDFromAccessTokenClaims() throws {
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let accountsPath = tempDirectory.appendingPathComponent("openai-codex-accounts.json")
+
+        try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let accessToken = makeTestJWT(
+            payload: #"""
+            {
+              "https://api.openai.com/auth": {
+                "chatgpt_account_id": "chatgpt-account-id"
+              },
+              "https://api.openai.com/profile": {
+                "email": "user@example.com"
+              }
+            }
+            """#
+        )
+
+        let json = """
+        {
+          "version": 3,
+          "accounts": [
+            {
+              "accountId": "org-example-account",
+              "organizationId": "org-example-account",
+              "accountIdSource": "org",
+              "accessToken": "\(accessToken)",
+              "refreshToken": "refresh-1",
+              "expiresAt": 1770563557150
+            },
+            {
+              "accountId": "chatgpt-account-id",
+              "accountIdSource": "token",
+              "accessToken": "\(accessToken)",
+              "refreshToken": "refresh-1",
+              "expiresAt": 1770563557150
+            }
+          ],
+          "activeIndex": 0
+        }
+        """
+
+        try XCTUnwrap(json.data(using: .utf8)).write(to: accountsPath)
+
+        let accounts = TokenManager.shared.readOpenAIMultiAuthFiles(at: [accountsPath])
+
+        XCTAssertEqual(accounts.count, 2)
+        XCTAssertEqual(accounts.map(\.accountId), ["chatgpt-account-id", "chatgpt-account-id"])
+        XCTAssertEqual(accounts.map(\.email), ["user@example.com", "user@example.com"])
+        XCTAssertEqual(accounts.map(\.source), [.openCodeMultiAuth, .openCodeMultiAuth])
+        XCTAssertEqual(accounts.map(\.authSource), [accountsPath.path, accountsPath.path])
+        XCTAssertEqual(accounts.map(\.sourceLabels), [["OpenCode Multi Auth"], ["OpenCode Multi Auth"]])
     }
 
     func testCodexProviderUsesChatGPTAccountIDForCodexLBInExternalMode() {
