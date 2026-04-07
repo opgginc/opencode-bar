@@ -363,6 +363,8 @@ final class CodexProvider: ProviderProtocol {
     private func sourcePriority(_ source: OpenAIAuthSource) -> Int {
         switch source {
         case .opencodeAuth:
+            return 3
+        case .openCodeMultiAuth:
             return 2
         case .codexLB:
             return 1
@@ -375,6 +377,8 @@ final class CodexProvider: ProviderProtocol {
         switch source {
         case .opencodeAuth:
             return "OpenCode"
+        case .openCodeMultiAuth:
+            return "OpenCode Multi Auth"
         case .codexLB:
             return "Codex LB"
         case .codexAuth:

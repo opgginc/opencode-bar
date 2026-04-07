@@ -58,6 +58,10 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 | **GitHub Copilot** | Quota-based | Multi-account, daily history, overage tracking, auth source labels |
 
 ### OpenCode Plugins
+- **ChatGPT / Codex**
+  - `ndycode/oc-chatgpt-multi-auth`
+  - Reads `~/.opencode/openai-codex-accounts.json` and `~/.opencode/projects/*/openai-codex-accounts.json`
+  - Also understands plugin-managed OpenCode `auth.json` fields such as `idToken`, `accountIdOverride`, and `organizationIdOverride`
 - **Antigravity/Gemini**
   - `NoeFabris/opencode-antigravity-auth` (writes `~/.config/opencode/antigravity-accounts.json`)
   - `jenslys/opencode-gemini-auth` (writes `google.oauth` in OpenCode `auth.json`)
@@ -75,8 +79,10 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
   - **Browser Cookies** - Chrome, Brave, Arc, Edge session cookies
   - Multiple accounts from different sources are automatically deduplicated and merged
 - **Codex**
+  - **OpenCode + oc-chatgpt-multi-auth** - Auto-detected from OpenCode `auth.json` plus `~/.opencode/.../openai-codex-accounts.json`
   - **Codex for Mac** - Auto-detected through `~/.codex/auth.json`
   - **Codex CLI** - Auto-detected through `~/.codex/auth.json`
+  - **codex-lb** - Auto-detected through `~/.codex-lb/`
 - **Claude Code CLI** - Keychain-based authentication detection
 
 ## Features
@@ -354,8 +360,8 @@ Quit (⌘Q)
 
 ## How It Works
 
-1. **Token Discovery**: Reads authentication tokens from OpenCode's `auth.json` (with multi-path fallback)
-2. **Multi-Source Account Discovery**: For providers like GitHub Copilot, discovers accounts from multiple sources (OpenCode auth, CLI Keychain, VS Code config, browser cookies) and deduplicates by login/email
+1. **Token Discovery**: Reads authentication tokens from OpenCode's `auth.json` (with multi-path fallback), including plugin-managed OpenAI metadata
+2. **Multi-Source Account Discovery**: For providers like ChatGPT and GitHub Copilot, discovers accounts from multiple sources (OpenCode auth, OpenCode plugin files, CLI/Keychain/config stores, browser cookies) and deduplicates them by stable account metadata
 3. **Parallel Fetching**: Queries all provider APIs simultaneously using TaskGroup
 4. **Smart Caching**: Falls back to cached data on network errors
 5. **Graceful Degradation**: Shows available providers even if some fail
@@ -376,6 +382,13 @@ The app searches for `auth.json` in these locations (in order):
 1. `$XDG_DATA_HOME/opencode/auth.json` (if XDG_DATA_HOME is set)
 2. `~/.local/share/opencode/auth.json` (default)
 3. `~/Library/Application Support/opencode/auth.json` (macOS fallback)
+
+For ChatGPT/Codex multi-account setups, the app also searches:
+1. `~/.opencode/auth/openai.json`
+2. `~/.opencode/openai-codex-accounts.json`
+3. `~/.opencode/projects/*/openai-codex-accounts.json`
+
+If `oc-chatgpt-multi-auth` is installed and OpenCode sets `provider.openai.options.baseURL` to a localhost proxy, OpenCode Bar still queries the direct ChatGPT usage endpoint by default. Only the explicit `opencode-bar.codex.usageURL` override changes the usage endpoint.
 
 ### GitHub Copilot not showing
 GitHub Copilot accounts are discovered from multiple sources (in priority order):
