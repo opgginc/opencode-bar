@@ -832,7 +832,7 @@ final class CodexProvider: ProviderProtocol {
         if normalized == "weekly" || normalized == "7d" || normalized == "7day" || normalized == "7days" {
             return "Weekly"
         }
-        if normalized == "monthly" || normalized == "30d" || normalized == "30days" || normalized == "31d" || normalized == "31days" {
+        if normalized == "monthly" {
             return "Monthly"
         }
         if normalized == "daily" || normalized == "1d" || normalized == "1day" || normalized == "1days" || normalized == "24h" {
@@ -843,7 +843,6 @@ final class CodexProvider: ProviderProtocol {
             if hours % 24 == 0 {
                 let days = hours / 24
                 if days == 7 { return "Weekly" }
-                if days >= 28 { return "Monthly" }
                 if days == 1 { return "Daily" }
                 return "\(days)d"
             }

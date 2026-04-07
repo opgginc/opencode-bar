@@ -46,6 +46,7 @@ jobs:
       - name: Build (Debug)
         run: |
           cd CopilotMonitor
+          set -o pipefail
           xcodebuild build \
             -project CopilotMonitor.xcodeproj \
             -scheme CopilotMonitor \
@@ -54,11 +55,26 @@ jobs:
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            | xcbeautify --renderer github-actions || true
-      
+            | xcbeautify --renderer github-actions
+
+      - name: Test (Debug)
+        run: |
+          cd CopilotMonitor
+          set -o pipefail
+          xcodebuild test \
+            -project CopilotMonitor.xcodeproj \
+            -scheme CopilotMonitor \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
       - name: Build (Release)
         run: |
           cd CopilotMonitor
+          set -o pipefail
           xcodebuild build \
             -project CopilotMonitor.xcodeproj \
             -scheme CopilotMonitor \
@@ -67,4 +83,4 @@ jobs:
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            | xcbeautify --renderer github-actions || true
+            | xcbeautify --renderer github-actions

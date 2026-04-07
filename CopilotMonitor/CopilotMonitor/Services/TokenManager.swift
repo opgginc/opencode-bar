@@ -1085,7 +1085,8 @@ final class TokenManager: @unchecked Sendable {
         if hasPlugin(named: "oc-chatgpt-multi-auth", in: configDictionary) {
             return CodexEndpointConfiguration(
                 mode: .directChatGPT,
-                source: "oc-chatgpt-multi-auth direct ChatGPT usage endpoint"
+                source: "oc-chatgpt-multi-auth direct ChatGPT usage endpoint",
+                usesOpenAIProviderBaseURL: false
             )
         }
 
@@ -2289,7 +2290,8 @@ final class TokenManager: @unchecked Sendable {
                         email: payload.email,
                         authSource: path.path,
                         sourceLabels: [openAISourceLabel(for: .openCodeMultiAuth)],
-                        source: .openCodeMultiAuth
+                        source: .openCodeMultiAuth,
+                        credentialType: .oauthBearer
                     )
                 )
             }

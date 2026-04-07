@@ -469,6 +469,84 @@ final class CodexProviderTests: XCTestCase {
         XCTAssertEqual(payload.details.sparkSecondaryWindowHours, 672)
     }
 
+    func testDecodeUsagePayloadKeepsThirtyDayWindowAsThirtyDays() throws {
+        let json = """
+        {
+          "plan_type": "plus",
+          "rate_limit": {
+            "secondary_window": {
+              "used_percent": 35,
+              "limit_window_seconds": 2592000,
+              "reset_after_seconds": 86400
+            }
+          }
+        }
+        """
+        let account = OpenAIAuthAccount(
+            accessToken: "oauth-token",
+            accountId: "account-id",
+            externalUsageAccountId: nil,
+            email: "user@example.com",
+            authSource: "auth.json",
+            sourceLabels: ["Codex Auth"],
+            source: .codexAuth,
+            credentialType: .oauthBearer
+        )
+        let configuration = CodexEndpointConfiguration(
+            mode: .directChatGPT,
+            source: "test",
+            usesOpenAIProviderBaseURL: false
+        )
+
+        let payload = try provider.decodeUsagePayload(
+            data: XCTUnwrap(json.data(using: .utf8)),
+            account: account,
+            endpointConfiguration: configuration
+        )
+
+        XCTAssertEqual(payload.details.codexSecondaryWindowLabel, "30d")
+        XCTAssertEqual(payload.details.codexSecondaryWindowHours, 720)
+    }
+
+    func testDecodeUsagePayloadKeepsTwentyNineDayWindowAsTwentyNineDays() throws {
+        let json = """
+        {
+          "plan_type": "plus",
+          "rate_limit": {
+            "secondary_window": {
+              "used_percent": 35,
+              "limit_window_seconds": 2505600,
+              "reset_after_seconds": 86400
+            }
+          }
+        }
+        """
+        let account = OpenAIAuthAccount(
+            accessToken: "oauth-token",
+            accountId: "account-id",
+            externalUsageAccountId: nil,
+            email: "user@example.com",
+            authSource: "auth.json",
+            sourceLabels: ["Codex Auth"],
+            source: .codexAuth,
+            credentialType: .oauthBearer
+        )
+        let configuration = CodexEndpointConfiguration(
+            mode: .directChatGPT,
+            source: "test",
+            usesOpenAIProviderBaseURL: false
+        )
+
+        let payload = try provider.decodeUsagePayload(
+            data: XCTUnwrap(json.data(using: .utf8)),
+            account: account,
+            endpointConfiguration: configuration
+        )
+
+        XCTAssertEqual(payload.details.codexSecondaryWindowLabel, "29d")
+        XCTAssertEqual(payload.details.codexSecondaryWindowHours, 696)
+    }
+
     func testDecodeUsagePayloadHandlesMissingLimitsKeyGracefully() throws {
         let json = """
         {

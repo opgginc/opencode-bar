@@ -43,7 +43,8 @@ final class TokenManagerTests: XCTestCase {
 
         XCTAssertEqual(configuration, CodexEndpointConfiguration(
             mode: .directChatGPT,
-            source: "oc-chatgpt-multi-auth direct ChatGPT usage endpoint"
+            source: "oc-chatgpt-multi-auth direct ChatGPT usage endpoint",
+            usesOpenAIProviderBaseURL: false
         ))
     }
 
