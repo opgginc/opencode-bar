@@ -350,23 +350,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
             .replacingOccurrences(of: ",", with: "")
         let messages = Int(messagesStr) ?? 0
 
-        var modelCosts: [String: Double] = [:]
-        let modelPattern = #"│ (\S+)\s+.*│\s+Cost\s+\$([0-9.]+)"#
-        do {
-            let modelRegex = try NSRegularExpression(pattern: modelPattern)
-            let matches = modelRegex.matches(in: output, range: NSRange(output.startIndex..., in: output))
-
-            for match in matches {
-                if let modelRange = Range(match.range(at: 1), in: output),
-                   let costRange = Range(match.range(at: 2), in: output),
-                   let cost = Double(output[costRange]) {
-                    let modelName = String(output[modelRange])
-                    modelCosts[modelName] = cost
-                }
-            }
-        } catch {
-            logger.warning("Failed to parse model costs: \(error.localizedDescription)")
-        }
+        let modelCosts = Self.parseModelCosts(from: output)
 
         return OpenCodeStats(
             totalCost: totalCost,
@@ -375,5 +359,88 @@ final class OpenCodeZenProvider: ProviderProtocol {
             messages: messages,
             modelCosts: modelCosts
         )
+    }
+
+    static func parseModelCosts(from output: String) -> [String: Double] {
+        var modelCosts: [String: Double] = [:]
+        var currentModel: String?
+
+        for rawLine in output.components(separatedBy: .newlines) {
+            let line = rawLine.replacingOccurrences(
+                of: #"\u{001B}\[[0-9;]*[A-Za-z]"#,
+                with: "",
+                options: .regularExpression
+            ).trimmingCharacters(in: .whitespaces)
+
+            guard line.hasPrefix("│") else {
+                if line.hasPrefix("├") || line.hasPrefix("└") {
+                    currentModel = nil
+                }
+                continue
+            }
+
+            let text = trimmedTableCell(line)
+            guard !text.isEmpty else { continue }
+
+            if text.hasPrefix("Cost") {
+                guard let currentModel,
+                      let cost = dollarValue(in: text) else { continue }
+                modelCosts[currentModel] = cost
+                continue
+            }
+
+            if isStatsMetricLine(text) {
+                continue
+            }
+
+            currentModel = text
+        }
+
+        return modelCosts
+    }
+
+    private static func trimmedTableCell(_ line: String) -> String {
+        var content = line
+        if content.first == "│" {
+            content.removeFirst()
+        }
+        if let trailingBorder = content.lastIndex(of: "│") {
+            content = String(content[..<trailingBorder])
+        }
+        return content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func dollarValue(in text: String) -> Double? {
+        guard let dollarIndex = text.lastIndex(of: "$") else { return nil }
+        let valueStart = text.index(after: dollarIndex)
+        let valueText = text[valueStart...]
+            .split(separator: " ")
+            .first
+            .map(String.init)
+        return valueText.flatMap(Double.init)
+    }
+
+    private static func isStatsMetricLine(_ text: String) -> Bool {
+        let metricPrefixes = [
+            "OVERVIEW",
+            "COST & TOKENS",
+            "MODEL USAGE",
+            "TOOL USAGE",
+            "Sessions",
+            "Messages",
+            "Days",
+            "Total Cost",
+            "Avg Cost/Day",
+            "Avg Tokens/Session",
+            "Median Tokens/Session",
+            "Input",
+            "Output",
+            "Input Tokens",
+            "Output Tokens",
+            "Cache Read",
+            "Cache Write"
+        ]
+
+        return metricPrefixes.contains { text.hasPrefix($0) }
     }
 }

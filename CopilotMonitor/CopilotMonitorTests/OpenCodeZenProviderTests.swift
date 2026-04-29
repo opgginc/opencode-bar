@@ -3,6 +3,54 @@ import XCTest
 
 final class OpenCodeZenProviderTests: XCTestCase {
 
+    func testParseModelCostsReadsCurrentMultilineStatsFormat() {
+        let output = #"""
+        ┌────────────────────────────────────────────────────────┐
+        │                      MODEL USAGE                       │
+        ├────────────────────────────────────────────────────────┤
+        │ openai/gpt-5.5                                         │
+        │  Messages                                        2,871 │
+        │  Input Tokens                                    12.5M │
+        │  Cost                                        $215.2045 │
+        ├────────────────────────────────────────────────────────┤
+        │ nano-gpt/moonshotai/kimi-k2.6:thinking                 │
+        │  Messages                                           18 │
+        │  Input Tokens                                   410.6K │
+        │  Cost                                          $0.2251 │
+        └────────────────────────────────────────────────────────┘
+        """#
+
+        let modelCosts = OpenCodeZenProvider.parseModelCosts(from: output)
+
+        XCTAssertEqual(modelCosts["openai/gpt-5.5"], 215.2045)
+        XCTAssertEqual(modelCosts["nano-gpt/moonshotai/kimi-k2.6:thinking"], 0.2251)
+        XCTAssertEqual(modelCosts.count, 2)
+    }
+
+    func testAdjustStatsForDisplayExcludesParsedOpenAIModelsWhenOpenAIBaseURLRoutesToCodex() {
+        let configuration = CodexEndpointConfiguration(
+            mode: .external(usageURL: URL(string: "https://codex.2631.eu/api/codex/usage")!),
+            source: "/tmp/opencode.json",
+            usesOpenAIProviderBaseURL: true
+        )
+        let modelCosts = [
+            "openai/gpt-5.5": 215.2045,
+            "openai/gpt-5.4": 4.2252,
+            "nano-gpt/moonshotai/kimi-k2.6:thinking": 0.2251
+        ]
+
+        let adjusted = OpenCodeZenProvider.adjustStatsForDisplay(
+            totalCost: 219.6548,
+            avgCostPerDay: 31.3792,
+            modelCosts: modelCosts,
+            codexEndpointConfiguration: configuration
+        )
+
+        XCTAssertEqual(adjusted.excludedCost, 219.4297, accuracy: 0.0001)
+        XCTAssertEqual(adjusted.totalCost, 0.2251, accuracy: 0.0001)
+        XCTAssertEqual(adjusted.modelCosts.keys.sorted(), ["nano-gpt/moonshotai/kimi-k2.6:thinking"])
+    }
+
     func testAdjustStatsForDisplayExcludesOpenAIModelsWhenOpenAIBaseURLRoutesToCodex() {
         let configuration = CodexEndpointConfiguration(
             mode: .external(usageURL: URL(string: "https://codex.2631.eu/api/codex/usage")!),
