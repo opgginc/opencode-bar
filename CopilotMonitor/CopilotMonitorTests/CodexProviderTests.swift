@@ -557,6 +557,50 @@ final class CodexProviderTests: XCTestCase {
         XCTAssertEqual(payload.details.codexSecondaryWindowHours, 696)
     }
 
+    func testDecodeUsagePayloadThrowsWhenRateLimitHasNoBaseWindow() throws {
+        let json = """
+        {
+          "plan_type": "plus",
+          "rate_limit": {
+            "primary_window_spark": {
+              "used_percent": 5,
+              "limit_window_seconds": 18000
+            }
+          }
+        }
+        """
+        let account = OpenAIAuthAccount(
+            accessToken: "oauth-token",
+            accountId: "account-id",
+            externalUsageAccountId: nil,
+            email: "user@example.com",
+            authSource: "auth.json",
+            sourceLabels: ["Codex Auth"],
+            source: .codexAuth,
+            credentialType: .oauthBearer
+        )
+        let configuration = CodexEndpointConfiguration(
+            mode: .directChatGPT,
+            source: "test",
+            usesOpenAIProviderBaseURL: false
+        )
+
+        XCTAssertThrowsError(
+            try provider.decodeUsagePayload(
+                data: XCTUnwrap(json.data(using: .utf8)),
+                account: account,
+                endpointConfiguration: configuration
+            )
+        ) { error in
+            guard case ProviderError.decodingError(let message) = error else {
+                return XCTFail("Expected decodingError, got \(error)")
+            }
+            XCTAssertTrue(message.contains("Missing rate-limit window"))
+            XCTAssertTrue(message.contains("user@example.com"))
+            XCTAssertTrue(message.contains("auth.json"))
+        }
+    }
+
     func testDecodeUsagePayloadHandlesMissingLimitsKeyGracefully() throws {
         let json = """
         {

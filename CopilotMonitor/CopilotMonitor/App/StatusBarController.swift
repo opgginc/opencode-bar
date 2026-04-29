@@ -1861,11 +1861,16 @@ final class StatusBarController: NSObject {
                     let codexServiceDisplayName = identifier == .codex
                         ? TokenManager.shared.getCodexEndpointConfiguration().externalServiceDisplayName
                         : nil
+                    let shouldConsolidateCodexServiceAccounts = identifier == .codex
+                        && codexServiceDisplayName != nil
+                        && accounts.count > 1
                     let displayAccounts: [ProviderAccountResult]
-                    if identifier == .codex,
-                       codexServiceDisplayName != nil,
+                    if shouldConsolidateCodexServiceAccounts,
                        let mostUsedAccount = accounts.max(by: { lhs, rhs in
-                           lhs.usage.usagePercentage < rhs.usage.usagePercentage
+                           if lhs.usage.usagePercentage != rhs.usage.usagePercentage {
+                               return lhs.usage.usagePercentage < rhs.usage.usagePercentage
+                           }
+                           return lhs.accountIndex > rhs.accountIndex
                        }) {
                         displayAccounts = [mostUsedAccount]
                     } else {
@@ -1907,7 +1912,11 @@ final class StatusBarController: NSObject {
                         if identifier == .codex,
                            let codexServiceDisplayName,
                            !codexServiceDisplayName.isEmpty {
-                            accountDisplayLabel = codexServiceDisplayName
+                            if shouldConsolidateCodexServiceAccounts {
+                                accountDisplayLabel = "\(codexServiceDisplayName), \(accounts.count) accounts"
+                            } else {
+                                accountDisplayLabel = codexServiceDisplayName
+                            }
                         } else if identifier == .claude,
                            let detailsEmail,
                            !detailsEmail.isEmpty {

@@ -364,6 +364,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
     static func parseModelCosts(from output: String) -> [String: Double] {
         var modelCosts: [String: Double] = [:]
         var currentModel: String?
+        var isInModelUsageSection = false
 
         for rawLine in output.components(separatedBy: .newlines) {
             let line = rawLine.replacingOccurrences(
@@ -381,6 +382,14 @@ final class OpenCodeZenProvider: ProviderProtocol {
 
             let text = trimmedTableCell(line)
             guard !text.isEmpty else { continue }
+
+            if isStatsSectionHeader(text) {
+                isInModelUsageSection = text == "MODEL USAGE"
+                currentModel = nil
+                continue
+            }
+
+            guard isInModelUsageSection else { continue }
 
             if text.hasPrefix("Cost") {
                 guard let currentModel,
@@ -422,10 +431,6 @@ final class OpenCodeZenProvider: ProviderProtocol {
 
     private static func isStatsMetricLine(_ text: String) -> Bool {
         let metricPrefixes = [
-            "OVERVIEW",
-            "COST & TOKENS",
-            "MODEL USAGE",
-            "TOOL USAGE",
             "Sessions",
             "Messages",
             "Days",
@@ -442,5 +447,16 @@ final class OpenCodeZenProvider: ProviderProtocol {
         ]
 
         return metricPrefixes.contains { text.hasPrefix($0) }
+    }
+
+    private static func isStatsSectionHeader(_ text: String) -> Bool {
+        let sectionHeaders = [
+            "OVERVIEW",
+            "COST & TOKENS",
+            "MODEL USAGE",
+            "TOOL USAGE"
+        ]
+
+        return sectionHeaders.contains(text)
     }
 }

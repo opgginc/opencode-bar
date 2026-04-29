@@ -611,8 +611,10 @@ final class CodexProvider: ProviderProtocol {
 
     private func buildStandardPayload(response codexResponse: CodexResponse, account: OpenAIAuthAccount) throws -> DecodedUsagePayload {
         guard let baseWindows = codexResponse.rate_limit.resolvedWindows(excludingSpark: true) else {
-            logger.error("Codex response missing usable rate-limit window")
-            throw ProviderError.decodingError("Missing rate-limit window")
+            let accountLabel = account.email ?? account.accountId ?? "unknown account"
+            let message = "Missing rate-limit window for \(accountLabel) from \(account.authSource)"
+            logger.error("\(message)")
+            throw ProviderError.decodingError(message)
         }
 
         let primaryWindow = baseWindows.shortWindow

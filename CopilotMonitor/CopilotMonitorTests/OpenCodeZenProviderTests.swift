@@ -27,6 +27,30 @@ final class OpenCodeZenProviderTests: XCTestCase {
         XCTAssertEqual(modelCosts.count, 2)
     }
 
+    func testParseModelCostsIgnoresCostRowsOutsideModelUsageSection() {
+        let output = #"""
+        ┌────────────────────────────────────────────────────────┐
+        │                      MODEL USAGE                       │
+        ├────────────────────────────────────────────────────────┤
+        │ openai/gpt-5.5                                         │
+        │  Messages                                        2,871 │
+        │  Cost                                        $215.2045 │
+        ├────────────────────────────────────────────────────────┤
+        │                       TOOL USAGE                       │
+        ├────────────────────────────────────────────────────────┤
+        │ mcp-server                                             │
+        │  Calls                                                4 │
+        │  Cost                                          $1.2300 │
+        └────────────────────────────────────────────────────────┘
+        """#
+
+        let modelCosts = OpenCodeZenProvider.parseModelCosts(from: output)
+
+        XCTAssertEqual(modelCosts["openai/gpt-5.5"], 215.2045)
+        XCTAssertNil(modelCosts["mcp-server"])
+        XCTAssertEqual(modelCosts.count, 1)
+    }
+
     func testAdjustStatsForDisplayExcludesParsedOpenAIModelsWhenOpenAIBaseURLRoutesToCodex() {
         let configuration = CodexEndpointConfiguration(
             mode: .external(usageURL: URL(string: "https://codex.2631.eu/api/codex/usage")!),

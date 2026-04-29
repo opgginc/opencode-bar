@@ -97,6 +97,25 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertNil(configuration.externalServiceDisplayName)
     }
 
+    func testCodexExternalDisplayNameFormatsOnlyCodexHosts() {
+        XCTAssertEqual(
+            CodexEndpointConfiguration.displayName(forExternalHost: "proxy.example.com"),
+            "proxy.example.com"
+        )
+        XCTAssertEqual(
+            CodexEndpointConfiguration.displayName(forExternalHost: "Codex.example.com"),
+            "Codex.example.com"
+        )
+        XCTAssertEqual(
+            CodexEndpointConfiguration.displayName(forExternalHost: "codex"),
+            "codex"
+        )
+        XCTAssertEqual(
+            CodexEndpointConfiguration.displayName(forExternalHost: "codex.2631.eu"),
+            "Codex.2631.eu"
+        )
+    }
+
     func testCodexEndpointConfigurationIgnoresMalformedUsageOverrideAndFallsBackToBaseURL() {
         let configuration = TokenManager.shared.codexEndpointConfiguration(
             from: [
