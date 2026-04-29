@@ -1,5 +1,5 @@
 import XCTest
-@testable import CopilotMonitor
+@testable import OpenCode_Bar
 
 final class OpenCodeAuthDecodingTests: XCTestCase {
     func testDecodingDoesNotFailWhenSomeEntriesHaveUnexpectedSchema() throws {

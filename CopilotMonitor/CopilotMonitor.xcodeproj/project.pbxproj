@@ -75,6 +75,9 @@
 		SYNTHTEST2222222222222222 /* SyntheticProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNTHTEST1111111111111111 /* SyntheticProviderTests.swift */; };
 		NANOGPTTESTBF1111111111 /* NanoGptProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = NANOGPTTESTFR1111111111 /* NanoGptProviderTests.swift */; };
 		TOKENTESTBF1111111111111 /* TokenManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TOKENTESTFR1111111111111 /* TokenManagerTests.swift */; };
+		CODEXTESTBF111111111111 /* CodexProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CODEXTESTFR111111111111 /* CodexProviderTests.swift */; };
+		OCAUTHTESTBF11111111111 /* OpenCodeAuthDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = OCAUTHTESTFR11111111111 /* OpenCodeAuthDecodingTests.swift */; };
+		OCZENTESTBF111111111111 /* OpenCodeZenProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = OCZENTESTFR111111111111 /* OpenCodeZenProviderTests.swift */; };
 		ME1111111111111111111111 /* MenuEnums.swift in Sources */ = {isa = PBXBuildFile; fileRef = ME2222222222222222222222 /* MenuEnums.swift */; };
 		OC1111111111111111111111 /* OpenCodeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OC2222222222222222222222 /* OpenCodeProvider.swift */; };
 		OR1111111111111111111111 /* OpenRouterProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OR2222222222222222222222 /* OpenRouterProvider.swift */; };
@@ -203,6 +206,9 @@
 		SYNTHTEST1111111111111111 /* SyntheticProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntheticProviderTests.swift; sourceTree = "<group>"; };
 		NANOGPTTESTFR1111111111 /* NanoGptProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoGptProviderTests.swift; sourceTree = "<group>"; };
 		TOKENTESTFR1111111111111 /* TokenManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenManagerTests.swift; sourceTree = "<group>"; };
+		CODEXTESTFR111111111111 /* CodexProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProviderTests.swift; sourceTree = "<group>"; };
+		OCAUTHTESTFR11111111111 /* OpenCodeAuthDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAuthDecodingTests.swift; sourceTree = "<group>"; };
+		OCZENTESTFR111111111111 /* OpenCodeZenProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeZenProviderTests.swift; sourceTree = "<group>"; };
 		TDDDDDDDDDDDDDDDDDDDDDD /* CopilotMonitorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CopilotMonitorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -416,6 +422,9 @@
 				NANOGPTTESTFR1111111111 /* NanoGptProviderTests.swift */,
 				MINIMAXTESTFR11111111111 /* MiniMaxProviderTests.swift */,
 				TOKENTESTFR1111111111111 /* TokenManagerTests.swift */,
+				CODEXTESTFR111111111111 /* CodexProviderTests.swift */,
+				OCAUTHTESTFR11111111111 /* OpenCodeAuthDecodingTests.swift */,
+				OCZENTESTFR111111111111 /* OpenCodeZenProviderTests.swift */,
 			);
 			path = CopilotMonitorTests;
 			sourceTree = "<group>";
@@ -656,6 +665,9 @@
 			NANOGPTTESTBF1111111111 /* NanoGptProviderTests.swift in Sources */,
 			MINIMAXTESTBF11111111111 /* MiniMaxProviderTests.swift in Sources */,
 			TOKENTESTBF1111111111111 /* TokenManagerTests.swift in Sources */,
+			CODEXTESTBF111111111111 /* CodexProviderTests.swift in Sources */,
+			OCAUTHTESTBF11111111111 /* OpenCodeAuthDecodingTests.swift in Sources */,
+			OCZENTESTBF111111111111 /* OpenCodeZenProviderTests.swift in Sources */,
 		);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

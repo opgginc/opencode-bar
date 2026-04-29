@@ -35,6 +35,9 @@ jobs:
       
       - name: Show Xcode Version
         run: xcodebuild -version
+
+      - name: Install xcbeautify
+        run: brew install xcbeautify
       
       - name: Resolve Swift Packages
         run: |

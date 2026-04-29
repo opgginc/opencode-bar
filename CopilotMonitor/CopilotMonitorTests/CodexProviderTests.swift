@@ -395,18 +395,18 @@ final class CodexProviderTests: XCTestCase {
         )
 
         XCTAssertEqual(payload.usage.usagePercentage, 25.0, accuracy: 0.001)
-        XCTAssertEqual(payload.details.dailyUsage, 25.0, accuracy: 0.001)
-        XCTAssertEqual(payload.details.secondaryUsage, 30.0, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(payload.details.dailyUsage), 25.0, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(payload.details.secondaryUsage), 30.0, accuracy: 0.001)
         XCTAssertEqual(payload.details.codexPrimaryWindowLabel, "5h")
         XCTAssertEqual(payload.details.codexSecondaryWindowLabel, "Weekly")
         XCTAssertEqual(payload.details.codexPrimaryWindowHours, 5)
         XCTAssertEqual(payload.details.codexSecondaryWindowHours, 168)
-        XCTAssertEqual(payload.details.sparkUsage, 10.0, accuracy: 0.001)
-        XCTAssertEqual(payload.details.sparkSecondaryUsage, 10.0, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(payload.details.sparkUsage), 10.0, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(payload.details.sparkSecondaryUsage), 10.0, accuracy: 0.001)
         XCTAssertEqual(payload.details.sparkWindowLabel, "Gpt 5.3 Codex Spark")
         XCTAssertEqual(payload.details.sparkPrimaryWindowLabel, "5h")
         XCTAssertEqual(payload.details.sparkSecondaryWindowLabel, "Weekly")
-        XCTAssertEqual(payload.details.monthlyCost, 11.75, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(payload.details.monthlyCost), 11.75, accuracy: 0.001)
     }
 
     func testDecodeUsagePayloadDerivesStandardWindowLabelsFromLimitSeconds() throws {
@@ -474,6 +474,11 @@ final class CodexProviderTests: XCTestCase {
         {
           "plan_type": "plus",
           "rate_limit": {
+            "primary_window": {
+              "used_percent": 12,
+              "limit_window_seconds": 18000,
+              "reset_after_seconds": 3600
+            },
             "secondary_window": {
               "used_percent": 35,
               "limit_window_seconds": 2592000,
@@ -513,6 +518,11 @@ final class CodexProviderTests: XCTestCase {
         {
           "plan_type": "plus",
           "rate_limit": {
+            "primary_window": {
+              "used_percent": 12,
+              "limit_window_seconds": 18000,
+              "reset_after_seconds": 3600
+            },
             "secondary_window": {
               "used_percent": 35,
               "limit_window_seconds": 2505600,
@@ -578,7 +588,7 @@ final class CodexProviderTests: XCTestCase {
 
         // No limits → no used percentage; provider shows 0% used (100 remaining)
         XCTAssertEqual(payload.usage.remainingQuota, 100)
-        XCTAssertEqual(payload.details.monthlyCost, 5.0, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(payload.details.monthlyCost), 5.0, accuracy: 0.001)
     }
 
     private func loadFixture(named: String) throws -> Any {
