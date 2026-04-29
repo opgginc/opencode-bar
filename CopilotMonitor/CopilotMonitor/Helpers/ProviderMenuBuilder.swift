@@ -375,6 +375,53 @@ extension StatusBarController {
             // === Subscription ===
             addSubscriptionItems(to: submenu, provider: .codex, accountId: accountId)
 
+        case .cursor:
+            var hasUsageWindow = false
+            if let planUsage = details.cursorPlanUsage {
+                let rows = createUsageWindowRow(
+                    label: "Plan",
+                    usagePercent: planUsage,
+                    resetDate: details.cursorPlanReset,
+                    isMonthly: true
+                )
+                rows.forEach { submenu.addItem($0) }
+                hasUsageWindow = true
+            }
+            if let autoUsage = details.cursorAutoUsage {
+                if hasUsageWindow { submenu.addItem(NSMenuItem.separator()) }
+                let rows = createUsageWindowRow(
+                    label: "Auto",
+                    usagePercent: autoUsage,
+                    resetDate: details.cursorAutoReset,
+                    isMonthly: true
+                )
+                rows.forEach { submenu.addItem($0) }
+                hasUsageWindow = true
+            }
+            if let apiUsage = details.cursorApiUsage {
+                if hasUsageWindow { submenu.addItem(NSMenuItem.separator()) }
+                let rows = createUsageWindowRow(
+                    label: "API",
+                    usagePercent: apiUsage,
+                    resetDate: details.cursorApiReset,
+                    isMonthly: true
+                )
+                rows.forEach { submenu.addItem($0) }
+                hasUsageWindow = true
+            }
+
+            if let plan = details.planType {
+                if hasUsageWindow { submenu.addItem(NSMenuItem.separator()) }
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(
+                    text: "Plan: \(plan.replacingOccurrences(of: "_", with: " ").capitalized)",
+                    icon: NSImage(systemSymbolName: "crown", accessibilityDescription: "Plan")
+                )
+                submenu.addItem(item)
+            }
+
+            addSubscriptionItems(to: submenu, provider: .cursor, accountId: accountId)
+
         case .geminiCLI:
             // modelBreakdown stores remaining% — convert to used% at display layer
             if let models = details.modelBreakdown, !models.isEmpty {

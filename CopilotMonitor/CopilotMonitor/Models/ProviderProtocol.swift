@@ -13,6 +13,7 @@ enum ProviderIdentifier: String, CaseIterable {
     case copilot
     case claude
     case codex
+    case cursor
     case geminiCLI = "gemini_cli"
     case openRouter = "openrouter"
     case openCode = "open_code"
@@ -35,6 +36,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Claude"
         case .codex:
             return "ChatGPT"
+        case .cursor:
+            return "Cursor"
         case .geminiCLI:
             return "Gemini CLI"
         case .openRouter:
@@ -72,6 +75,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Claude"
         case .codex:
             return "Codex"
+        case .cursor:
+            return "Cursor"
         case .geminiCLI:
             return "Gemini"
         case .openRouter:
@@ -109,6 +114,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "brain.head.profile"
         case .codex:
             return "sparkles"
+        case .cursor:
+            return "CursorIcon"
         case .geminiCLI:
             return "g.circle"
         case .openRouter:

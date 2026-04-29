@@ -106,6 +106,13 @@ struct SwiftUIProviderAlertView: View {
                 .scaledToFit()
                 .frame(width: 12, height: 12)
                 .foregroundColor(.red)
+        } else if identifier == .cursor {
+            Image("CursorIcon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 12, height: 12)
+                .foregroundColor(.red)
         } else {
             Image(systemName: iconName(for: identifier))
                 .font(.system(size: 12))
@@ -117,6 +124,7 @@ struct SwiftUIProviderAlertView: View {
         switch identifier {
         case .claude: return "brain"
         case .codex: return "terminal"
+        case .cursor: return "cursorarrow"
         case .geminiCLI: return "sparkles"
         case .copilot: return "airplane"
         case .openRouter: return "dollarsign.circle"

@@ -13,7 +13,7 @@ actor CLIProviderManager {
     private let fetchTimeout: TimeInterval = 10.0
     
     static let registeredProviders: [ProviderIdentifier] = [
-        .claude, .codex, .geminiCLI, .openRouter,
+        .claude, .codex, .cursor, .geminiCLI, .openRouter,
         .antigravity, .openCodeZen, .kimi, .minimaxCodingPlan, .zaiCodingPlan,
         .nanoGpt,
         .chutes, .copilot,
@@ -27,6 +27,7 @@ actor CLIProviderManager {
         // Shared providers (no UI dependencies)
         let claudeProvider = ClaudeProvider()
         let codexProvider = CodexProvider()
+        let cursorProvider = CursorProvider()
         let geminiCLIProvider = GeminiCLIProvider()
         let openRouterProvider = OpenRouterProvider()
         let antigravityProvider = AntigravityProvider()
@@ -44,6 +45,7 @@ actor CLIProviderManager {
         self.providers = [
             claudeProvider,
             codexProvider,
+            cursorProvider,
             geminiCLIProvider,
             openRouterProvider,
             antigravityProvider,

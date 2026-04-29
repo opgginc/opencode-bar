@@ -191,6 +191,14 @@ struct DetailedUsage {
     let toolWebReadCount: Int?
     let toolZreadCount: Int?
 
+    // Cursor quota windows
+    let cursorPlanUsage: Double?
+    let cursorPlanReset: Date?
+    let cursorAutoUsage: Double?
+    let cursorAutoReset: Date?
+    let cursorApiUsage: Double?
+    let cursorApiReset: Date?
+
     // Copilot-specific fields (overage tracking)
     let copilotOverageCost: Double?
     let copilotOverageRequests: Double?
@@ -267,6 +275,12 @@ struct DetailedUsage {
         toolNetworkSearchCount: Int? = nil,
         toolWebReadCount: Int? = nil,
         toolZreadCount: Int? = nil,
+        cursorPlanUsage: Double? = nil,
+        cursorPlanReset: Date? = nil,
+        cursorAutoUsage: Double? = nil,
+        cursorAutoReset: Date? = nil,
+        cursorApiUsage: Double? = nil,
+        cursorApiReset: Date? = nil,
         copilotOverageCost: Double? = nil,
         copilotOverageRequests: Double? = nil,
         copilotUsedRequests: Int? = nil,
@@ -341,6 +355,12 @@ struct DetailedUsage {
         self.toolNetworkSearchCount = toolNetworkSearchCount
         self.toolWebReadCount = toolWebReadCount
         self.toolZreadCount = toolZreadCount
+        self.cursorPlanUsage = cursorPlanUsage
+        self.cursorPlanReset = cursorPlanReset
+        self.cursorAutoUsage = cursorAutoUsage
+        self.cursorAutoReset = cursorAutoReset
+        self.cursorApiUsage = cursorApiUsage
+        self.cursorApiReset = cursorApiReset
         self.copilotOverageCost = copilotOverageCost
         self.copilotOverageRequests = copilotOverageRequests
         self.copilotUsedRequests = copilotUsedRequests
@@ -370,6 +390,7 @@ extension DetailedUsage: Codable {
         case mcpUsagePercent, mcpUsageReset, mcpUsageUsed, mcpUsageTotal
         case modelUsageTokens, modelUsageCalls
         case toolNetworkSearchCount, toolWebReadCount, toolZreadCount
+        case cursorPlanUsage, cursorPlanReset, cursorAutoUsage, cursorAutoReset, cursorApiUsage, cursorApiReset
         case copilotOverageCost, copilotOverageRequests, copilotUsedRequests, copilotLimitRequests, copilotQuotaResetDateUTC
     }
 
@@ -443,6 +464,12 @@ extension DetailedUsage: Codable {
         toolNetworkSearchCount = try container.decodeIfPresent(Int.self, forKey: .toolNetworkSearchCount)
         toolWebReadCount = try container.decodeIfPresent(Int.self, forKey: .toolWebReadCount)
         toolZreadCount = try container.decodeIfPresent(Int.self, forKey: .toolZreadCount)
+        cursorPlanUsage = try container.decodeIfPresent(Double.self, forKey: .cursorPlanUsage)
+        cursorPlanReset = try container.decodeIfPresent(Date.self, forKey: .cursorPlanReset)
+        cursorAutoUsage = try container.decodeIfPresent(Double.self, forKey: .cursorAutoUsage)
+        cursorAutoReset = try container.decodeIfPresent(Date.self, forKey: .cursorAutoReset)
+        cursorApiUsage = try container.decodeIfPresent(Double.self, forKey: .cursorApiUsage)
+        cursorApiReset = try container.decodeIfPresent(Date.self, forKey: .cursorApiReset)
         copilotOverageCost = try container.decodeIfPresent(Double.self, forKey: .copilotOverageCost)
         copilotOverageRequests = try container.decodeIfPresent(Double.self, forKey: .copilotOverageRequests)
         copilotUsedRequests = try container.decodeIfPresent(Int.self, forKey: .copilotUsedRequests)
@@ -520,6 +547,12 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(toolNetworkSearchCount, forKey: .toolNetworkSearchCount)
         try container.encodeIfPresent(toolWebReadCount, forKey: .toolWebReadCount)
         try container.encodeIfPresent(toolZreadCount, forKey: .toolZreadCount)
+        try container.encodeIfPresent(cursorPlanUsage, forKey: .cursorPlanUsage)
+        try container.encodeIfPresent(cursorPlanReset, forKey: .cursorPlanReset)
+        try container.encodeIfPresent(cursorAutoUsage, forKey: .cursorAutoUsage)
+        try container.encodeIfPresent(cursorAutoReset, forKey: .cursorAutoReset)
+        try container.encodeIfPresent(cursorApiUsage, forKey: .cursorApiUsage)
+        try container.encodeIfPresent(cursorApiReset, forKey: .cursorApiReset)
         try container.encodeIfPresent(copilotOverageCost, forKey: .copilotOverageCost)
         try container.encodeIfPresent(copilotOverageRequests, forKey: .copilotOverageRequests)
         try container.encodeIfPresent(copilotUsedRequests, forKey: .copilotUsedRequests)
@@ -1118,6 +1151,9 @@ extension DetailedUsage {
             || mcpUsageUsed != nil || mcpUsageTotal != nil
             || modelUsageTokens != nil || modelUsageCalls != nil
             || toolNetworkSearchCount != nil || toolWebReadCount != nil || toolZreadCount != nil
+            || cursorPlanUsage != nil || cursorPlanReset != nil
+            || cursorAutoUsage != nil || cursorAutoReset != nil
+            || cursorApiUsage != nil || cursorApiReset != nil
             || copilotOverageCost != nil || copilotOverageRequests != nil
             || copilotUsedRequests != nil || copilotLimitRequests != nil
             || copilotQuotaResetDateUTC != nil
