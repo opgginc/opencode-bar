@@ -1865,6 +1865,9 @@ final class StatusBarController: NSObject {
                     )
                     let showAuthLabel = authLabels.count > 1
                     let baseName = multiAccountBaseName(for: identifier)
+                    let codexServiceDisplayName = identifier == .codex
+                        ? TokenManager.shared.getCodexEndpointConfiguration().externalServiceDisplayName
+                        : nil
                     let codexEmailByAccountId: [String: String]
                     if identifier == .codex {
                         codexEmailByAccountId = Dictionary(
@@ -1889,36 +1892,40 @@ final class StatusBarController: NSObject {
 
                         let detailsEmail = account.details?.email?
                             .trimmingCharacters(in: .whitespacesAndNewlines)
-                        let accountEmail: String?
-                        if identifier == .claude,
+                        let accountDisplayLabel: String?
+                        if identifier == .codex,
+                           let codexServiceDisplayName,
+                           !codexServiceDisplayName.isEmpty {
+                            accountDisplayLabel = codexServiceDisplayName
+                        } else if identifier == .claude,
                            let detailsEmail,
                            !detailsEmail.isEmpty {
-                            accountEmail = detailsEmail
+                            accountDisplayLabel = detailsEmail
                         } else if identifier == .codex,
                                   let detailsEmail,
                                   !detailsEmail.isEmpty {
-                            accountEmail = detailsEmail
+                            accountDisplayLabel = detailsEmail
                         } else if identifier == .codex,
                                   let accountId = account.accountId?
                             .trimmingCharacters(in: .whitespacesAndNewlines),
                                   !accountId.isEmpty,
                                   let mappedEmail = codexEmailByAccountId[accountId],
                                   !mappedEmail.isEmpty {
-                            accountEmail = mappedEmail
+                            accountDisplayLabel = mappedEmail
                         } else if identifier == .codex,
                                   let fallbackEmail = codexEmailByAccountId.values.first,
                                   accounts.count == 1 {
                             // Single-account fallback for legacy cached results that may miss accountId.
-                            accountEmail = fallbackEmail
+                            accountDisplayLabel = fallbackEmail
                         } else {
-                            accountEmail = nil
+                            accountDisplayLabel = nil
                         }
 
-                        if let accountEmail {
+                        if let accountDisplayLabel {
                             if accounts.count > 1 {
-                                displayName += " (\(accountEmail))"
+                                displayName += " (\(accountDisplayLabel))"
                             } else {
-                                displayName = "\(baseName) (\(accountEmail))"
+                                displayName = "\(baseName) (\(accountDisplayLabel))"
                             }
                         } else if accounts.count > 1, showAuthLabel {
                             let sourceLabel = authSourceLabel(for: account.details?.authSource, provider: identifier) ?? "Unknown"

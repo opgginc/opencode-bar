@@ -67,6 +67,7 @@ final class TokenManagerTests: XCTestCase {
             source: "/tmp/opencode.json",
             usesOpenAIProviderBaseURL: true
         ))
+        XCTAssertEqual(configuration.externalServiceDisplayName, "Codex.2631.eu")
     }
 
     func testCodexEndpointConfigurationPrefersExplicitUsageOverride() {
@@ -93,6 +94,7 @@ final class TokenManagerTests: XCTestCase {
             source: "/tmp/opencode.json",
             usesOpenAIProviderBaseURL: false
         ))
+        XCTAssertNil(configuration.externalServiceDisplayName)
     }
 
     func testCodexEndpointConfigurationIgnoresMalformedUsageOverrideAndFallsBackToBaseURL() {

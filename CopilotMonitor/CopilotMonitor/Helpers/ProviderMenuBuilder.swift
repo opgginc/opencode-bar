@@ -362,8 +362,14 @@ extension StatusBarController {
                 item.view = createDisabledLabelView(text: String(format: "Credits: $%.2f", credits))
                 submenu.addItem(item)
             }
-            let codexEmail = details.email ?? codexEmail(for: accountId)
-            if let email = codexEmail {
+            if let serviceDisplayName = codexServiceDisplayName() {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(
+                    text: "Service: \(serviceDisplayName)",
+                    icon: NSImage(systemSymbolName: "server.rack", accessibilityDescription: "Codex Service")
+                )
+                submenu.addItem(item)
+            } else if let email = details.email ?? codexEmail(for: accountId) {
                 let item = NSMenuItem()
                 item.view = createDisabledLabelView(
                     text: "Email: \(email)",
@@ -768,6 +774,10 @@ extension StatusBarController {
         return TokenManager.shared.getOpenAIAccounts().first { account in
             account.accountId == accountId
         }?.email
+    }
+
+    private func codexServiceDisplayName() -> String? {
+        TokenManager.shared.getCodexEndpointConfiguration().externalServiceDisplayName
     }
 
     private func resolvedChutesMonthlyValuePresentation(details: DetailedUsage) -> (usedUSD: Double?, capUSD: Double?, usedPercent: Double?) {

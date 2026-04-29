@@ -406,6 +406,27 @@ struct CodexEndpointConfiguration: Equatable {
     let mode: CodexEndpointMode
     let source: String
     let usesOpenAIProviderBaseURL: Bool
+
+    var externalServiceDisplayName: String? {
+        guard usesOpenAIProviderBaseURL,
+              case .external(let usageURL) = mode,
+              let host = usageURL.host?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !host.isEmpty else {
+            return nil
+        }
+
+        return Self.displayName(forExternalHost: host)
+    }
+
+    static func displayName(forExternalHost host: String) -> String {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercasedHost = trimmedHost.lowercased()
+        if lowercasedHost.hasPrefix("codex.") {
+            return "Codex" + String(trimmedHost.dropFirst("codex".count))
+        }
+
+        return trimmedHost
+    }
 }
 
 /// Auth source types for Claude account discovery
