@@ -211,6 +211,26 @@ final class ProviderUsageTests: XCTestCase {
         XCTAssertTrue(output.contains("1%,1%"))
     }
 
+    func testCodexSubscriptionPresetsUseBusinessMonthlyPrice() {
+        let presets = ProviderSubscriptionPresets.presets(for: .codex)
+
+        XCTAssertTrue(presets.contains { $0.name == "Business" && $0.cost == 25 })
+        XCTAssertFalse(presets.contains { $0.name == "Team" })
+    }
+
+    func testSubscriptionSettingsMigratesLegacyCodexTeamPreset() {
+        let manager = SubscriptionSettingsManager.shared
+        let key = "codex.subscription-settings-migration-test"
+        defer { manager.removePlan(forKey: key) }
+
+        manager.setPlan(.preset("Team", 30), forKey: key)
+
+        let migratedPlan = manager.getPlan(forKey: key)
+
+        XCTAssertEqual(migratedPlan, .preset("Business", 25))
+        XCTAssertEqual(manager.getPlan(forKey: key), .preset("Business", 25))
+    }
+
     func testTableFormatterShowsGeminiPercentOnlyForGeminiAccounts() {
         let geminiAccounts = [
             GeminiAccountQuota(

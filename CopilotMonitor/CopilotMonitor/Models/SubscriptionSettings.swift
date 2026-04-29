@@ -105,7 +105,7 @@ struct ProviderSubscriptionPresets {
     static let codex: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Go", cost: 8),
         SubscriptionPreset(name: "Plus", cost: 20),
-        SubscriptionPreset(name: "Team", cost: 30),
+        SubscriptionPreset(name: "Business", cost: 25),
         SubscriptionPreset(name: "Pro", cost: 200)
     ]
 
@@ -228,7 +228,12 @@ final class SubscriptionSettingsManager {
               let plan = try? JSONDecoder().decode(SubscriptionPlan.self, from: data) else {
             return .none
         }
-        return plan
+        let normalizedPlan = normalizeLegacyPlan(plan, forKey: key)
+        if normalizedPlan != plan {
+            NSLog("Migrated legacy ChatGPT Team subscription preset to Business for key '%@'", fullKey)
+            setPlan(normalizedPlan, forKey: key)
+        }
+        return normalizedPlan
     }
 
     func getPlan(for provider: ProviderIdentifier, accountId: String? = nil) -> SubscriptionPlan {
@@ -283,5 +288,20 @@ final class SubscriptionSettingsManager {
             }
         }
         return false
+    }
+
+    private func normalizeLegacyPlan(_ plan: SubscriptionPlan, forKey key: String) -> SubscriptionPlan {
+        let isCodexSubscription = key == ProviderIdentifier.codex.rawValue
+            || key.hasPrefix("\(ProviderIdentifier.codex.rawValue).")
+        guard isCodexSubscription else {
+            return plan
+        }
+
+        guard case .preset(let name, _) = plan,
+              name.caseInsensitiveCompare("Team") == .orderedSame else {
+            return plan
+        }
+
+        return .preset("Business", 25)
     }
 }
