@@ -1,5 +1,4 @@
 import Foundation
-import Foundation
 import os.log
 
 private let cursorLogger = Logger(subsystem: "com.opencodeproviders", category: "CursorProvider")
@@ -197,6 +196,8 @@ final class CursorProvider: ProviderProtocol {
             teamOnDemandPercent: teamOnDemandPercent
         )
 
+        // Cursor can report a real 0% plan headline while on-demand has active usage;
+        // use on-demand as the headline in that case so the status bar shows the active bucket.
         if (percent ?? 0) == 0, let individualOnDemandPercent, individualOnDemandPercent > 0 {
             percent = individualOnDemandPercent
         }
@@ -323,7 +324,11 @@ final class CursorProvider: ProviderProtocol {
     }
 
     private func fetchUsageSummary(cookie: String) async throws -> CursorUsageSummaryResponse {
-        var request = URLRequest(url: URL(string: "https://cursor.com/api/usage-summary")!)
+        guard let usageSummaryURL = URL(string: "https://cursor.com/api/usage-summary") else {
+            throw ProviderError.providerError("Invalid Cursor usage summary URL")
+        }
+
+        var request = URLRequest(url: usageSummaryURL)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(cookie, forHTTPHeaderField: "Cookie")
