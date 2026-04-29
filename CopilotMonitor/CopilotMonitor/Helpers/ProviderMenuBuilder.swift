@@ -377,38 +377,20 @@ extension StatusBarController {
 
         case .cursor:
             var hasUsageWindow = false
-            if let planUsage = details.cursorPlanUsage {
-                let rows = createUsageWindowRow(
-                    label: "Plan",
-                    usagePercent: planUsage,
-                    resetDate: details.cursorPlanReset,
-                    isMonthly: true
-                )
-                rows.forEach { submenu.addItem($0) }
-                hasUsageWindow = true
-            }
-            if let autoUsage = details.cursorAutoUsage {
+            func addCursorUsageWindow(label: String, usagePercent: Double?, resetDate: Date?) {
+                guard let usagePercent else { return }
                 if hasUsageWindow { submenu.addItem(NSMenuItem.separator()) }
-                let rows = createUsageWindowRow(
-                    label: "Auto",
-                    usagePercent: autoUsage,
-                    resetDate: details.cursorAutoReset,
+                createUsageWindowRow(
+                    label: label,
+                    usagePercent: usagePercent,
+                    resetDate: resetDate,
                     isMonthly: true
-                )
-                rows.forEach { submenu.addItem($0) }
+                ).forEach { submenu.addItem($0) }
                 hasUsageWindow = true
             }
-            if let apiUsage = details.cursorApiUsage {
-                if hasUsageWindow { submenu.addItem(NSMenuItem.separator()) }
-                let rows = createUsageWindowRow(
-                    label: "API",
-                    usagePercent: apiUsage,
-                    resetDate: details.cursorApiReset,
-                    isMonthly: true
-                )
-                rows.forEach { submenu.addItem($0) }
-                hasUsageWindow = true
-            }
+
+            addCursorUsageWindow(label: "Auto", usagePercent: details.cursorAutoUsage, resetDate: details.cursorAutoReset)
+            addCursorUsageWindow(label: "API", usagePercent: details.cursorApiUsage, resetDate: details.cursorApiReset)
 
             if let plan = details.planType {
                 if hasUsageWindow { submenu.addItem(NSMenuItem.separator()) }

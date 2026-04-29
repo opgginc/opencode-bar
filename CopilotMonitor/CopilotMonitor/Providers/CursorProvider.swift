@@ -128,21 +128,21 @@ final class CursorProvider: ProviderProtocol {
 
         let response = try await fetchUsageSummary(cookie: token.cookie)
         let normalized = try Self.normalizeUsageSummary(response)
-        debugLog("🟢 Cursor usage normalized: plan=\(normalized.primaryUsagePercent), auto=\(normalized.autoUsagePercent ?? -1), api=\(normalized.apiUsagePercent ?? -1)")
+        debugLog("🟢 Cursor usage normalized: headline=\(normalized.primaryUsagePercent), auto=\(normalized.autoUsagePercent ?? -1), api=\(normalized.apiUsagePercent ?? -1)")
 
-        let usedPercent = UsagePercentDisplayFormatter.wholePercent(from: normalized.primaryUsagePercent)
+        let visibleUsagePercent = Self.visibleUsagePercent(from: normalized)
+        let usedPercent = UsagePercentDisplayFormatter.wholePercent(from: visibleUsagePercent)
         let remaining = max(0, 100 - usedPercent)
         let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: 100, overagePermitted: false)
+        let billingCycleReset = normalized.resetDate
         let details = DetailedUsage(
             planType: normalized.membershipType,
             authSource: paths.stateDatabase.path,
             authUsageSummary: "Cursor",
-            cursorPlanUsage: normalized.primaryUsagePercent,
-            cursorPlanReset: normalized.resetDate,
             cursorAutoUsage: normalized.autoUsagePercent,
-            cursorAutoReset: normalized.resetDate,
+            cursorAutoReset: billingCycleReset,
             cursorApiUsage: normalized.apiUsagePercent,
-            cursorApiReset: normalized.resetDate
+            cursorApiReset: billingCycleReset
         )
 
         debugLog("🟢 fetch completed")
@@ -152,48 +152,15 @@ final class CursorProvider: ProviderProtocol {
 
     static func normalizeUsageSummary(_ response: CursorUsageSummaryResponse) throws -> CursorNormalizedUsage {
         let plan = response.individualUsage?.plan
-        let individualOnDemand = response.individualUsage?.onDemand
-        let teamOnDemand = response.teamUsage?.onDemand
         let autoPercent = clampPercent(plan?.autoPercentUsed)
         let apiPercent = clampPercent(plan?.apiPercentUsed)
+        let primaryUsagePercent = primaryUsagePercent(
+            response: response,
+            autoPercent: autoPercent,
+            apiPercent: apiPercent
+        )
 
-        var planPercent = clampPercent(plan?.totalPercentUsed)
-        if planPercent == nil, let autoPercent, let apiPercent {
-            planPercent = (autoPercent + apiPercent) / 2.0
-        }
-        if planPercent == nil {
-            planPercent = apiPercent ?? autoPercent
-        }
-        if planPercent == nil {
-            planPercent = percentFromUsedLimit(used: plan?.used, limit: plan?.limit)
-        }
-        if planPercent == nil {
-            planPercent = percentFromUsedLimit(used: individualOnDemand?.used, limit: individualOnDemand?.limit)
-        }
-        if planPercent == nil {
-            planPercent = percentFromUsedLimit(used: teamOnDemand?.used, limit: teamOnDemand?.limit)
-        }
-
-        let individualOnDemandPercent = percentFromUsedLimit(used: individualOnDemand?.used, limit: individualOnDemand?.limit)
-        let teamOnDemandPercent = percentFromUsedLimit(used: teamOnDemand?.used, limit: teamOnDemand?.limit)
-        if (planPercent ?? 0) == 0, let individualOnDemandPercent, individualOnDemandPercent > 0 {
-            planPercent = individualOnDemandPercent
-        }
-        if (planPercent ?? 0) == 0, let teamOnDemandPercent, teamOnDemandPercent > 0 {
-            planPercent = teamOnDemandPercent
-        }
-
-        let membershipType = response.membershipType?.lowercased()
-        let limitType = response.limitType?.lowercased()
-        let shouldPreferTeamPool = limitType == "team" || membershipType == "enterprise" || membershipType == "team"
-        if shouldPreferTeamPool,
-           let teamOnDemandPercent,
-           teamOnDemandPercent > 0,
-           planPercent == nil || planPercent == 0 {
-            planPercent = teamOnDemandPercent
-        }
-
-        guard let primaryUsagePercent = planPercent else {
+        guard let primaryUsagePercent else {
             throw ProviderError.decodingError("Cursor usage summary did not contain quota windows")
         }
 
@@ -204,6 +171,74 @@ final class CursorProvider: ProviderProtocol {
             apiUsagePercent: apiPercent,
             resetDate: parseResetDate(response.billingCycleEnd)
         )
+    }
+
+    static func visibleUsagePercent(from normalized: CursorNormalizedUsage) -> Double {
+        let visiblePercents = [normalized.autoUsagePercent, normalized.apiUsagePercent].compactMap { $0 }
+        return visiblePercents.max() ?? normalized.primaryUsagePercent
+    }
+
+    private static func primaryUsagePercent(
+        response: CursorUsageSummaryResponse,
+        autoPercent: Double?,
+        apiPercent: Double?
+    ) -> Double? {
+        let plan = response.individualUsage?.plan
+        let individualOnDemand = response.individualUsage?.onDemand
+        let teamOnDemand = response.teamUsage?.onDemand
+        let individualOnDemandPercent = percentFromUsedLimit(used: individualOnDemand?.used, limit: individualOnDemand?.limit)
+        let teamOnDemandPercent = percentFromUsedLimit(used: teamOnDemand?.used, limit: teamOnDemand?.limit)
+
+        var percent = headlinePlanPercent(
+            plan: plan,
+            autoPercent: autoPercent,
+            apiPercent: apiPercent,
+            individualOnDemandPercent: individualOnDemandPercent,
+            teamOnDemandPercent: teamOnDemandPercent
+        )
+
+        if (percent ?? 0) == 0, let individualOnDemandPercent, individualOnDemandPercent > 0 {
+            percent = individualOnDemandPercent
+        }
+        if shouldPreferTeamPool(response),
+           let teamOnDemandPercent,
+           teamOnDemandPercent > 0,
+           percent == nil || percent == 0 {
+            percent = teamOnDemandPercent
+        }
+
+        return percent
+    }
+
+    private static func headlinePlanPercent(
+        plan: CursorUsageSummaryResponse.UsagePlan?,
+        autoPercent: Double?,
+        apiPercent: Double?,
+        individualOnDemandPercent: Double?,
+        teamOnDemandPercent: Double?
+    ) -> Double? {
+        if let totalPercent = clampPercent(plan?.totalPercentUsed) {
+            return totalPercent
+        }
+        if let autoPercent, let apiPercent {
+            return (autoPercent + apiPercent) / 2.0
+        }
+        if let apiPercent {
+            return apiPercent
+        }
+        if let autoPercent {
+            return autoPercent
+        }
+        if let planPercent = percentFromUsedLimit(used: plan?.used, limit: plan?.limit) {
+            return planPercent
+        }
+        return individualOnDemandPercent ?? teamOnDemandPercent
+    }
+
+    private static func shouldPreferTeamPool(_ response: CursorUsageSummaryResponse) -> Bool {
+        let membershipType = response.membershipType?.lowercased()
+        let limitType = response.limitType?.lowercased()
+        return limitType == "team" || membershipType == "enterprise" || membershipType == "team"
     }
 
     static func cursorPercentFromUsedLimit(used: Double?, limit: Double?) -> Double? {

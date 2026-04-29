@@ -963,7 +963,6 @@ final class StatusBarController: NSObject {
             add(dailyPercentFromDetails(details), priority: .daily)
             add(details?.sparkUsage, priority: .hourly)
         case .cursor:
-            add(details?.cursorPlanUsage, priority: .monthly)
             add(details?.cursorAutoUsage, priority: .monthly)
             add(details?.cursorApiUsage, priority: .monthly)
         case .copilot:
@@ -1073,7 +1072,6 @@ final class StatusBarController: NSObject {
                     details.secondaryUsage,
                     details.sparkUsage,
                     details.sparkSecondaryUsage,
-                    details.cursorPlanUsage,
                     details.cursorAutoUsage,
                     details.cursorApiUsage,
                     details.tokenUsagePercent,
@@ -1971,7 +1969,6 @@ final class StatusBarController: NSObject {
                             usedPercents = percents
                         } else if identifier == .cursor {
                             let percents = [
-                                account.details?.cursorPlanUsage,
                                 account.details?.cursorAutoUsage,
                                 account.details?.cursorApiUsage
                             ].compactMap { $0 }
@@ -2045,7 +2042,6 @@ final class StatusBarController: NSObject {
                         usedPercents = percents
                     } else if identifier == .cursor {
                         let percents = [
-                            result.details?.cursorPlanUsage,
                             result.details?.cursorAutoUsage,
                             result.details?.cursorApiUsage
                         ].compactMap { $0 }
