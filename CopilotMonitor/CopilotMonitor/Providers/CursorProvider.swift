@@ -107,23 +107,8 @@ final class CursorProvider: ProviderProtocol {
         cursorLogger.info("Cursor fetch started")
 
         let paths = resolvePaths()
-        guard fileManager.fileExists(atPath: paths.appDirectory.path) else {
-            debugLog("🔴 Cursor application support directory not found")
-            throw ProviderError.authenticationFailed("Cursor is not installed or has not created its support directory")
-        }
-
-        guard fileManager.fileExists(atPath: paths.stateDatabase.path) else {
-            debugLog("🔴 Cursor state database not found at \(paths.stateDatabase.path)")
-            throw ProviderError.authenticationFailed("Cursor session database not found. Log in to Cursor first.")
-        }
-
-        guard fileManager.isReadableFile(atPath: paths.stateDatabase.path) else {
-            debugLog("🔴 Cursor state database is not readable at \(paths.stateDatabase.path)")
-            throw ProviderError.authenticationFailed("Cursor session database is not readable")
-        }
-
         let token = try await extractSessionToken(paths: paths)
-        debugLog("🟢 Cursor session token extracted for userId=\(token.userId)")
+        debugLog("🟢 Cursor session token extracted from source=\(token.authSource)")
 
         let response = try await fetchUsageSummary(cookie: token.cookie)
         let normalized = try Self.normalizeUsageSummary(response)
@@ -136,7 +121,7 @@ final class CursorProvider: ProviderProtocol {
         let billingCycleReset = normalized.resetDate
         let details = DetailedUsage(
             planType: normalized.membershipType,
-            authSource: paths.stateDatabase.path,
+            authSource: token.authSource,
             authUsageSummary: "Cursor",
             cursorAutoUsage: normalized.autoUsagePercent,
             cursorAutoReset: billingCycleReset,
@@ -247,12 +232,46 @@ final class CursorProvider: ProviderProtocol {
     }
 
     static func extractUserId(fromCLIConfigData data: Data) -> String? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let authInfo = object["authInfo"] as? [String: Any],
-              let authId = authInfo["authId"] as? String else {
+        extractUserId(fromAuthData: data)
+    }
+
+    static func extractUserId(fromAuthData data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
-        return extractUserId(from: authId)
+
+        let containers = nestedAuthContainers(in: object)
+        for container in containers {
+            if let authId = firstString(in: container, keys: ["authId", "auth_id"]),
+               let userId = extractUserId(from: authId) {
+                return userId
+            }
+        }
+
+        for container in containers {
+            if let userId = firstString(in: container, keys: ["userId", "user_id"]), !userId.isEmpty {
+                return userId
+            }
+        }
+
+        return nil
+    }
+
+    static func extractAccessToken(fromAuthData data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        for container in nestedAuthContainers(in: object) {
+            if let token = firstString(
+                in: container,
+                keys: ["accessToken", "access_token", "access", "sessionToken", "session_token"]
+            ), !token.isEmpty {
+                return token
+            }
+        }
+
+        return nil
     }
 
     static func extractUserId(fromJWT jwt: String) -> String? {
@@ -266,14 +285,14 @@ final class CursorProvider: ProviderProtocol {
     }
 
     private struct CursorPaths {
-        let appDirectory: URL
         let stateDatabase: URL
-        let cliConfig: URL
+        let authFiles: [URL]
     }
 
     private struct CursorSessionToken {
         let cookie: String
         let userId: String
+        let authSource: String
     }
 
     private func resolvePaths() -> CursorPaths {
@@ -281,46 +300,145 @@ final class CursorProvider: ProviderProtocol {
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("Application Support", isDirectory: true)
             .appendingPathComponent("Cursor", isDirectory: true)
+        var authFiles = [
+            homeDirectory
+                .appendingPathComponent(".cursor", isDirectory: true)
+                .appendingPathComponent("cli-config.json"),
+            homeDirectory
+                .appendingPathComponent(".cursor", isDirectory: true)
+                .appendingPathComponent("auth.json"),
+            homeDirectory
+                .appendingPathComponent(".config", isDirectory: true)
+                .appendingPathComponent("cursor", isDirectory: true)
+                .appendingPathComponent("cli-config.json"),
+            homeDirectory
+                .appendingPathComponent(".config", isDirectory: true)
+                .appendingPathComponent("cursor", isDirectory: true)
+                .appendingPathComponent("auth.json")
+        ]
+        if let xdgConfigHome = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"], !xdgConfigHome.isEmpty {
+            let xdgCursorDirectory = URL(fileURLWithPath: xdgConfigHome, isDirectory: true)
+                .appendingPathComponent("cursor", isDirectory: true)
+            authFiles.insert(xdgCursorDirectory.appendingPathComponent("cli-config.json"), at: 0)
+            authFiles.insert(xdgCursorDirectory.appendingPathComponent("auth.json"), at: 1)
+        }
         return CursorPaths(
-            appDirectory: appDirectory,
             stateDatabase: appDirectory
                 .appendingPathComponent("User", isDirectory: true)
                 .appendingPathComponent("globalStorage", isDirectory: true)
                 .appendingPathComponent("state.vscdb"),
-            cliConfig: homeDirectory
-                .appendingPathComponent(".cursor", isDirectory: true)
-                .appendingPathComponent("cli-config.json")
+            authFiles: Self.uniqueURLs(authFiles)
         )
     }
 
     private func extractSessionToken(paths: CursorPaths) async throws -> CursorSessionToken {
-        let jwt = try await runSQLiteQuery(
-            databasePath: paths.stateDatabase.path,
-            query: "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';"
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !jwt.isEmpty else {
-            debugLog("🔴 Cursor access token missing from state database")
-            throw ProviderError.authenticationFailed("Cursor session token not found. Log in to Cursor to refresh it.")
-        }
-
-        let userId = userIdFromCLIConfig(paths.cliConfig) ?? Self.extractUserId(fromJWT: jwt)
+        let token = try await extractAccessToken(paths: paths)
+        let userId = userIdFromAuthFiles(paths.authFiles) ?? Self.extractUserId(fromJWT: token.value)
         guard let userId, !userId.isEmpty else {
             debugLog("🔴 Cursor user ID could not be extracted")
             throw ProviderError.authenticationFailed("Cursor user ID not found. Log in to Cursor to refresh it.")
         }
 
-        return CursorSessionToken(cookie: "WorkosCursorSessionToken=\(userId)%3A%3A\(jwt)", userId: userId)
+        return CursorSessionToken(
+            cookie: "WorkosCursorSessionToken=\(userId)%3A%3A\(token.value)",
+            userId: userId,
+            authSource: token.source
+        )
     }
 
-    private func userIdFromCLIConfig(_ configURL: URL) -> String? {
-        guard fileManager.fileExists(atPath: configURL.path), fileManager.isReadableFile(atPath: configURL.path) else {
+    private struct CursorAccessToken {
+        let value: String
+        let source: String
+    }
+
+    private func extractAccessToken(paths: CursorPaths) async throws -> CursorAccessToken {
+        if let databaseToken = try await accessTokenFromStateDatabase(paths.stateDatabase) {
+            return databaseToken
+        }
+        if let authFileToken = accessTokenFromAuthFiles(paths.authFiles) {
+            return authFileToken
+        }
+        if let keychainToken = try await accessTokenFromKeychain() {
+            return keychainToken
+        }
+
+        debugLog("🔴 Cursor access token was not found in state database, auth files, or keychain")
+        throw ProviderError.authenticationFailed("Cursor session token not found. Log in with Cursor or cursor-agent first.")
+    }
+
+    private func accessTokenFromStateDatabase(_ databaseURL: URL) async throws -> CursorAccessToken? {
+        guard fileManager.fileExists(atPath: databaseURL.path) else {
+            debugLog("🟡 Cursor state database not found at \(databaseURL.path); trying Cursor Agent auth")
             return nil
         }
-        guard let data = try? Data(contentsOf: configURL) else {
+        guard fileManager.isReadableFile(atPath: databaseURL.path) else {
+            debugLog("🟡 Cursor state database is not readable at \(databaseURL.path); trying Cursor Agent auth")
             return nil
         }
-        return Self.extractUserId(fromCLIConfigData: data)
+
+        do {
+            let jwt = try await runSQLiteQuery(
+                databasePath: databaseURL.path,
+                query: "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';"
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !jwt.isEmpty else {
+                debugLog("🟡 Cursor access token missing from state database; trying Cursor Agent auth")
+                return nil
+            }
+
+            debugLog("🟢 Cursor access token found in state database")
+            return CursorAccessToken(value: jwt, source: databaseURL.path)
+        } catch {
+            debugLog("🟡 Cursor state database read failed: \(error.localizedDescription); trying Cursor Agent auth")
+            return nil
+        }
+    }
+
+    private func accessTokenFromAuthFiles(_ authFiles: [URL]) -> CursorAccessToken? {
+        for url in authFiles {
+            guard fileManager.fileExists(atPath: url.path) else { continue }
+            guard fileManager.isReadableFile(atPath: url.path) else {
+                debugLog("🟡 Cursor auth file is not readable at \(url.path)")
+                continue
+            }
+            guard let data = try? Data(contentsOf: url), let token = Self.extractAccessToken(fromAuthData: data) else {
+                continue
+            }
+            debugLog("🟢 Cursor access token found in auth file at \(url.path)")
+            return CursorAccessToken(value: token, source: url.path)
+        }
+        return nil
+    }
+
+    private func accessTokenFromKeychain() async throws -> CursorAccessToken? {
+        do {
+            let token = try await runSecurityGenericPassword(service: "cursor-access-token", account: "cursor-user")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !token.isEmpty else {
+                debugLog("🟡 Cursor keychain access token is empty")
+                return nil
+            }
+            debugLog("🟢 Cursor access token found in keychain service cursor-access-token")
+            return CursorAccessToken(value: token, source: "macOS Keychain: cursor-access-token")
+        } catch {
+            debugLog("🟡 Cursor keychain access token not available: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func userIdFromAuthFiles(_ authFiles: [URL]) -> String? {
+        for url in authFiles {
+            guard fileManager.fileExists(atPath: url.path), fileManager.isReadableFile(atPath: url.path) else {
+                continue
+            }
+            guard let data = try? Data(contentsOf: url), let userId = Self.extractUserId(fromAuthData: data) else {
+                continue
+            }
+            debugLog("🟢 Cursor user ID found in auth file at \(url.path)")
+            return userId
+        }
+        return nil
     }
 
     private func fetchUsageSummary(cookie: String) async throws -> CursorUsageSummaryResponse {
@@ -365,9 +483,36 @@ final class CursorProvider: ProviderProtocol {
             throw ProviderError.providerError("sqlite3 is not available at /usr/bin/sqlite3")
         }
 
+        return try await runProcess(
+            executablePath: "/usr/bin/sqlite3",
+            arguments: [databasePath, query],
+            failureMessage: "Failed to read Cursor session database",
+            startFailureMessage: "Failed to start sqlite3"
+        )
+    }
+
+    private func runSecurityGenericPassword(service: String, account: String) async throws -> String {
+        guard fileManager.fileExists(atPath: "/usr/bin/security") else {
+            throw ProviderError.providerError("security is not available at /usr/bin/security")
+        }
+
+        return try await runProcess(
+            executablePath: "/usr/bin/security",
+            arguments: ["find-generic-password", "-s", service, "-a", account, "-w"],
+            failureMessage: "Failed to read Cursor keychain token",
+            startFailureMessage: "Failed to start security"
+        )
+    }
+
+    private func runProcess(
+        executablePath: String,
+        arguments: [String],
+        failureMessage: String,
+        startFailureMessage: String
+    ) async throws -> String {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
-        process.arguments = [databasePath, query]
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -393,8 +538,8 @@ final class CursorProvider: ProviderProtocol {
                     let output = String(data: outputData, encoding: .utf8) ?? ""
                     continuation.resume(returning: output)
                 } else {
-                    let errorOutput = String(data: errorData, encoding: .utf8) ?? "Unknown sqlite3 error"
-                    continuation.resume(throwing: ProviderError.providerError("Failed to read Cursor session database: \(errorOutput)"))
+                    let errorOutput = String(data: errorData, encoding: .utf8) ?? "Unknown process error"
+                    continuation.resume(throwing: ProviderError.providerError("\(failureMessage): \(errorOutput)"))
                 }
             }
 
@@ -403,7 +548,7 @@ final class CursorProvider: ProviderProtocol {
             } catch {
                 outputPipe.fileHandleForReading.readabilityHandler = nil
                 errorPipe.fileHandleForReading.readabilityHandler = nil
-                continuation.resume(throwing: ProviderError.providerError("Failed to start sqlite3: \(error.localizedDescription)"))
+                continuation.resume(throwing: ProviderError.providerError("\(startFailureMessage): \(error.localizedDescription)"))
             }
         }
     }
@@ -437,6 +582,43 @@ final class CursorProvider: ProviderProtocol {
             return nil
         }
         return String(value[range])
+    }
+
+    private static func nestedAuthContainers(in object: [String: Any]) -> [[String: Any]] {
+        var containers = [object]
+        for key in ["authInfo", "auth_info", "userInfo", "user_info", "credentials", "oauth"] {
+            if let nested = object[key] as? [String: Any] {
+                containers.append(nested)
+            }
+        }
+        return containers
+    }
+
+    private static func firstString(in object: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = stringValue(object[key]), !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        switch value {
+        case let string as String:
+            return string.trimmingCharacters(in: .whitespacesAndNewlines)
+        case let number as NSNumber:
+            return number.stringValue
+        default:
+            return nil
+        }
+    }
+
+    private static func uniqueURLs(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        return urls.filter { url in
+            seen.insert(url.standardizedFileURL.path).inserted
+        }
     }
 
     private static func decodeBase64URL(_ value: String) -> Data? {

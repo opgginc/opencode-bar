@@ -103,6 +103,30 @@ final class CursorProviderTests: XCTestCase {
         XCTAssertEqual(CursorProvider.extractUserId(fromCLIConfigData: data), "user_cursor123")
     }
 
+    func testExtractUserIdFromCursorAgentAuthInfoUserId() throws {
+        let data = Data(#"{"authInfo":{"userId":123456789}}"#.utf8)
+
+        XCTAssertEqual(CursorProvider.extractUserId(fromCLIConfigData: data), "123456789")
+    }
+
+    func testExtractUserIdPrefersAuthIdOverNumericCursorAgentUserId() throws {
+        let data = Data(#"{"authInfo":{"authId":"auth0|user_cursoragent","userId":123456789}}"#.utf8)
+
+        XCTAssertEqual(CursorProvider.extractUserId(fromAuthData: data), "user_cursoragent")
+    }
+
+    func testExtractAccessTokenFromCursorAgentAuthFile() throws {
+        let data = Data(#"{"accessToken":"cursor_access_token"}"#.utf8)
+
+        XCTAssertEqual(CursorProvider.extractAccessToken(fromAuthData: data), "cursor_access_token")
+    }
+
+    func testExtractAccessTokenFromNestedCursorAgentAuthInfo() throws {
+        let data = Data(#"{"authInfo":{"access_token":"nested_cursor_access_token"}}"#.utf8)
+
+        XCTAssertEqual(CursorProvider.extractAccessToken(fromAuthData: data), "nested_cursor_access_token")
+    }
+
     func testExtractUserIdFromJWT() throws {
         let jwt = makeJWT(payload: #"{"sub":"auth0|user_fromjwt"}"#)
 
