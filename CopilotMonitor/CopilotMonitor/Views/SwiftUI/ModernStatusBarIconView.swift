@@ -106,30 +106,36 @@ struct SwiftUIProviderAlertView: View {
                 .scaledToFit()
                 .frame(width: 12, height: 12)
                 .foregroundColor(.red)
-        } else {
-            Image(systemName: iconName(for: identifier))
+        } else if identifier == .cursor {
+            Image("CursorIcon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 12, height: 12)
+                .foregroundColor(.red)
+        } else if let systemIconName = systemIconName(for: identifier) {
+            Image(systemName: systemIconName)
                 .font(.system(size: 12))
                 .foregroundColor(.red)
         }
     }
     
-    private func iconName(for identifier: ProviderIdentifier) -> String {
+    private func systemIconName(for identifier: ProviderIdentifier) -> String? {
         switch identifier {
         case .claude: return "brain"
         case .codex: return "terminal"
+        case .cursor: return nil
         case .geminiCLI: return "sparkles"
         case .copilot: return "airplane"
         case .openRouter: return "dollarsign.circle"
         case .openCode, .openCodeZen: return "chevron.left.forwardslash.chevron.right"
         case .antigravity: return "arrow.up.circle"
         case .kimi: return "k.circle"
-        case .minimaxCodingPlan: return "m.circle"
         case .zaiCodingPlan: return "globe"
         case .nanoGpt: return "n.circle"
         case .synthetic: return "diamond"
         case .chutes: return "c.circle"
-        case .tavilySearch: return "magnifyingglass"
-        case .braveSearch: return "b.circle"
+        case .tavilySearch, .braveSearch, .minimaxCodingPlan: return nil
         }
     }
 }

@@ -962,6 +962,9 @@ final class StatusBarController: NSObject {
             add(details?.sparkSecondaryUsage, priority: .weekly)
             add(dailyPercentFromDetails(details), priority: .daily)
             add(details?.sparkUsage, priority: .hourly)
+        case .cursor:
+            add(details?.cursorAutoUsage, priority: .monthly)
+            add(details?.cursorApiUsage, priority: .monthly)
         case .copilot:
             if let used = details?.copilotUsedRequests,
                let limit = details?.copilotLimitRequests,
@@ -1069,6 +1072,8 @@ final class StatusBarController: NSObject {
                     details.secondaryUsage,
                     details.sparkUsage,
                     details.sparkSecondaryUsage,
+                    details.cursorAutoUsage,
+                    details.cursorApiUsage,
                     details.tokenUsagePercent,
                     details.mcpUsagePercent
                 ]
@@ -1835,6 +1840,7 @@ final class StatusBarController: NSObject {
             .kimi,
             .minimaxCodingPlan,
             .codex,
+            .cursor,
             .zaiCodingPlan,
             .nanoGpt,
             .antigravity,
@@ -1988,6 +1994,12 @@ final class StatusBarController: NSObject {
                                 percents.append(sparkSecondary)
                             }
                             usedPercents = percents
+                        } else if identifier == .cursor {
+                            let percents = [
+                                account.details?.cursorAutoUsage,
+                                account.details?.cursorApiUsage
+                            ].compactMap { $0 }
+                            usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else if identifier == .zaiCodingPlan {
                             let percents = [account.details?.tokenUsagePercent, account.details?.mcpUsagePercent].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
@@ -2055,6 +2067,12 @@ final class StatusBarController: NSObject {
                             percents.append(sparkSecondary)
                         }
                         usedPercents = percents
+                    } else if identifier == .cursor {
+                        let percents = [
+                            result.details?.cursorAutoUsage,
+                            result.details?.cursorApiUsage
+                        ].compactMap { $0 }
+                        usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else if identifier == .zaiCodingPlan {
                         let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
@@ -2311,6 +2329,8 @@ final class StatusBarController: NSObject {
         switch identifier {
         case .codex:
             return "ChatGPT"
+        case .cursor:
+            return "Cursor"
         default:
             return identifier.displayName
         }
@@ -2333,6 +2353,10 @@ final class StatusBarController: NSObject {
                 }
                 if lowercased.contains(".codex") || lowercased.contains("/codex/") || lowercased == "codex" {
                     return "Codex"
+                }
+            case .cursor:
+                if lowercased.contains("cursor") {
+                    return "Cursor"
                 }
             case .claude:
                 if lowercased.contains("claude code (keychain)") || lowercased.contains("keychain") {
@@ -2869,6 +2893,8 @@ final class StatusBarController: NSObject {
             image = NSImage(named: "ClaudeIcon")
         case .codex:
             image = NSImage(named: "CodexIcon")
+        case .cursor:
+            image = NSImage(named: "CursorIcon")
         case .geminiCLI:
             image = NSImage(named: "GeminiIcon")
         case .openCode:

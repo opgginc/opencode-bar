@@ -381,6 +381,35 @@ extension StatusBarController {
             // === Subscription ===
             addSubscriptionItems(to: submenu, provider: .codex, accountId: accountId)
 
+        case .cursor:
+            var hasUsageWindow = false
+            func addCursorUsageWindow(label: String, usagePercent: Double?, resetDate: Date?) {
+                guard let usagePercent else { return }
+                if hasUsageWindow { submenu.addItem(NSMenuItem.separator()) }
+                createUsageWindowRow(
+                    label: label,
+                    usagePercent: usagePercent,
+                    resetDate: resetDate,
+                    isMonthly: true
+                ).forEach { submenu.addItem($0) }
+                hasUsageWindow = true
+            }
+
+            addCursorUsageWindow(label: "Auto", usagePercent: details.cursorAutoUsage, resetDate: details.cursorAutoReset)
+            addCursorUsageWindow(label: "API", usagePercent: details.cursorApiUsage, resetDate: details.cursorApiReset)
+
+            if let plan = details.planType {
+                if hasUsageWindow { submenu.addItem(NSMenuItem.separator()) }
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(
+                    text: "Plan: \(plan.replacingOccurrences(of: "_", with: " ").capitalized)",
+                    icon: NSImage(systemSymbolName: "crown", accessibilityDescription: "Plan")
+                )
+                submenu.addItem(item)
+            }
+
+            addSubscriptionItems(to: submenu, provider: .cursor, accountId: accountId)
+
         case .geminiCLI:
             // modelBreakdown stores remaining% — convert to used% at display layer
             if let models = details.modelBreakdown, !models.isEmpty {
