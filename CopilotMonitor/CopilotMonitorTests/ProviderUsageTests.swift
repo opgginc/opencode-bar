@@ -218,17 +218,37 @@ final class ProviderUsageTests: XCTestCase {
         XCTAssertFalse(presets.contains { $0.name == "Team" })
     }
 
-    func testSubscriptionSettingsMigratesLegacyCodexTeamPreset() {
+    func testSubscriptionSettingsUsesAccountScopedKeys() {
         let manager = SubscriptionSettingsManager.shared
-        let key = "codex.subscription-settings-migration-test"
-        defer { manager.removePlan(forKey: key) }
 
-        manager.setPlan(.preset("Team", 30), forKey: key)
+        XCTAssertEqual(manager.subscriptionKey(for: .claude), "claude._default_")
+        XCTAssertEqual(
+            manager.subscriptionKey(for: .claude, accountId: " User@Example.COM "),
+            "claude.user@example.com"
+        )
+    }
 
-        let migratedPlan = manager.getPlan(forKey: key)
+    func testSubscriptionSettingsIgnoresLegacyProviderLevelKeys() {
+        let manager = SubscriptionSettingsManager.shared
+        let validKey = manager.subscriptionKey(for: .codex, accountId: "subscription-settings-test@example.com")
+        let providerLevelKey = "codex"
+        let invalidProviderKey = "chatgpt.subscription-settings-test@example.com"
+        defer {
+            manager.removePlan(forKey: validKey)
+            manager.removePlan(forKey: providerLevelKey)
+            manager.removePlan(forKey: invalidProviderKey)
+        }
 
-        XCTAssertEqual(migratedPlan, .preset("Business", 25))
-        XCTAssertEqual(manager.getPlan(forKey: key), .preset("Business", 25))
+        manager.setPlan(.custom(11), forKey: validKey)
+        manager.setPlan(.custom(22), forKey: providerLevelKey)
+        manager.setPlan(.custom(33), forKey: invalidProviderKey)
+
+        XCTAssertEqual(manager.getPlan(forKey: validKey), .custom(11))
+        XCTAssertEqual(manager.getPlan(forKey: providerLevelKey), .none)
+        XCTAssertEqual(manager.getPlan(forKey: invalidProviderKey), .none)
+        XCTAssertTrue(manager.getAllSubscriptionKeys().contains(validKey))
+        XCTAssertFalse(manager.getAllSubscriptionKeys().contains(providerLevelKey))
+        XCTAssertFalse(manager.getAllSubscriptionKeys().contains(invalidProviderKey))
     }
 
     func testTableFormatterShowsGeminiPercentOnlyForGeminiAccounts() {

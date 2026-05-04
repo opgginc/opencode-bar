@@ -217,30 +217,27 @@ struct ProviderSubscriptionPresets {
 
 final class SubscriptionSettingsManager {
     static let shared = SubscriptionSettingsManager()
+    static let defaultAccountId = "_default_"
 
     private let userDefaultsKeyPrefix = "subscription_v2."
 
     private init() {}
 
     func subscriptionKey(for provider: ProviderIdentifier, accountId: String? = nil) -> String {
-        if let accountId = accountId {
-            return "\(provider.rawValue).\(accountId)"
-        }
-        return provider.rawValue
+        "\(provider.rawValue).\(normalizedAccountId(accountId))"
     }
 
     func getPlan(forKey key: String) -> SubscriptionPlan {
+        guard isCurrentSubscriptionKey(key) else {
+            return .none
+        }
+
         let fullKey = "\(userDefaultsKeyPrefix)\(key)"
         guard let data = UserDefaults.standard.data(forKey: fullKey),
               let plan = try? JSONDecoder().decode(SubscriptionPlan.self, from: data) else {
             return .none
         }
-        let normalizedPlan = normalizeLegacyPlan(plan, forKey: key)
-        if normalizedPlan != plan {
-            NSLog("Migrated legacy ChatGPT Team subscription preset to Business for key '%@'", fullKey)
-            setPlan(normalizedPlan, forKey: key)
-        }
-        return normalizedPlan
+        return plan
     }
 
     func getPlan(for provider: ProviderIdentifier, accountId: String? = nil) -> SubscriptionPlan {
@@ -249,10 +246,16 @@ final class SubscriptionSettingsManager {
     }
 
     func setPlan(_ plan: SubscriptionPlan, forKey key: String) {
+        guard isCurrentSubscriptionKey(key) else {
+            NSLog("Skipped saving subscription plan for legacy key")
+            return
+        }
+
         let fullKey = "\(userDefaultsKeyPrefix)\(key)"
         do {
             let data = try JSONEncoder().encode(plan)
             UserDefaults.standard.set(data, forKey: fullKey)
+            NSLog("Saved subscription plan for account-scoped key")
         } catch {
             NSLog("Failed to encode SubscriptionPlan for key '%@': %@", fullKey, String(describing: error))
         }
@@ -278,6 +281,8 @@ final class SubscriptionSettingsManager {
         let allKeys = UserDefaults.standard.dictionaryRepresentation().keys
         return allKeys.filter { $0.hasPrefix(userDefaultsKeyPrefix) }
             .map { String($0.dropFirst(userDefaultsKeyPrefix.count)) }
+            .filter { isCurrentSubscriptionKey($0) }
+            .sorted()
     }
 
     func getTotalMonthlySubscriptionCost() -> Double {
@@ -297,18 +302,22 @@ final class SubscriptionSettingsManager {
         return false
     }
 
-    private func normalizeLegacyPlan(_ plan: SubscriptionPlan, forKey key: String) -> SubscriptionPlan {
-        let isCodexSubscription = key == ProviderIdentifier.codex.rawValue
-            || key.hasPrefix("\(ProviderIdentifier.codex.rawValue).")
-        guard isCodexSubscription else {
-            return plan
+    private func normalizedAccountId(_ accountId: String?) -> String {
+        guard let accountId = accountId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !accountId.isEmpty else {
+            return Self.defaultAccountId
+        }
+        return accountId.lowercased()
+    }
+
+    private func isCurrentSubscriptionKey(_ key: String) -> Bool {
+        let parts = key.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              ProviderIdentifier(rawValue: String(parts[0])) != nil else {
+            return false
         }
 
-        guard case .preset(let name, _) = plan,
-              name.caseInsensitiveCompare("Team") == .orderedSame else {
-            return plan
-        }
-
-        return .preset("Business", 25)
+        let accountId = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return !accountId.isEmpty
     }
 }

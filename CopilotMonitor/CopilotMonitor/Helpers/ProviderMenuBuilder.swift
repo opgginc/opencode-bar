@@ -64,6 +64,7 @@ extension StatusBarController {
 
     func createDetailSubmenu(_ details: DetailedUsage, identifier: ProviderIdentifier, accountId: String? = nil) -> NSMenu {
         let submenu = NSMenu()
+        let subscriptionAccountId = resolvedSubscriptionAccountId(details: details, fallback: accountId)
 
         switch identifier {
         case .openRouter:
@@ -181,7 +182,7 @@ extension StatusBarController {
             submenu.addItem(authItem)
 
             // === Subscription ===
-            addSubscriptionItems(to: submenu, provider: .copilot, accountId: accountId)
+            addSubscriptionItems(to: submenu, provider: .copilot, accountId: subscriptionAccountId)
 
         case .claude:
             // === Usage Windows ===
@@ -287,7 +288,7 @@ extension StatusBarController {
             }
 
             // === Subscription (includes separator internally) ===
-            addSubscriptionItems(to: submenu, provider: .claude, accountId: accountId)
+            addSubscriptionItems(to: submenu, provider: .claude, accountId: subscriptionAccountId)
 
         case .codex:
             // === Usage Windows ===
@@ -379,7 +380,7 @@ extension StatusBarController {
             }
 
             // === Subscription ===
-            addSubscriptionItems(to: submenu, provider: .codex, accountId: accountId)
+            addSubscriptionItems(to: submenu, provider: .codex, accountId: subscriptionAccountId)
 
         case .cursor:
             var hasUsageWindow = false
@@ -408,7 +409,7 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
-            addSubscriptionItems(to: submenu, provider: .cursor, accountId: accountId)
+            addSubscriptionItems(to: submenu, provider: .cursor, accountId: subscriptionAccountId)
 
         case .geminiCLI:
             // modelBreakdown stores remaining% — convert to used% at display layer
@@ -431,7 +432,7 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
-            addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: details.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? accountId)
+            addSubscriptionItems(to: submenu, provider: .geminiCLI, accountId: subscriptionAccountId)
 
         case .antigravity:
             // modelBreakdown stores remaining% — convert to used% at display layer
@@ -456,7 +457,7 @@ extension StatusBarController {
                 createAccountInfoSection(items: accountItems).forEach { submenu.addItem($0) }
             }
 
-            addSubscriptionItems(to: submenu, provider: .antigravity, accountId: accountId)
+            addSubscriptionItems(to: submenu, provider: .antigravity, accountId: subscriptionAccountId)
 
         case .kimi:
             // === Usage Windows ===
@@ -491,7 +492,7 @@ extension StatusBarController {
             }
 
             // === Subscription ===
-            addSubscriptionItems(to: submenu, provider: .kimi, accountId: accountId)
+            addSubscriptionItems(to: submenu, provider: .kimi, accountId: subscriptionAccountId)
 
         case .minimaxCodingPlan:
             if let fiveHour = details.fiveHourUsage {
@@ -516,7 +517,7 @@ extension StatusBarController {
                 items.forEach { submenu.addItem($0) }
             }
 
-            addSubscriptionItems(to: submenu, provider: .minimaxCodingPlan, accountId: accountId)
+            addSubscriptionItems(to: submenu, provider: .minimaxCodingPlan, accountId: subscriptionAccountId)
 
         case .zaiCodingPlan:
             // === Token Usage ===
@@ -604,7 +605,7 @@ extension StatusBarController {
             }
 
             // === Subscription ===
-            addSubscriptionItems(to: submenu, provider: .zaiCodingPlan, accountId: accountId)
+            addSubscriptionItems(to: submenu, provider: .zaiCodingPlan, accountId: subscriptionAccountId)
 
         case .nanoGpt:
             if let weeklyUsage = details.sevenDayUsage {
@@ -633,7 +634,7 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
-            addSubscriptionItems(to: submenu, provider: .nanoGpt, accountId: accountId)
+            addSubscriptionItems(to: submenu, provider: .nanoGpt, accountId: subscriptionAccountId)
 
         case .chutes:
             if let plan = details.planType {
@@ -681,7 +682,7 @@ extension StatusBarController {
             overageItem.view = createDisabledLabelView(text: "Overage: PAYGO after cap")
             submenu.addItem(overageItem)
 
-            addSubscriptionItems(to: submenu, provider: .chutes)
+            addSubscriptionItems(to: submenu, provider: .chutes, accountId: subscriptionAccountId)
 
         case .synthetic:
             if let fiveHour = details.fiveHourUsage {
@@ -702,7 +703,7 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
             submenu.addItem(NSMenuItem.separator())
-            addSubscriptionItems(to: submenu, provider: .synthetic)
+            addSubscriptionItems(to: submenu, provider: .synthetic, accountId: subscriptionAccountId)
             debugLog("createDetailSubmenu: added subscription items for Synthetic")
 
         default:
@@ -788,6 +789,20 @@ extension StatusBarController {
         }
 
         return submenu
+    }
+
+    private func resolvedSubscriptionAccountId(details: DetailedUsage, fallback accountId: String?) -> String? {
+        if let email = details.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           !email.isEmpty {
+            return email
+        }
+
+        if let accountId = accountId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !accountId.isEmpty {
+            return accountId
+        }
+
+        return nil
     }
 
     private func addHorizontalDivider(to submenu: NSMenu) {
@@ -930,6 +945,8 @@ extension StatusBarController {
         let subscriptionKey = SubscriptionSettingsManager.shared.subscriptionKey(for: provider, accountId: accountId)
         let currentPlan = SubscriptionSettingsManager.shared.getPlan(forKey: subscriptionKey)
         let presets = ProviderSubscriptionPresets.presets(for: provider)
+        let subscriptionScope = subscriptionKey.hasSuffix(".\(SubscriptionSettingsManager.defaultAccountId)") ? "default" : "account"
+        debugLog("addSubscriptionItems: provider=\(provider.rawValue), subscriptionScope=\(subscriptionScope)")
 
         submenu.addItem(NSMenuItem.separator())
 

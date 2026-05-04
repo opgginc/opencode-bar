@@ -1377,6 +1377,20 @@ final class StatusBarController: NSObject {
         return ProviderIdentifier(rawValue: String(prefix))
     }
 
+    private func subscriptionAccountId(details: DetailedUsage?, fallback accountId: String? = nil) -> String? {
+        if let email = details?.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           !email.isEmpty {
+            return email
+        }
+
+        if let accountId = accountId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !accountId.isEmpty {
+            return accountId
+        }
+
+        return nil
+    }
+
     private func collectVisibleSubscriptionKeys(providerResults: [ProviderIdentifier: ProviderResult]) -> Set<String> {
         var keys = Set<String>()
 
@@ -1408,14 +1422,12 @@ final class StatusBarController: NSObject {
 
             if let accounts = result.accounts, !accounts.isEmpty {
                 for account in accounts {
-                    if let subId = account.subscriptionId, !subId.isEmpty {
-                        keys.insert(SubscriptionSettingsManager.shared.subscriptionKey(for: identifier, accountId: subId))
-                    } else {
-                        keys.insert(SubscriptionSettingsManager.shared.subscriptionKey(for: identifier))
-                    }
+                    let accountId = subscriptionAccountId(details: account.details, fallback: account.accountId)
+                    keys.insert(SubscriptionSettingsManager.shared.subscriptionKey(for: identifier, accountId: accountId))
                 }
             } else {
-                keys.insert(SubscriptionSettingsManager.shared.subscriptionKey(for: identifier))
+                let accountId = subscriptionAccountId(details: result.details)
+                keys.insert(SubscriptionSettingsManager.shared.subscriptionKey(for: identifier, accountId: accountId))
             }
         }
 
@@ -1826,7 +1838,8 @@ final class StatusBarController: NSObject {
                     )
                     submenu.addItem(authItem)
 
-                    addSubscriptionItems(to: submenu, provider: .copilot)
+                    let copilotSubscriptionAccountId = subscriptionAccountId(details: providerResults[.copilot]?.details)
+                    addSubscriptionItems(to: submenu, provider: .copilot, accountId: copilotSubscriptionAccountId)
 
                     quotaItem.submenu = submenu
                 }
