@@ -1847,13 +1847,14 @@ final class TokenManager: @unchecked Sendable {
         )
     }
 
-    private func dedupeOpenAIAccounts(_ accounts: [OpenAIAuthAccount]) -> [OpenAIAuthAccount] {
+    // Intentionally internal for unit coverage of source priority and cross-source account merging.
+    func dedupeOpenAIAccounts(_ accounts: [OpenAIAuthAccount]) -> [OpenAIAuthAccount] {
         func priority(for source: OpenAIAuthSource) -> Int {
             switch source {
             case .opencodeAuth: return 3
-            case .openCodeMultiAuth: return 2
-            case .codexLB: return 1
-            case .codexAuth: return 0
+            case .codexAuth: return 2
+            case .openCodeMultiAuth: return 1
+            case .codexLB: return 0
             }
         }
 
@@ -1932,6 +1933,11 @@ final class TokenManager: @unchecked Sendable {
         let fallbackEmail = fallback.email?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let mergedSourceLabels = mergeSourceLabels(primary.sourceLabels, fallback.sourceLabels)
+        if primary.source == .codexAuth, fallback.source != .codexAuth {
+            logger.debug(
+                "OpenAI account merge selected Codex native auth over \(self.openAISourceLabel(for: fallback.source), privacy: .public) for a matching account"
+            )
+        }
 
         return OpenAIAuthAccount(
             accessToken: primary.accessToken,

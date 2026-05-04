@@ -364,11 +364,11 @@ final class CodexProvider: ProviderProtocol {
         switch source {
         case .opencodeAuth:
             return 3
-        case .openCodeMultiAuth:
-            return 2
-        case .codexLB:
-            return 1
         case .codexAuth:
+            return 2
+        case .openCodeMultiAuth:
+            return 1
+        case .codexLB:
             return 0
         }
     }
