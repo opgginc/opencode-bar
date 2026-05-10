@@ -368,6 +368,8 @@ final class CodexProvider: ProviderProtocol {
             return 2
         case .openCodeMultiAuth:
             return 1
+        case .openCodeAnthropicAuthCodexCache:
+            return -1
         case .codexLB:
             return 0
         }
@@ -379,6 +381,8 @@ final class CodexProvider: ProviderProtocol {
             return "OpenCode"
         case .openCodeMultiAuth:
             return "OpenCode Multi Auth"
+        case .openCodeAnthropicAuthCodexCache:
+            return "OpenCode Anthropic Auth"
         case .codexLB:
             return "Codex LB"
         case .codexAuth:
@@ -427,6 +431,39 @@ final class CodexProvider: ProviderProtocol {
     }
 
     private func fetchUsageForAccount(_ account: OpenAIAuthAccount) async throws -> CodexAccountCandidate {
+        if let cachedUsage = account.cachedCodexUsage {
+            return buildCachedUsageCandidate(account: account, cachedUsage: cachedUsage)
+        }
+
+        var account = account
+        var didRefresh = false
+
+        if TokenManager.shared.openAIMultiAuthAccountNeedsRefresh(account) {
+            do {
+                account = try await TokenManager.shared.refreshOpenAIMultiAuthAccount(account)
+                didRefresh = true
+                logger.info("Codex retry will use refreshed OpenAI multi-auth token")
+            } catch {
+                logger.warning("OpenAI multi-auth token refresh before Codex request failed: \(error.localizedDescription)")
+            }
+        }
+
+        do {
+            return try await fetchUsageForResolvedAccount(account)
+        } catch {
+            guard !didRefresh,
+                  isUnauthorizedError(error),
+                  TokenManager.shared.canRefreshOpenAIMultiAuthAccount(account) else {
+                throw error
+            }
+
+            logger.info("Codex API returned 401 for OpenAI multi-auth account; refreshing token and retrying once")
+            let refreshedAccount = try await TokenManager.shared.refreshOpenAIMultiAuthAccount(account)
+            return try await fetchUsageForResolvedAccount(refreshedAccount)
+        }
+    }
+
+    private func fetchUsageForResolvedAccount(_ account: OpenAIAuthAccount) async throws -> CodexAccountCandidate {
         let endpointConfiguration = TokenManager.shared.getCodexEndpointConfiguration()
         let url = try codexUsageURL(for: endpointConfiguration, account: account)
 
@@ -465,6 +502,61 @@ final class CodexProvider: ProviderProtocol {
             usage: decodedPayload.usage,
             details: decodedPayload.details,
             sourceLabels: account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels,
+            source: account.source
+        )
+    }
+
+    private func isUnauthorizedError(_ error: Error) -> Bool {
+        guard case ProviderError.networkError(let message) = error else {
+            return false
+        }
+        return message.contains("HTTP 401")
+    }
+
+    private func buildCachedUsageCandidate(
+        account: OpenAIAuthAccount,
+        cachedUsage: CodexCachedUsageSnapshot
+    ) -> CodexAccountCandidate {
+        let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
+        let authUsageSummary = sourceSummary(sourceLabels, fallback: "Unknown")
+        let primaryPercent = cachedUsage.primary?.utilization ?? 0
+        let remaining = max(0, Int(round(100 - primaryPercent)))
+        let details = DetailedUsage(
+            dailyUsage: cachedUsage.primary?.utilization,
+            secondaryUsage: cachedUsage.secondary?.utilization,
+            primaryReset: cachedUsage.primary?.resetsAt,
+            codexPrimaryWindowLabel: cachedUsage.primary?.label,
+            codexPrimaryWindowHours: hours(fromWindowMs: cachedUsage.primary?.windowMs),
+            codexSecondaryWindowLabel: cachedUsage.secondary?.label,
+            codexSecondaryWindowHours: hours(fromWindowMs: cachedUsage.secondary?.windowMs),
+            sparkUsage: cachedUsage.sparkPrimary?.utilization,
+            sparkReset: cachedUsage.sparkPrimary?.resetsAt,
+            sparkSecondaryUsage: cachedUsage.sparkSecondary?.utilization,
+            sparkSecondaryReset: cachedUsage.sparkSecondary?.resetsAt,
+            sparkPrimaryWindowLabel: cachedUsage.sparkPrimary?.label,
+            sparkPrimaryWindowHours: hours(fromWindowMs: cachedUsage.sparkPrimary?.windowMs),
+            sparkSecondaryWindowLabel: cachedUsage.sparkSecondary?.label,
+            sparkSecondaryWindowHours: hours(fromWindowMs: cachedUsage.sparkSecondary?.windowMs),
+            creditsBalance: cachedUsage.creditsBalance,
+            planType: cachedUsage.planType,
+            email: account.email,
+            authSource: account.authSource,
+            authUsageSummary: authUsageSummary
+        )
+
+        logger.info(
+            """
+            Codex cached usage loaded (\(authUsageSummary)): \
+            account=\(account.email ?? account.accountId ?? "unknown", privacy: .private), \
+            primary=\(primaryPercent, privacy: .public)%
+            """
+        )
+
+        return CodexAccountCandidate(
+            accountId: account.accountId,
+            usage: ProviderUsage.quotaBased(remaining: remaining, entitlement: 100, overagePermitted: false),
+            details: details,
+            sourceLabels: sourceLabels,
             source: account.source
         )
     }
@@ -884,6 +976,11 @@ final class CodexProvider: ProviderProtocol {
         case "w": return value * 24 * 7
         default: return nil
         }
+    }
+
+    private func hours(fromWindowMs windowMs: Int?) -> Int? {
+        guard let windowMs, windowMs > 0 else { return nil }
+        return max(1, Int(round(Double(windowMs) / 3_600_000.0)))
     }
 
     private func codexWindowMetadata(for window: RateLimitWindow, fallbackLabel: String) -> (label: String, hours: Int?) {

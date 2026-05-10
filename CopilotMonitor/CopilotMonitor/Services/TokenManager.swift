@@ -372,10 +372,29 @@ struct CodexLBEncryptedAccount {
     let lastRefresh: String?
 }
 
+struct CodexCachedUsageWindow {
+    let utilization: Double
+    let resetsAt: Date?
+    let label: String?
+    let windowMs: Int?
+}
+
+struct CodexCachedUsageSnapshot {
+    let fetchedAt: Date?
+    let planType: String?
+    let primary: CodexCachedUsageWindow?
+    let secondary: CodexCachedUsageWindow?
+    let sparkPrimary: CodexCachedUsageWindow?
+    let sparkSecondary: CodexCachedUsageWindow?
+    let creditsBalance: Double?
+    let creditsUnlimited: Bool?
+}
+
 /// Auth source types for OpenAI (Codex) account discovery
 enum OpenAIAuthSource {
     case opencodeAuth
     case openCodeMultiAuth
+    case openCodeAnthropicAuthCodexCache
     case codexLB
     case codexAuth
 }
@@ -395,6 +414,38 @@ struct OpenAIAuthAccount {
     let sourceLabels: [String]
     let source: OpenAIAuthSource
     let credentialType: OpenAICredentialType
+    let refreshToken: String?
+    let expiresAt: Date?
+    let idToken: String?
+    let cachedCodexUsage: CodexCachedUsageSnapshot?
+
+    init(
+        accessToken: String,
+        accountId: String?,
+        externalUsageAccountId: String?,
+        email: String?,
+        authSource: String,
+        sourceLabels: [String],
+        source: OpenAIAuthSource,
+        credentialType: OpenAICredentialType,
+        refreshToken: String? = nil,
+        expiresAt: Date? = nil,
+        idToken: String? = nil,
+        cachedCodexUsage: CodexCachedUsageSnapshot? = nil
+    ) {
+        self.accessToken = accessToken
+        self.accountId = accountId
+        self.externalUsageAccountId = externalUsageAccountId
+        self.email = email
+        self.authSource = authSource
+        self.sourceLabels = sourceLabels
+        self.source = source
+        self.credentialType = credentialType
+        self.refreshToken = refreshToken
+        self.expiresAt = expiresAt
+        self.idToken = idToken
+        self.cachedCodexUsage = cachedCodexUsage
+    }
 }
 
 enum CodexEndpointMode: Equatable {
@@ -743,6 +794,13 @@ final class TokenManager: @unchecked Sendable {
 
     /// Paths where oc-chatgpt-multi-auth account files were found
     private(set) var lastFoundOpenCodeMultiAuthPaths: [URL] = []
+
+    /// Cached opencode-anthropic-auth Codex usage accounts
+    private var cachedOpenCodeAnthropicCodexAccounts: [OpenAIAuthAccount]?
+    private var openCodeAnthropicCodexAccountsCacheTimestamp: Date?
+
+    /// Paths where opencode-anthropic-auth Codex account files were found
+    private(set) var lastFoundOpenCodeAnthropicCodexAccountPaths: [URL] = []
 
     /// Cached GitHub Copilot token accounts (OpenCode + VS Code)
     private var cachedCopilotAccounts: [CopilotAuthAccount]?
@@ -1238,6 +1296,9 @@ final class TokenManager: @unchecked Sendable {
             cachedAuth = nil
             cacheTimestamp = nil
             lastFoundAuthPath = nil
+            cachedOpenCodeAnthropicCodexAccounts = nil
+            openCodeAnthropicCodexAccountsCacheTimestamp = nil
+            lastFoundOpenCodeAnthropicCodexAccountPaths = []
         }
     }
 
@@ -1681,6 +1742,13 @@ final class TokenManager: @unchecked Sendable {
         )
     }
 
+    func shouldIncludeCodexLBAccount(_ account: CodexLBEncryptedAccount) -> Bool {
+        guard let status = normalizedNonEmpty(account.status)?.lowercased() else {
+            return true
+        }
+        return status == "active"
+    }
+
     func readCodexLBOpenAIAccounts() -> [OpenAIAuthAccount] {
         return queue.sync {
             if let cached = cachedCodexLBAccounts,
@@ -1713,6 +1781,13 @@ final class TokenManager: @unchecked Sendable {
 
                     var decodedAccounts: [OpenAIAuthAccount] = []
                     for encryptedAccount in encryptedAccounts {
+                        guard shouldIncludeCodexLBAccount(encryptedAccount) else {
+                            logger.info(
+                                "Skipping inactive codex-lb OpenAI account with status \(encryptedAccount.status ?? "unknown", privacy: .public)"
+                            )
+                            continue
+                        }
+
                         do {
                             let accessToken = try decryptCodexLBFernetToken(
                                 encryptedAccount.accessTokenEncrypted,
@@ -1777,6 +1852,8 @@ final class TokenManager: @unchecked Sendable {
             return "OpenCode"
         case .openCodeMultiAuth:
             return "OpenCode Multi Auth"
+        case .openCodeAnthropicAuthCodexCache:
+            return "OpenCode Anthropic Auth"
         case .codexLB:
             return "Codex LB"
         case .codexAuth:
@@ -1854,6 +1931,7 @@ final class TokenManager: @unchecked Sendable {
             case .opencodeAuth: return 3
             case .codexAuth: return 2
             case .openCodeMultiAuth: return 1
+            case .openCodeAnthropicAuthCodexCache: return -1
             case .codexLB: return 0
             }
         }
@@ -1947,7 +2025,11 @@ final class TokenManager: @unchecked Sendable {
             authSource: primary.authSource,
             sourceLabels: mergedSourceLabels,
             source: primary.source,
-            credentialType: primary.credentialType
+            credentialType: primary.credentialType,
+            refreshToken: normalizedNonEmpty(primary.refreshToken) ?? normalizedNonEmpty(fallback.refreshToken),
+            expiresAt: primary.expiresAt ?? fallback.expiresAt,
+            idToken: normalizedNonEmpty(primary.idToken) ?? normalizedNonEmpty(fallback.idToken),
+            cachedCodexUsage: primary.cachedCodexUsage ?? fallback.cachedCodexUsage
         )
     }
 
@@ -2133,6 +2215,9 @@ final class TokenManager: @unchecked Sendable {
         let accessToken: String
         let accountId: String?
         let email: String?
+        let refreshToken: String?
+        let expiresAt: Date?
+        let idToken: String?
     }
 
     private func valueForNormalizedKey(_ normalizedKeyName: String, in dict: [String: Any]) -> Any? {
@@ -2272,6 +2357,9 @@ final class TokenManager: @unchecked Sendable {
 
     private func extractOpenAIMultiAuthPayload(from dict: [String: Any]) -> OpenAIMultiAuthPayload? {
         let accessKeys: Set<String> = ["accesstoken", "access", "oauthtoken", "token"]
+        let refreshKeys: Set<String> = ["refreshtoken", "oauthrefreshtoken", "refresh"]
+        let expiresKeys: Set<String> = ["expiresat", "expires", "expiration", "expiry"]
+        let idTokenKeys: Set<String> = ["idtoken"]
         let accountKeys: Set<String> = ["accountid", "chatgptaccountid", "userid", "id"]
         let emailKeys: Set<String> = ["email", "useremail", "login", "username"]
 
@@ -2284,6 +2372,12 @@ final class TokenManager: @unchecked Sendable {
         let tokenAccountId = normalizedNonEmpty(accessTokenPayload?.auth?.chatGPTAccountId)
         let storedAccountId = findDirectStringValue(in: dict, matching: accountKeys)
             ?? findStringValue(in: dict, matching: accountKeys)
+        let expiresRaw = findDirectInt64Value(in: dict, matching: expiresKeys)
+            ?? findInt64Value(in: dict, matching: expiresKeys)
+        let expiresAt = expiresRaw.flatMap { dateFromEpoch($0) } ?? parseISO8601Date(
+            findDirectStringValue(in: dict, matching: expiresKeys)
+                ?? findStringValue(in: dict, matching: expiresKeys)
+        )
         let email = normalizedNonEmpty(accessTokenPayload?.profile?.email)
             ?? normalizedNonEmpty(findDirectStringValue(in: dict, matching: emailKeys)
             ?? findStringValue(in: dict, matching: emailKeys))
@@ -2291,8 +2385,176 @@ final class TokenManager: @unchecked Sendable {
         return OpenAIMultiAuthPayload(
             accessToken: accessToken,
             accountId: tokenAccountId ?? normalizedNonEmpty(storedAccountId),
-            email: email
+            email: email,
+            refreshToken: normalizedNonEmpty(findDirectStringValue(in: dict, matching: refreshKeys)
+                ?? findStringValue(in: dict, matching: refreshKeys)),
+            expiresAt: expiresAt,
+            idToken: normalizedNonEmpty(findDirectStringValue(in: dict, matching: idTokenKeys)
+                ?? findStringValue(in: dict, matching: idTokenKeys))
         )
+    }
+
+    private func openCodeAnthropicCodexAccountPaths() -> [URL] {
+        buildOpenCodeFilePaths(
+            envVarName: "XDG_CONFIG_HOME",
+            envRelativePathComponents: ["opencode", "opencode-anthropic-auth", "codex-accounts.json"],
+            fallbackRelativePathComponents: [
+                [".config", "opencode", "opencode-anthropic-auth", "codex-accounts.json"]
+            ]
+        )
+    }
+
+    private func boolValue(_ value: Any?) -> Bool? {
+        if let bool = value as? Bool {
+            return bool
+        }
+        if let number = value as? NSNumber {
+            return number.boolValue
+        }
+        if let string = value as? String {
+            switch string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "true", "yes", "1":
+                return true
+            case "false", "no", "0":
+                return false
+            default:
+                return nil
+            }
+        }
+        return nil
+    }
+
+    private func directDoubleValue(in dict: [String: Any], matching keys: Set<String>) -> Double? {
+        for (key, value) in dict where keys.contains(normalizedKey(key)) {
+            if let double = value as? Double {
+                return double
+            }
+            if let int = value as? Int {
+                return Double(int)
+            }
+            if let number = value as? NSNumber {
+                return number.doubleValue
+            }
+            if let string = value as? String {
+                return Double(string.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        return nil
+    }
+
+    private func directBoolValue(in dict: [String: Any], matching keys: Set<String>) -> Bool? {
+        for (key, value) in dict where keys.contains(normalizedKey(key)) {
+            if let bool = boolValue(value) {
+                return bool
+            }
+        }
+        return nil
+    }
+
+    private func parseOpenCodeAnthropicCodexUsageWindow(_ value: Any?) -> CodexCachedUsageWindow? {
+        guard let dict = value as? [String: Any],
+              let utilization = directDoubleValue(in: dict, matching: ["utilization", "usedpercent", "usagepercent"]) else {
+            return nil
+        }
+
+        let resetDate = parseISO8601Date(findDirectStringValue(in: dict, matching: ["resetsat", "resetat"]))
+            ?? dateFromEpoch(findDirectInt64Value(in: dict, matching: ["resetsat", "resetat"]))
+        let label = normalizedNonEmpty(findDirectStringValue(in: dict, matching: ["label", "windowlabel"]))
+        let windowMs = findDirectInt64Value(in: dict, matching: ["windowms"]).map { Int($0) }
+
+        return CodexCachedUsageWindow(
+            utilization: utilization,
+            resetsAt: resetDate,
+            label: label,
+            windowMs: windowMs
+        )
+    }
+
+    private func parseOpenCodeAnthropicCodexUsage(_ value: Any?) -> CodexCachedUsageSnapshot? {
+        guard let dict = value as? [String: Any] else {
+            return nil
+        }
+
+        let primary = parseOpenCodeAnthropicCodexUsageWindow(valueForNormalizedKey("primary", in: dict))
+        let secondary = parseOpenCodeAnthropicCodexUsageWindow(valueForNormalizedKey("secondary", in: dict))
+        let sparkPrimary = parseOpenCodeAnthropicCodexUsageWindow(valueForNormalizedKey("sparkprimary", in: dict))
+        let sparkSecondary = parseOpenCodeAnthropicCodexUsageWindow(valueForNormalizedKey("sparksecondary", in: dict))
+
+        guard primary != nil || secondary != nil || sparkPrimary != nil || sparkSecondary != nil else {
+            return nil
+        }
+
+        return CodexCachedUsageSnapshot(
+            fetchedAt: dateFromEpoch(findDirectInt64Value(in: dict, matching: ["fetchedat"])),
+            planType: normalizedNonEmpty(findDirectStringValue(in: dict, matching: ["plantype"])),
+            primary: primary,
+            secondary: secondary,
+            sparkPrimary: sparkPrimary,
+            sparkSecondary: sparkSecondary,
+            creditsBalance: directDoubleValue(in: dict, matching: ["creditsbalance", "balance"]),
+            creditsUnlimited: directBoolValue(in: dict, matching: ["creditsunlimited", "unlimited"])
+        )
+    }
+
+    private func shouldIncludeOpenCodeAnthropicCodexAccount(_ accountDict: [String: Any]) -> Bool {
+        if let enabled = boolValue(valueForNormalizedKey("enabled", in: accountDict)), !enabled {
+            return false
+        }
+        guard let status = normalizedNonEmpty(findDirectStringValue(in: accountDict, matching: ["status"]))?.lowercased() else {
+            return true
+        }
+        return status == "active"
+    }
+
+    func readOpenCodeAnthropicCodexAccountFiles(at paths: [URL]) -> [OpenAIAuthAccount] {
+        var accounts: [OpenAIAuthAccount] = []
+
+        for path in paths {
+            guard let dict = readJSONDictionary(at: path) else { continue }
+            let rawAccounts = valueForNormalizedKey("accounts", in: dict) as? [Any] ?? [dict]
+            var pathAccounts: [OpenAIAuthAccount] = []
+
+            for rawAccount in rawAccounts {
+                guard let accountDict = rawAccount as? [String: Any],
+                      shouldIncludeOpenCodeAnthropicCodexAccount(accountDict),
+                      let cachedUsage = parseOpenCodeAnthropicCodexUsage(valueForNormalizedKey("usage", in: accountDict)) else {
+                    continue
+                }
+
+                let accountId = normalizedNonEmpty(findDirectStringValue(
+                    in: accountDict,
+                    matching: ["accountid", "chatgptaccountid"]
+                )) ?? normalizedNonEmpty(findDirectStringValue(in: accountDict, matching: ["id"]))
+                let email = normalizedNonEmpty(findDirectStringValue(
+                    in: accountDict,
+                    matching: ["email", "useremail", "login", "username"]
+                ))
+                guard accountId != nil || email != nil else {
+                    continue
+                }
+
+                pathAccounts.append(
+                    OpenAIAuthAccount(
+                        accessToken: "",
+                        accountId: accountId,
+                        externalUsageAccountId: nil,
+                        email: email,
+                        authSource: path.path,
+                        sourceLabels: [openAISourceLabel(for: .openCodeAnthropicAuthCodexCache)],
+                        source: .openCodeAnthropicAuthCodexCache,
+                        credentialType: .oauthBearer,
+                        cachedCodexUsage: cachedUsage
+                    )
+                )
+            }
+
+            if !pathAccounts.isEmpty {
+                logger.info("Loaded \(pathAccounts.count) cached Codex account(s) from opencode-anthropic-auth at \(path.path)")
+                accounts.append(contentsOf: pathAccounts)
+            }
+        }
+
+        return accounts
     }
 
     func readOpenAIMultiAuthFiles(at paths: [URL]) -> [OpenAIAuthAccount] {
@@ -2318,7 +2580,10 @@ final class TokenManager: @unchecked Sendable {
                         authSource: path.path,
                         sourceLabels: [openAISourceLabel(for: .openCodeMultiAuth)],
                         source: .openCodeMultiAuth,
-                        credentialType: .oauthBearer
+                        credentialType: .oauthBearer,
+                        refreshToken: payload.refreshToken,
+                        expiresAt: payload.expiresAt,
+                        idToken: payload.idToken
                     )
                 )
             }
@@ -2349,6 +2614,219 @@ final class TokenManager: @unchecked Sendable {
             openCodeMultiAuthAccountsCacheTimestamp = Date()
             lastFoundOpenCodeMultiAuthPaths = existingPaths
             return accounts
+        }
+    }
+
+    private func readOpenCodeAnthropicCodexAccountFiles() -> [OpenAIAuthAccount] {
+        return queue.sync {
+            if let cached = cachedOpenCodeAnthropicCodexAccounts,
+               let timestamp = openCodeAnthropicCodexAccountsCacheTimestamp,
+               Date().timeIntervalSince(timestamp) < cacheValiditySeconds {
+                return cached
+            }
+
+            let fileManager = FileManager.default
+            let paths = openCodeAnthropicCodexAccountPaths()
+            let accounts = readOpenCodeAnthropicCodexAccountFiles(at: paths)
+            let existingPaths = paths.filter { fileManager.fileExists(atPath: $0.path) }
+
+            cachedOpenCodeAnthropicCodexAccounts = accounts
+            openCodeAnthropicCodexAccountsCacheTimestamp = Date()
+            lastFoundOpenCodeAnthropicCodexAccountPaths = existingPaths
+            return accounts
+        }
+    }
+
+    private struct OpenAITokenRefreshResponse: Decodable {
+        let accessToken: String
+        let refreshToken: String?
+        let expiresIn: Double
+        let idToken: String?
+
+        enum CodingKeys: String, CodingKey {
+            case accessToken = "access_token"
+            case refreshToken = "refresh_token"
+            case expiresIn = "expires_in"
+            case idToken = "id_token"
+        }
+    }
+
+    private enum OpenAITokenRefreshError: LocalizedError {
+        case unsupportedSource
+        case missingRefreshToken
+        case invalidTokenURL
+        case invalidResponse
+        case httpStatus(Int)
+        case missingAccessToken
+        case storageUpdateFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .unsupportedSource:
+                return "OpenAI token refresh is only supported for OpenCode Multi Auth accounts"
+            case .missingRefreshToken:
+                return "OpenAI refresh token is missing"
+            case .invalidTokenURL:
+                return "OpenAI token refresh URL is invalid"
+            case .invalidResponse:
+                return "OpenAI token refresh returned an invalid response"
+            case .httpStatus(let status):
+                return "OpenAI token refresh failed with HTTP \(status)"
+            case .missingAccessToken:
+                return "OpenAI token refresh response did not include an access token"
+            case .storageUpdateFailed:
+                return "OpenAI multi-auth account storage could not be updated"
+            }
+        }
+    }
+
+    func canRefreshOpenAIMultiAuthAccount(_ account: OpenAIAuthAccount) -> Bool {
+        account.source == .openCodeMultiAuth
+            && normalizedNonEmpty(account.refreshToken) != nil
+            && account.credentialType == .oauthBearer
+    }
+
+    func openAIMultiAuthAccountNeedsRefresh(_ account: OpenAIAuthAccount, skew: TimeInterval = 60) -> Bool {
+        guard canRefreshOpenAIMultiAuthAccount(account),
+              let expiresAt = account.expiresAt else {
+            return false
+        }
+
+        return expiresAt <= Date().addingTimeInterval(max(0, skew))
+    }
+
+    private func formURLEncodedBody(_ queryItems: [URLQueryItem]) -> Data {
+        var components = URLComponents()
+        components.queryItems = queryItems
+        return components.percentEncodedQuery?.data(using: .utf8) ?? Data()
+    }
+
+    func refreshOpenAIMultiAuthAccount(_ account: OpenAIAuthAccount) async throws -> OpenAIAuthAccount {
+        guard account.source == .openCodeMultiAuth else {
+            throw OpenAITokenRefreshError.unsupportedSource
+        }
+        guard let refreshToken = normalizedNonEmpty(account.refreshToken) else {
+            throw OpenAITokenRefreshError.missingRefreshToken
+        }
+        guard let tokenURL = URL(string: "https://auth.openai.com/oauth/token") else {
+            throw OpenAITokenRefreshError.invalidTokenURL
+        }
+
+        logger.info("Refreshing OpenAI multi-auth token for Codex usage")
+
+        var request = URLRequest(url: tokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = formURLEncodedBody([
+            URLQueryItem(name: "grant_type", value: "refresh_token"),
+            URLQueryItem(name: "refresh_token", value: refreshToken),
+            URLQueryItem(name: "client_id", value: "app_EMoamEEZ73f0CkXaXp7hrann")
+        ])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenAITokenRefreshError.invalidResponse
+        }
+        guard httpResponse.statusCode == 200 else {
+            logger.warning("OpenAI multi-auth token refresh failed with status \(httpResponse.statusCode)")
+            throw OpenAITokenRefreshError.httpStatus(httpResponse.statusCode)
+        }
+
+        let refreshResponse = try JSONDecoder().decode(OpenAITokenRefreshResponse.self, from: data)
+        let accessToken = refreshResponse.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else {
+            throw OpenAITokenRefreshError.missingAccessToken
+        }
+
+        let refreshedAccessPayload = decodeOpenAIAccessTokenPayload(accessToken)
+        let refreshedIDPayload = decodeOpenAIIDTokenPayload(refreshResponse.idToken)
+        let refreshedAccount = OpenAIAuthAccount(
+            accessToken: accessToken,
+            accountId: normalizedNonEmpty(refreshedAccessPayload?.auth?.chatGPTAccountId) ?? account.accountId,
+            externalUsageAccountId: account.externalUsageAccountId,
+            email: normalizedNonEmpty(refreshedIDPayload?.email)
+                ?? normalizedNonEmpty(refreshedAccessPayload?.profile?.email)
+                ?? account.email,
+            authSource: account.authSource,
+            sourceLabels: account.sourceLabels,
+            source: account.source,
+            credentialType: account.credentialType,
+            refreshToken: normalizedNonEmpty(refreshResponse.refreshToken) ?? refreshToken,
+            expiresAt: Date().addingTimeInterval(refreshResponse.expiresIn),
+            idToken: normalizedNonEmpty(refreshResponse.idToken) ?? account.idToken
+        )
+
+        try persistOpenAIMultiAuthRefresh(original: account, refreshed: refreshedAccount)
+        logger.info("OpenAI multi-auth token refresh succeeded for Codex usage")
+        return refreshedAccount
+    }
+
+    private func persistOpenAIMultiAuthRefresh(original: OpenAIAuthAccount, refreshed: OpenAIAuthAccount) throws {
+        let storageURL = URL(fileURLWithPath: original.authSource)
+        try queue.sync {
+            let fileManager = FileManager.default
+            guard fileManager.fileExists(atPath: storageURL.path),
+                  fileManager.isReadableFile(atPath: storageURL.path) else {
+                throw OpenAITokenRefreshError.storageUpdateFailed
+            }
+
+            let data = try Data(contentsOf: storageURL)
+            guard var root = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+                throw OpenAITokenRefreshError.storageUpdateFailed
+            }
+
+            var updated = false
+            if var accounts = root["accounts"] as? [[String: Any]] {
+                for index in accounts.indices where openAIMultiAuthStorageAccount(accounts[index], matches: original) {
+                    updateOpenAIMultiAuthStorageAccount(&accounts[index], with: refreshed)
+                    updated = true
+                }
+                root["accounts"] = accounts
+            } else if openAIMultiAuthStorageAccount(root, matches: original) {
+                updateOpenAIMultiAuthStorageAccount(&root, with: refreshed)
+                updated = true
+            }
+
+            guard updated else {
+                throw OpenAITokenRefreshError.storageUpdateFailed
+            }
+
+            let output = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+            try output.write(to: storageURL, options: .atomic)
+
+            cachedOpenCodeMultiAuthAccounts = nil
+            openCodeMultiAuthAccountsCacheTimestamp = nil
+        }
+    }
+
+    private func openAIMultiAuthStorageAccount(_ accountDict: [String: Any], matches account: OpenAIAuthAccount) -> Bool {
+        let accessKeys: Set<String> = ["accesstoken", "access", "oauthtoken", "token"]
+        let refreshKeys: Set<String> = ["refreshtoken", "oauthrefreshtoken", "refresh"]
+        let accountKeys: Set<String> = ["accountid", "chatgptaccountid", "userid", "id"]
+        let emailKeys: Set<String> = ["email", "useremail", "login", "username"]
+
+        if let refreshToken = normalizedNonEmpty(account.refreshToken),
+           normalizedNonEmpty(findDirectStringValue(in: accountDict, matching: refreshKeys)) == refreshToken {
+            return true
+        }
+
+        if normalizedNonEmpty(findDirectStringValue(in: accountDict, matching: accessKeys)) == account.accessToken {
+            return true
+        }
+
+        let storedAccountId = normalizedNonEmpty(findDirectStringValue(in: accountDict, matching: accountKeys))
+        let storedEmail = normalizedNonEmpty(findDirectStringValue(in: accountDict, matching: emailKeys))?.lowercased()
+        let accountIdMatches = storedAccountId != nil && storedAccountId == normalizedNonEmpty(account.accountId)
+        let emailMatches = storedEmail != nil && storedEmail == normalizedNonEmpty(account.email)?.lowercased()
+        return accountIdMatches && emailMatches
+    }
+
+    private func updateOpenAIMultiAuthStorageAccount(_ accountDict: inout [String: Any], with account: OpenAIAuthAccount) {
+        accountDict["accessToken"] = account.accessToken
+        accountDict["refreshToken"] = account.refreshToken
+        accountDict["expiresAt"] = account.expiresAt.map { Int64($0.timeIntervalSince1970 * 1000) }
+        if let idToken = normalizedNonEmpty(account.idToken) {
+            accountDict["idToken"] = idToken
         }
     }
 
@@ -3163,6 +3641,11 @@ final class TokenManager: @unchecked Sendable {
         let openCodeMultiAuthAccounts = readOpenAIMultiAuthFiles()
         if !openCodeMultiAuthAccounts.isEmpty {
             accounts.append(contentsOf: openCodeMultiAuthAccounts)
+        }
+
+        let openCodeAnthropicCodexAccounts = readOpenCodeAnthropicCodexAccountFiles()
+        if !openCodeAnthropicCodexAccounts.isEmpty {
+            accounts.append(contentsOf: openCodeAnthropicCodexAccounts)
         }
 
         let codexLBAccounts = readCodexLBOpenAIAccounts()
