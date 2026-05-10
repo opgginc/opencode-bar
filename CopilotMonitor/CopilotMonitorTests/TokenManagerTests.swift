@@ -369,6 +369,168 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertEqual(accounts.map(\.sourceLabels), [["OpenCode Multi Auth"], ["OpenCode Multi Auth"]])
     }
 
+    func testReadOpenAIMultiAuthFilesCapturesRefreshMetadata() throws {
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let accountsPath = tempDirectory.appendingPathComponent("openai-codex-accounts.json")
+
+        try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let accessToken = makeTestJWT(
+            payload: #"""
+            {
+              "https://api.openai.com/auth": {
+                "chatgpt_account_id": "chatgpt-account-id"
+              },
+              "https://api.openai.com/profile": {
+                "email": "user@example.com"
+              }
+            }
+            """#
+        )
+
+        let json = """
+        {
+          "version": 3,
+          "accounts": [
+            {
+              "accountId": "chatgpt-account-id",
+              "accountIdSource": "token",
+              "accessToken": "\(accessToken)",
+              "refreshToken": "refresh-token",
+              "expiresAt": 1770563557150
+            }
+          ],
+          "activeIndex": 0
+        }
+        """
+
+        try XCTUnwrap(json.data(using: .utf8)).write(to: accountsPath)
+
+        let account = try XCTUnwrap(TokenManager.shared.readOpenAIMultiAuthFiles(at: [accountsPath]).first)
+
+        XCTAssertEqual(account.refreshToken, "refresh-token")
+        let expiresAt = try XCTUnwrap(account.expiresAt)
+        XCTAssertEqual(expiresAt.timeIntervalSince1970, 1_770_563_557.15, accuracy: 0.01)
+    }
+
+    func testReadOpenCodeAnthropicCodexAccountFilesCapturesCachedUsage() throws {
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let accountsPath = tempDirectory.appendingPathComponent("codex-accounts.json")
+
+        try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let json = """
+        {
+          "version": 1,
+          "accounts": [
+            {
+              "id": "local-cache-id",
+              "accountID": "chatgpt-account-id",
+              "email": "user@example.com",
+              "enabled": true,
+              "usage": {
+                "fetchedAt": 1778410367180,
+                "planType": "pro",
+                "primary": {
+                  "utilization": 25,
+                  "resetsAt": "2026-05-10T15:15:02.180Z",
+                  "label": "5h",
+                  "windowMs": 18000000
+                },
+                "secondary": {
+                  "utilization": 75,
+                  "resetsAt": "2026-05-15T19:42:30.180Z",
+                  "label": "Weekly",
+                  "windowMs": 604800000
+                },
+                "sparkPrimary": {
+                  "utilization": 10,
+                  "resetsAt": "2026-05-10T15:52:47.715Z",
+                  "label": "Spark 5h",
+                  "windowMs": 18000000
+                },
+                "creditsBalance": "0",
+                "creditsUnlimited": false
+              }
+            },
+            {
+              "id": "disabled-cache-id",
+              "email": "disabled@example.com",
+              "enabled": false,
+              "usage": {
+                "primary": {
+                  "utilization": 50
+                }
+              }
+            }
+          ]
+        }
+        """
+
+        try XCTUnwrap(json.data(using: .utf8)).write(to: accountsPath)
+
+        let accounts = TokenManager.shared.readOpenCodeAnthropicCodexAccountFiles(at: [accountsPath])
+
+        XCTAssertEqual(accounts.count, 1)
+        let account = try XCTUnwrap(accounts.first)
+        XCTAssertEqual(account.accountId, "chatgpt-account-id")
+        XCTAssertEqual(account.email, "user@example.com")
+        XCTAssertEqual(account.authSource, accountsPath.path)
+        XCTAssertEqual(account.source, .openCodeAnthropicAuthCodexCache)
+        XCTAssertEqual(account.sourceLabels, ["OpenCode Anthropic Auth"])
+        XCTAssertEqual(account.cachedCodexUsage?.planType, "pro")
+        XCTAssertEqual(account.cachedCodexUsage?.primary?.utilization, 25)
+        XCTAssertEqual(account.cachedCodexUsage?.primary?.label, "5h")
+        XCTAssertEqual(account.cachedCodexUsage?.primary?.windowMs, 18_000_000)
+        XCTAssertEqual(account.cachedCodexUsage?.secondary?.utilization, 75)
+        XCTAssertEqual(account.cachedCodexUsage?.sparkPrimary?.utilization, 10)
+        XCTAssertEqual(account.cachedCodexUsage?.creditsBalance, 0)
+        XCTAssertEqual(account.cachedCodexUsage?.creditsUnlimited, false)
+    }
+
+    func testDedupeOpenAIAccountsPreservesOpenAIMultiAuthRefreshMetadata() throws {
+        let expiresAt = Date(timeIntervalSince1970: 1_770_563_557.15)
+        let firstAccount = OpenAIAuthAccount(
+            accessToken: "first-token",
+            accountId: "chatgpt-account-id",
+            externalUsageAccountId: nil,
+            email: "user@example.com",
+            authSource: "/tmp/project-a/openai-codex-accounts.json",
+            sourceLabels: ["OpenCode Multi Auth"],
+            source: .openCodeMultiAuth,
+            credentialType: .oauthBearer,
+            refreshToken: "refresh-token",
+            expiresAt: expiresAt,
+            idToken: "id-token"
+        )
+        let duplicateAccount = OpenAIAuthAccount(
+            accessToken: "duplicate-token",
+            accountId: "chatgpt-account-id",
+            externalUsageAccountId: nil,
+            email: "user@example.com",
+            authSource: "/tmp/project-b/openai-codex-accounts.json",
+            sourceLabels: ["OpenCode Multi Auth"],
+            source: .openCodeMultiAuth,
+            credentialType: .oauthBearer,
+            refreshToken: "duplicate-refresh-token",
+            expiresAt: Date(timeIntervalSince1970: 1_770_563_600),
+            idToken: "duplicate-id-token"
+        )
+
+        let account = try XCTUnwrap(TokenManager.shared.dedupeOpenAIAccounts([firstAccount, duplicateAccount]).first)
+
+        XCTAssertEqual(account.refreshToken, "refresh-token")
+        let mergedExpiresAt = try XCTUnwrap(account.expiresAt)
+        XCTAssertEqual(mergedExpiresAt.timeIntervalSince1970, expiresAt.timeIntervalSince1970, accuracy: 0.01)
+        XCTAssertEqual(account.idToken, "id-token")
+    }
+
     func testCodexProviderUsesChatGPTAccountIDForCodexLBInExternalMode() {
         let provider = CodexProvider()
         let account = OpenAIAuthAccount(
@@ -414,6 +576,46 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertEqual(account.email, "user@example.com")
         XCTAssertEqual(account.source, .codexLB)
         XCTAssertEqual(account.credentialType, .oauthBearer)
+    }
+
+    func testShouldIncludeCodexLBAccountSkipsInactiveStatus() {
+        let activeAccount = CodexLBEncryptedAccount(
+            accountId: "active-id",
+            chatGPTAccountId: "active-chatgpt-id",
+            email: "active@example.com",
+            planType: "plus",
+            status: "active",
+            accessTokenEncrypted: Data([0x01]),
+            refreshTokenEncrypted: nil,
+            idTokenEncrypted: nil,
+            lastRefresh: nil
+        )
+        let inactiveAccount = CodexLBEncryptedAccount(
+            accountId: "inactive-id",
+            chatGPTAccountId: "inactive-chatgpt-id",
+            email: "inactive@example.com",
+            planType: "plus",
+            status: "deactivated",
+            accessTokenEncrypted: Data([0x01]),
+            refreshTokenEncrypted: nil,
+            idTokenEncrypted: nil,
+            lastRefresh: nil
+        )
+        let legacyAccount = CodexLBEncryptedAccount(
+            accountId: "legacy-id",
+            chatGPTAccountId: "legacy-chatgpt-id",
+            email: "legacy@example.com",
+            planType: nil,
+            status: nil,
+            accessTokenEncrypted: Data([0x01]),
+            refreshTokenEncrypted: nil,
+            idTokenEncrypted: nil,
+            lastRefresh: nil
+        )
+
+        XCTAssertTrue(TokenManager.shared.shouldIncludeCodexLBAccount(activeAccount))
+        XCTAssertFalse(TokenManager.shared.shouldIncludeCodexLBAccount(inactiveAccount))
+        XCTAssertTrue(TokenManager.shared.shouldIncludeCodexLBAccount(legacyAccount))
     }
 
     func testCodexProviderKeepsDefaultAccountIDInDirectMode() {
