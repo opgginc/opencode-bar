@@ -142,15 +142,20 @@ final class OpenCodeZenProvider: ProviderProtocol {
     private struct OpenCodeStats {
         let totalCost: Double
         let avgCostPerDay: Double
-        let sessions: Int
-        let messages: Int
         let modelCosts: [String: Double]
+        let modelMessages: [String: Int]
+    }
+
+    private struct ModelUsageStats {
+        var cost: Double?
+        var messages: Int?
     }
 
     struct DisplayStatsAdjustment {
         let totalCost: Double
         let avgCostPerDay: Double
         let modelCosts: [String: Double]
+        let messages: Int
         let excludedCost: Double
     }
 
@@ -168,12 +173,11 @@ final class OpenCodeZenProvider: ProviderProtocol {
         debugLog("Fetching current stats only (history tracking disabled)")
         let output = try await runOpenCodeStats(days: 7)
         let stats = try parseStats(output)
-        let endpointConfiguration = TokenManager.shared.getCodexEndpointConfiguration()
         let displayStats = Self.adjustStatsForDisplay(
             totalCost: stats.totalCost,
             avgCostPerDay: stats.avgCostPerDay,
             modelCosts: stats.modelCosts,
-            codexEndpointConfiguration: endpointConfiguration
+            modelMessages: stats.modelMessages
         )
 
         let monthlyLimit = 1000.0
@@ -181,14 +185,14 @@ final class OpenCodeZenProvider: ProviderProtocol {
         logger.info("OpenCode Zen: $\(String(format: "%.2f", displayStats.totalCost)) (\(String(format: "%.1f", utilization))% of $\(monthlyLimit) limit)")
         if displayStats.excludedCost > 0 {
             let excludedSummary = String(format: "%.2f", displayStats.excludedCost)
-            logger.info("OpenCode Zen: Excluded $\(excludedSummary) of externally routed OpenAI usage from pay-as-you-go totals")
-            debugLog("Excluded $\(excludedSummary) of externally routed OpenAI usage from OpenCode Zen totals")
+            logger.info("OpenCode Zen: Excluded $\(excludedSummary) of non-Zen OpenCode stats usage from pay-as-you-go totals")
+            debugLog("Excluded $\(excludedSummary) of non-Zen OpenCode stats usage from OpenCode Zen totals")
         }
 
         let details = DetailedUsage(
             modelBreakdown: displayStats.modelCosts,
-            sessions: stats.sessions > 0 ? stats.sessions : nil,
-            messages: stats.messages > 0 ? stats.messages : nil,
+            sessions: nil,
+            messages: displayStats.messages > 0 ? displayStats.messages : nil,
             avgCostPerDay: displayStats.avgCostPerDay > 0 ? displayStats.avgCostPerDay : nil,
             monthlyCost: displayStats.totalCost,
             authSource: "opencode CLI via \(binarySourceDescription)"
@@ -209,7 +213,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
             let process = Process()
             process.executableURL = binaryPath
             // Use the unlimited --models form so filtering can inspect every
-            // reported openai/* model instead of truncating the stats table.
+            // reported provider/model row instead of truncating the stats table.
             process.arguments = ["stats", "--days", "\(days)", "--models"]
 
             let pipe = Pipe()
@@ -259,54 +263,39 @@ final class OpenCodeZenProvider: ProviderProtocol {
         totalCost: Double,
         avgCostPerDay: Double,
         modelCosts: [String: Double],
-        codexEndpointConfiguration: CodexEndpointConfiguration
+        modelMessages: [String: Int] = [:]
     ) -> DisplayStatsAdjustment {
-        guard codexEndpointConfiguration.usesOpenAIProviderBaseURL,
-              case .external = codexEndpointConfiguration.mode else {
-            return DisplayStatsAdjustment(
-                totalCost: totalCost,
-                avgCostPerDay: avgCostPerDay,
-                modelCosts: modelCosts,
-                excludedCost: 0
-            )
-        }
-
-        let excludedCost = modelCosts
-            .filter { isOpenAIModelRoutedThroughCodex($0.key) }
+        let zenModelCosts = modelCosts.filter { isOpenCodeZenModel($0.key) }
+        let zenCost = zenModelCosts
             .reduce(0.0) { partialResult, item in
                 partialResult + max(item.value, 0)
             }
-
-        guard excludedCost > 0 else {
-            return DisplayStatsAdjustment(
-                totalCost: totalCost,
-                avgCostPerDay: avgCostPerDay,
-                modelCosts: modelCosts,
-                excludedCost: 0
-            )
-        }
-
-        let adjustedTotalCost = max(0, totalCost - excludedCost)
+        let excludedCost = max(0, totalCost - zenCost)
         let adjustedAvgCostPerDay: Double
         if totalCost > 0, avgCostPerDay > 0 {
-            adjustedAvgCostPerDay = max(0, avgCostPerDay * (adjustedTotalCost / totalCost))
+            adjustedAvgCostPerDay = max(0, avgCostPerDay * (zenCost / totalCost))
         } else {
             adjustedAvgCostPerDay = 0
         }
 
-        let adjustedModelCosts = modelCosts.filter { !isOpenAIModelRoutedThroughCodex($0.key) }
+        let zenMessages = modelMessages
+            .filter { isOpenCodeZenModel($0.key) }
+            .reduce(0) { partialResult, item in
+                partialResult + max(item.value, 0)
+            }
 
         return DisplayStatsAdjustment(
-            totalCost: adjustedTotalCost,
+            totalCost: zenCost,
             avgCostPerDay: adjustedAvgCostPerDay,
-            modelCosts: adjustedModelCosts,
+            modelCosts: zenModelCosts,
+            messages: zenMessages,
             excludedCost: excludedCost
         )
     }
 
-    static func isOpenAIModelRoutedThroughCodex(_ modelName: String) -> Bool {
+    static func isOpenCodeZenModel(_ modelName: String) -> Bool {
         let normalized = modelName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return normalized.hasPrefix("openai/")
+        return normalized.hasPrefix("opencode/") || normalized.hasPrefix("opencode-go/")
     }
 
     /// Parses opencode stats output using regex patterns.
@@ -332,37 +321,27 @@ final class OpenCodeZenProvider: ProviderProtocol {
             throw ProviderError.decodingError("Invalid avg cost value")
         }
 
-        let sessionsPattern = #"│Sessions\s+([0-9,]+)"#
-        guard let sessionsMatch = output.range(of: sessionsPattern, options: .regularExpression) else {
-            throw ProviderError.decodingError("Cannot parse sessions")
-        }
-        let sessionsStr = String(output[sessionsMatch])
-            .replacingOccurrences(of: #"│Sessions\s+"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: ",", with: "")
-        let sessions = Int(sessionsStr) ?? 0
-
-        let messagesPattern = #"│Messages\s+([0-9,]+)"#
-        guard let messagesMatch = output.range(of: messagesPattern, options: .regularExpression) else {
-            throw ProviderError.decodingError("Cannot parse messages")
-        }
-        let messagesStr = String(output[messagesMatch])
-            .replacingOccurrences(of: #"│Messages\s+"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: ",", with: "")
-        let messages = Int(messagesStr) ?? 0
-
         let modelCosts = Self.parseModelCosts(from: output)
+        let modelMessages = Self.parseModelMessages(from: output)
 
         return OpenCodeStats(
             totalCost: totalCost,
             avgCostPerDay: avgCost,
-            sessions: sessions,
-            messages: messages,
-            modelCosts: modelCosts
+            modelCosts: modelCosts,
+            modelMessages: modelMessages
         )
     }
 
     static func parseModelCosts(from output: String) -> [String: Double] {
-        var modelCosts: [String: Double] = [:]
+        parseModelUsageStats(from: output).compactMapValues(\.cost)
+    }
+
+    static func parseModelMessages(from output: String) -> [String: Int] {
+        parseModelUsageStats(from: output).compactMapValues(\.messages)
+    }
+
+    private static func parseModelUsageStats(from output: String) -> [String: ModelUsageStats] {
+        var modelUsageStats: [String: ModelUsageStats] = [:]
         var currentModel: String?
         var isInModelUsageSection = false
 
@@ -394,7 +373,18 @@ final class OpenCodeZenProvider: ProviderProtocol {
             if text.hasPrefix("Cost") {
                 guard let currentModel,
                       let cost = dollarValue(in: text) else { continue }
-                modelCosts[currentModel] = cost
+                var stats = modelUsageStats[currentModel] ?? ModelUsageStats()
+                stats.cost = cost
+                modelUsageStats[currentModel] = stats
+                continue
+            }
+
+            if text.hasPrefix("Messages") {
+                guard let currentModel,
+                      let messages = integerValue(in: text) else { continue }
+                var stats = modelUsageStats[currentModel] ?? ModelUsageStats()
+                stats.messages = messages
+                modelUsageStats[currentModel] = stats
                 continue
             }
 
@@ -405,7 +395,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
             currentModel = text
         }
 
-        return modelCosts
+        return modelUsageStats
     }
 
     private static func trimmedTableCell(_ line: String) -> String {
@@ -427,6 +417,14 @@ final class OpenCodeZenProvider: ProviderProtocol {
             .first
             .map(String.init)
         return valueText.flatMap(Double.init)
+    }
+
+    private static func integerValue(in text: String) -> Int? {
+        guard let valueRange = text.range(of: #"[0-9][0-9,]*"#, options: .regularExpression) else {
+            return nil
+        }
+        let valueText = String(text[valueRange]).replacingOccurrences(of: ",", with: "")
+        return Int(valueText)
     }
 
     private static func isStatsMetricLine(_ text: String) -> Bool {
