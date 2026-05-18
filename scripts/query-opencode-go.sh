@@ -375,6 +375,7 @@ def fail_quietly():
 
 
 if CRYPTO_BACKEND is None:
+    print("note: install pycryptodome or cryptography to enable browser cookie discovery", file=sys.stderr)
     fail_quietly()
 
 

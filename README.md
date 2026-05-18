@@ -216,6 +216,7 @@ OpenRouter            Pay-as-you-go    -           $37.42 spent
 - OpenCode Go is resolved from the OpenCode auth entry `opencode-go` in `auth.json`.
 - OpenCode Bar validates the API key against `https://opencode.ai/zen/go/v1/models`.
 - Usage windows come from the OpenCode dashboard and require `OPENCODE_GO_WORKSPACE_ID` plus `OPENCODE_GO_AUTH_COOKIE`, or `~/.config/opencode-bar/opencode-go.json`.
+- The monthly dashboard window is a usage cap signal; the app's subscription preset for the Go plan remains `$10.00`.
 
 #### JSON Output Example
 

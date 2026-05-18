@@ -62,6 +62,7 @@ Quit (⌘Q)
   - **GitHub Copilot** - Credits-based quotas with overage billing (Overage billing will be charged as `Add-on` in Pay-as-you-go)
   - **Gemini CLI** - Per-model quota limits
   - **Antigravity** - Local server monitoring by Antigravity IDE
+  - **OpenCode Go** - Time-window based quotas (5h/weekly/monthly)
   - **Z.AI Coding Plan** - Time-window based & tool usage based quotas
   - **Chutes AI** - Time-window based quotas, credits balance
 - **Features**

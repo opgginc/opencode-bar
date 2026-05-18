@@ -17,6 +17,14 @@ struct OpenCodeGoDashboardUsage: Equatable {
     var usagePercents: [Double] {
         [rolling?.usagePercent, weekly?.usagePercent, monthly?.usagePercent].compactMap { $0 }
     }
+
+    var missingWindowNames: [String] {
+        var names: [String] = []
+        if rolling == nil { names.append("rollingUsage") }
+        if weekly == nil { names.append("weeklyUsage") }
+        if monthly == nil { names.append("monthlyUsage") }
+        return names
+    }
 }
 
 private struct OpenCodeGoDashboardCredentials {
@@ -61,7 +69,14 @@ final class OpenCodeGoProvider: ProviderProtocol {
         let (dashboardUsage, credentialSource) = try await fetchFirstDashboardUsage(from: credentialCandidates)
         guard !dashboardUsage.usagePercents.isEmpty else {
             logger.error("OpenCode Go dashboard response missing usage windows")
-            throw ProviderError.decodingError("Missing OpenCode Go dashboard usage windows")
+            throw ProviderError.decodingError(
+                "OpenCode Go dashboard markup may have changed. No usage windows were found. Please report this issue."
+            )
+        }
+
+        let missingWindowNames = dashboardUsage.missingWindowNames
+        if !missingWindowNames.isEmpty {
+            logger.warning("OpenCode Go dashboard missing usage window(s): \(missingWindowNames.joined(separator: ", "), privacy: .public)")
         }
 
         let overallUsed = dashboardUsage.usagePercents.max() ?? 0
@@ -104,7 +119,9 @@ final class OpenCodeGoProvider: ProviderProtocol {
         )
 
         guard !usage.usagePercents.isEmpty else {
-            throw ProviderError.decodingError("No OpenCode Go usage windows found in dashboard HTML")
+            throw ProviderError.decodingError(
+                "OpenCode Go dashboard markup may have changed. No usage windows were found. Please report this issue."
+            )
         }
 
         return usage

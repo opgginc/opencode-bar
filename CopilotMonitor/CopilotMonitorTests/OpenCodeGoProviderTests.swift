@@ -45,6 +45,21 @@ final class OpenCodeGoProviderTests: XCTestCase {
         XCTAssertEqual(usage.rolling?.resetInSeconds, 18_000)
     }
 
+    func testDashboardUsageParserKeepsPartialUsageWindows() throws {
+        let html = #"""
+        <script>
+        self.__next_f.push([1,"{\"rollingUsage\":{\"usagePercent\":64,\"resetInSec\":900}}"])
+        </script>
+        """#
+
+        let usage = try OpenCodeGoProvider.parseDashboardUsageHTML(html)
+
+        XCTAssertEqual(usage.rolling?.usagePercent ?? -1, 64, accuracy: 0.001)
+        XCTAssertNil(usage.weekly)
+        XCTAssertNil(usage.monthly)
+        XCTAssertEqual(usage.missingWindowNames, ["weeklyUsage", "monthlyUsage"])
+    }
+
     func testWorkspaceIDExtractionKeepsRecentOrderAndDeduplicates() {
         let urls = [
             "https://opencode.ai/workspace/wrk_01ABCDEF0123456789ABCDEFG/go",
