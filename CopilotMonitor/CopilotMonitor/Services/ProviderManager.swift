@@ -30,6 +30,7 @@ actor ProviderManager {
             CopilotProvider(),
             ClaudeProvider(),
             CodexProvider(),
+            CommandCodeProvider(),
             CursorProvider(),
             GeminiCLIProvider(),
             MiniMaxProvider(),

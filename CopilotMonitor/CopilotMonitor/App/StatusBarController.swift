@@ -985,6 +985,8 @@ final class StatusBarController: NSObject {
                 details?.sparkUsage,
                 priority: priorityForWindowHours(details?.sparkPrimaryWindowHours, fallback: .hourly)
             )
+        case .commandCode:
+            add(usage.usagePercentage, priority: .monthly)
         case .cursor:
             add(details?.cursorAutoUsage, priority: .monthly)
             add(details?.cursorApiUsage, priority: .monthly)
@@ -1876,6 +1878,7 @@ final class StatusBarController: NSObject {
             .kimi,
             .minimaxCodingPlan,
             .codex,
+            .commandCode,
             .cursor,
             .zaiCodingPlan,
             .nanoGpt,
@@ -2929,6 +2932,8 @@ final class StatusBarController: NSObject {
             image = NSImage(named: "ClaudeIcon")
         case .codex:
             image = NSImage(named: "CodexIcon")
+        case .commandCode:
+            image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
         case .cursor:
             image = NSImage(named: "CursorIcon")
         case .geminiCLI:

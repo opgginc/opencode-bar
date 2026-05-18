@@ -58,6 +58,34 @@ class BrowserCookieService {
         throw BrowserCookieError.noBrowserFound
     }
 
+    func getCommandCodeCookieHeader() throws -> String {
+        debugLog("Starting Command Code cookie extraction from browsers")
+
+        for browser in SupportedBrowser.allCases {
+            debugLog("Trying browser for Command Code cookies: \(browser.displayName)")
+            do {
+                let cookies = try extractCookieValues(
+                    from: browser,
+                    hostSuffix: "commandcode.ai",
+                    cookieNames: CommandCodeCookieHeader.supportedCookieNames
+                )
+
+                for cookieName in CommandCodeCookieHeader.supportedCookieNames {
+                    if let token = cookies[cookieName], !token.isEmpty {
+                        debugLog("Successfully extracted Command Code cookie named \(cookieName) from \(browser.displayName)")
+                        return "\(cookieName)=\(token)"
+                    }
+                }
+            } catch {
+                debugLog("Failed to extract Command Code cookie from \(browser.displayName): \(error.localizedDescription)")
+                continue
+            }
+        }
+
+        debugLog("No browser found with valid Command Code cookies")
+        throw BrowserCookieError.noBrowserFound
+    }
+
     // MARK: - Browser Detection & Cookie Extraction
 
     private func extractCookies(from browser: SupportedBrowser) throws -> GitHubCookies {
@@ -80,6 +108,40 @@ class BrowserCookieService {
                     return cookies
                 }
                 debugLog("Cookies at \(path) are not valid")
+            } catch {
+                debugLog("Failed to read cookies from \(path): \(error.localizedDescription)")
+                continue
+            }
+        }
+
+        throw BrowserCookieError.noBrowserFound
+    }
+
+    private func extractCookieValues(from browser: SupportedBrowser, hostSuffix: String, cookieNames: [String]) throws -> [String: String] {
+        let cookieDBPaths = browser.cookieDBPaths
+        debugLog("Found \(cookieDBPaths.count) cookie paths for \(browser.displayName)")
+
+        guard !cookieDBPaths.isEmpty else {
+            throw BrowserCookieError.cookieDBNotFound
+        }
+
+        let encryptionKey = try getEncryptionKey(for: browser)
+        let aesKey = try deriveAESKey(from: encryptionKey)
+
+        for path in cookieDBPaths {
+            debugLog("Trying cookie path: \(path)")
+            do {
+                let cookies = try readCookieValues(
+                    from: path,
+                    aesKey: aesKey,
+                    hostSuffix: hostSuffix,
+                    cookieNames: cookieNames
+                )
+                if !cookies.isEmpty {
+                    debugLog("Found matching cookies at: \(path)")
+                    return cookies
+                }
+                debugLog("No matching cookies at \(path)")
             } catch {
                 debugLog("Failed to read cookies from \(path): \(error.localizedDescription)")
                 continue
@@ -229,6 +291,71 @@ class BrowserCookieService {
             dotcomUser: cookies["dotcom_user"],
             loggedIn: cookies["logged_in"]
         )
+    }
+
+    private func readCookieValues(
+        from dbPath: String,
+        aesKey: Data,
+        hostSuffix: String,
+        cookieNames: [String]
+    ) throws -> [String: String] {
+        let tempPath = NSTemporaryDirectory() + "browser_cookies_temp_\(UUID().uuidString).db"
+        try? FileManager.default.removeItem(atPath: tempPath)
+        try FileManager.default.copyItem(atPath: dbPath, toPath: tempPath)
+        defer { try? FileManager.default.removeItem(atPath: tempPath) }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(tempPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            logger.error("Failed to open SQLite database at \(tempPath)")
+            throw BrowserCookieError.invalidCookieFormat
+        }
+        defer { sqlite3_close(db) }
+
+        let placeholders = cookieNames.map { _ in "?" }.joined(separator: ",")
+        let query = "SELECT name, encrypted_value, value FROM cookies WHERE host_key LIKE ? AND name IN (\(placeholders))"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
+            logger.error("Failed to prepare SQLite statement")
+            throw BrowserCookieError.invalidCookieFormat
+        }
+        defer { sqlite3_finalize(statement) }
+
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(statement, 1, "%\(hostSuffix)", -1, transient)
+        for (index, cookieName) in cookieNames.enumerated() {
+            sqlite3_bind_text(statement, Int32(index + 2), cookieName, -1, transient)
+        }
+
+        var cookies: [String: String] = [:]
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let namePtr = sqlite3_column_text(statement, 0) else { continue }
+            let name = String(cString: namePtr)
+
+            if let encryptedBlob = sqlite3_column_blob(statement, 1) {
+                let encryptedLength = Int(sqlite3_column_bytes(statement, 1))
+                if encryptedLength > 0 {
+                    let encryptedData = Data(bytes: encryptedBlob, count: encryptedLength)
+
+                    if let decrypted = try? decryptCookie(encryptedData, aesKey: aesKey), !decrypted.isEmpty {
+                        cookies[name] = decrypted
+                        logger.debug("Decrypted browser cookie named \(name)")
+                        continue
+                    }
+                }
+            }
+
+            if let valuePtr = sqlite3_column_text(statement, 2) {
+                let value = String(cString: valuePtr)
+                if !value.isEmpty {
+                    cookies[name] = value
+                    logger.debug("Found plaintext browser cookie named \(name)")
+                }
+            }
+        }
+
+        logger.info("Found \(cookies.count) matching browser cookies for \(hostSuffix)")
+        return cookies
     }
 
     // MARK: - AES-CBC Decryption
@@ -425,7 +552,7 @@ enum BrowserCookieError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noBrowserFound:
-            return "No supported browser found with GitHub cookies"
+            return "No supported browser found with matching cookies"
         case .cookieDBNotFound:
             return "Cookie database not found"
         case .keychainAccessFailed:

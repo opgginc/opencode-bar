@@ -124,6 +124,7 @@ struct SwiftUIProviderAlertView: View {
         switch identifier {
         case .claude: return "brain"
         case .codex: return "terminal"
+        case .commandCode: return "command"
         case .cursor: return nil
         case .geminiCLI: return "sparkles"
         case .copilot: return "airplane"

@@ -48,6 +48,9 @@
 		CLIANTIGRAVITY11111111 /* AntigravityProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1DA8E47F4CFEFC3571708AD /* AntigravityProvider.swift */; };
 		CLICLAUDE11111111111111 /* ClaudeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DDC1B4DE6B5118CE4AE8F82 /* ClaudeProvider.swift */; };
 		CLICODEX111111111111111 /* CodexProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76783C44AA2329AE3FA7E981 /* CodexProvider.swift */; };
+		CMDCODEAPP111111111111 /* CommandCodeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CMDCODEFILE11111111111 /* CommandCodeProvider.swift */; };
+		CMDCODECLI111111111111 /* CommandCodeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CMDCODEFILE11111111111 /* CommandCodeProvider.swift */; };
+		CMDCODETESTBF111111111 /* CommandCodeProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CMDCODETESTFR111111111 /* CommandCodeProviderTests.swift */; };
 		CLICURSOR1111111111111 /* CursorProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CURSORFILE222222222222 /* CursorProvider.swift */; };
 		CLICOPILOT11111111111111 /* CopilotCLIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLICOPILOT22222222222222 /* CopilotCLIProvider.swift */; };
 		CLICOPILOTUSAGE111111111 /* CopilotUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22222222222222222222222 /* CopilotUsage.swift */; };
@@ -177,6 +180,8 @@
 		CLI5555555555555555555555 /* opencodebar-cli */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "opencodebar-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
 		CLICOPILOT22222222222222 /* CopilotCLIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotCLIProvider.swift; sourceTree = "<group>"; };
 		CLIPROVMGR22222222222222 /* CLIProviderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIProviderManager.swift; sourceTree = "<group>"; };
+		CMDCODEFILE11111111111 /* CommandCodeProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeProvider.swift; sourceTree = "<group>"; };
+		CMDCODETESTFR111111111 /* CommandCodeProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCodeProviderTests.swift; sourceTree = "<group>"; };
 		CURSORFILE222222222222 /* CursorProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorProvider.swift; sourceTree = "<group>"; };
 		CURSORTSTFR11111111111 /* CursorProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorProviderTests.swift; sourceTree = "<group>"; };
 		D22222222222222222222222 /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
@@ -269,6 +274,7 @@
 				06EC3B683EB6892E4F9C8316 /* GeminiCLIProvider.swift */,
 				4DDC1B4DE6B5118CE4AE8F82 /* ClaudeProvider.swift */,
 				76783C44AA2329AE3FA7E981 /* CodexProvider.swift */,
+				CMDCODEFILE11111111111 /* CommandCodeProvider.swift */,
 				CURSORFILE222222222222 /* CursorProvider.swift */,
 				F4AE672516E564CC52739BD9 /* CopilotProvider.swift */,
 				OC2222222222222222222222 /* OpenCodeProvider.swift */,
@@ -430,6 +436,7 @@
 				CURSORTSTFR11111111111 /* CursorProviderTests.swift */,
 				TOKENTESTFR1111111111111 /* TokenManagerTests.swift */,
 				CODEXTESTFR111111111111 /* CodexProviderTests.swift */,
+				CMDCODETESTFR111111111 /* CommandCodeProviderTests.swift */,
 				OCAUTHTESTFR11111111111 /* OpenCodeAuthDecodingTests.swift */,
 				OCZENTESTFR111111111111 /* OpenCodeZenProviderTests.swift */,
 			);
@@ -592,6 +599,7 @@
 			68CE796F262067298FE88469 /* BrowserCookieService.swift in Sources */,
 			CLICLAUDE11111111111111 /* ClaudeProvider.swift in Sources */,
 			CLICODEX111111111111111 /* CodexProvider.swift in Sources */,
+			CMDCODECLI111111111111 /* CommandCodeProvider.swift in Sources */,
 			CLICURSOR1111111111111 /* CursorProvider.swift in Sources */,
 			F35960B456C28D71BE7575A5 /* GeminiCLIProvider.swift in Sources */,
 			CLIOPENROUTER111111111 /* OpenRouterProvider.swift in Sources */,
@@ -635,6 +643,7 @@
 				87297CDD8B65F7EF0BC5D650 /* ProviderManager.swift in Sources */,
 				AD95EBD6AE3134DF4C797577 /* ClaudeProvider.swift in Sources */,
 				0B6CF8BEB936A2055F19AA8C /* CodexProvider.swift in Sources */,
+				CMDCODEAPP111111111111 /* CommandCodeProvider.swift in Sources */,
 				CURSORAPP1111111111111 /* CursorProvider.swift in Sources */,
 				27A0B56ADAC5B75A3270F90D /* CopilotProvider.swift in Sources */,
 				OC1111111111111111111111 /* OpenCodeProvider.swift in Sources */,
@@ -676,6 +685,7 @@
 			CURSORTSTBF11111111111 /* CursorProviderTests.swift in Sources */,
 			TOKENTESTBF1111111111111 /* TokenManagerTests.swift in Sources */,
 			CODEXTESTBF111111111111 /* CodexProviderTests.swift in Sources */,
+			CMDCODETESTBF111111111 /* CommandCodeProviderTests.swift in Sources */,
 			OCAUTHTESTBF11111111111 /* OpenCodeAuthDecodingTests.swift in Sources */,
 			OCZENTESTBF111111111111 /* OpenCodeZenProviderTests.swift in Sources */,
 		);
