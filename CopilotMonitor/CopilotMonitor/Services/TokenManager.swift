@@ -218,6 +218,7 @@ struct OpenCodeAuth: Codable {
     let githubCopilot: OAuth?
     let openrouter: APIKey?
     let opencode: APIKey?
+    let openCodeGo: APIKey?
     let kimiForCoding: APIKey?
     let minimaxCodingPlan: APIKey?
     let zaiCodingPlan: APIKey?
@@ -227,6 +228,7 @@ struct OpenCodeAuth: Codable {
 
     enum CodingKeys: String, CodingKey {
         case anthropic, openai, openrouter, opencode, synthetic, chutes
+        case openCodeGo = "opencode-go"
         case githubCopilot = "github-copilot"
         case kimiForCoding = "kimi-for-coding"
         case minimaxCodingPlan = "minimax-coding-plan"
@@ -241,6 +243,7 @@ struct OpenCodeAuth: Codable {
         githubCopilot: OAuth?,
         openrouter: APIKey?,
         opencode: APIKey?,
+        openCodeGo: APIKey?,
         kimiForCoding: APIKey?,
         minimaxCodingPlan: APIKey?,
         zaiCodingPlan: APIKey?,
@@ -254,6 +257,7 @@ struct OpenCodeAuth: Codable {
         self.githubCopilot = githubCopilot
         self.openrouter = openrouter
         self.opencode = opencode
+        self.openCodeGo = openCodeGo
         self.kimiForCoding = kimiForCoding
         self.minimaxCodingPlan = minimaxCodingPlan
         self.zaiCodingPlan = zaiCodingPlan
@@ -273,6 +277,7 @@ struct OpenCodeAuth: Codable {
         githubCopilot = Self.decodeLossyIfPresent(OAuth.self, from: container, forKey: .githubCopilot)
         openrouter = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .openrouter)
         opencode = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .opencode)
+        openCodeGo = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .openCodeGo)
         kimiForCoding = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .kimiForCoding)
         minimaxCodingPlan = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .minimaxCodingPlan)
         zaiCodingPlan = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .zaiCodingPlan)
@@ -286,6 +291,7 @@ struct OpenCodeAuth: Codable {
            githubCopilot == nil,
            openrouter == nil,
            opencode == nil,
+           openCodeGo == nil,
            kimiForCoding == nil,
            minimaxCodingPlan == nil,
            zaiCodingPlan == nil,
@@ -322,6 +328,7 @@ struct OpenCodeAuth: Codable {
         try container.encodeIfPresent(githubCopilot, forKey: .githubCopilot)
         try container.encodeIfPresent(openrouter, forKey: .openrouter)
         try container.encodeIfPresent(opencode, forKey: .opencode)
+        try container.encodeIfPresent(openCodeGo, forKey: .openCodeGo)
         try container.encodeIfPresent(kimiForCoding, forKey: .kimiForCoding)
         try container.encodeIfPresent(minimaxCodingPlan, forKey: .minimaxCodingPlan)
         try container.encodeIfPresent(zaiCodingPlan, forKey: .zaiCodingPlan)
@@ -4152,6 +4159,11 @@ final class TokenManager: @unchecked Sendable {
         return auth.opencode?.key
     }
 
+    func getOpenCodeGoAPIKey() -> String? {
+        guard let auth = readOpenCodeAuth() else { return nil }
+        return auth.openCodeGo?.key
+    }
+
     func getKimiAPIKey() -> String? {
         guard let auth = readOpenCodeAuth() else { return nil }
         return auth.kimiForCoding?.key
@@ -4882,6 +4894,7 @@ final class TokenManager: @unchecked Sendable {
             debugLines.append(gitHubCopilotTokenStatusLine())
             debugLines.append("  [OpenRouter] \(auth.openrouter != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [OpenCode] \(auth.opencode != nil ? "CONFIGURED" : "NOT CONFIGURED")")
+            debugLines.append("  [OpenCode Go] \(auth.openCodeGo != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [Kimi] \(auth.kimiForCoding != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [MiniMax Coding Plan] \(auth.minimaxCodingPlan != nil ? "CONFIGURED" : "NOT CONFIGURED")")
             debugLines.append("  [Z.AI Coding Plan] \(auth.zaiCodingPlan != nil ? "CONFIGURED" : "NOT CONFIGURED")")
@@ -5182,6 +5195,14 @@ final class TokenManager: @unchecked Sendable {
                 debugLines.append("  - Key Preview: \(maskToken(opencode.key))")
             } else {
                 debugLines.append("[OpenCode] NOT CONFIGURED")
+            }
+
+            if let openCodeGo = auth.openCodeGo {
+                debugLines.append("[OpenCode Go] API Key Present")
+                debugLines.append("  - Key Length: \(openCodeGo.key.count) chars")
+                debugLines.append("  - Key Preview: \(maskToken(openCodeGo.key))")
+            } else {
+                debugLines.append("[OpenCode Go] NOT CONFIGURED")
             }
 
             // Kimi for Coding

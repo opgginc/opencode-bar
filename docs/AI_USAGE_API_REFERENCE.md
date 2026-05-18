@@ -8,7 +8,7 @@
 |----------|-----------|
 | Claude | `~/.config/opencode/opencode-anthropic-auth/accounts.json`, `~/.local/share/opencode/auth.json`, `~/.config/claude-code/auth.json`, macOS Keychain (`Claude Code-credentials`, `Claude Code`) |
 | Codex / ChatGPT | `~/.local/share/opencode/auth.json`, `~/.opencode/auth/openai.json`, `~/.opencode/openai-codex-accounts.json`, `~/.opencode/projects/*/openai-codex-accounts.json`, `~/.codex/auth.json`, `~/.codex-lb/` |
-| Copilot, Nano-GPT, MiniMax | `~/.local/share/opencode/auth.json` |
+| Copilot, Nano-GPT, MiniMax, OpenCode Go | `~/.local/share/opencode/auth.json` |
 | Antigravity (Gemini) | `~/.config/opencode/antigravity-accounts.json` |
 | Antigravity (Local cache) | `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb` |
 
@@ -271,7 +271,47 @@ The bundled [`scripts/query-minimax.sh`](/Users/kargnas/projects/opencode-bar/sc
 
 ---
 
-## 6. Antigravity (Dual Quota System)
+## 6. OpenCode Go
+
+**Model endpoint:** `GET https://opencode.ai/zen/go/v1/models`
+
+OpenCode Go credentials are stored in the OpenCode auth entry `opencode-go`.
+
+```bash
+API_KEY=$(jq -r '."opencode-go".key' ~/.local/share/opencode/auth.json)
+
+curl -s "https://opencode.ai/zen/go/v1/models" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Accept: application/json"
+```
+
+OpenCode Go usage is currently exposed through the OpenCode dashboard. OpenCode Bar reads the dashboard page when both a workspace ID and browser auth cookie are configured:
+
+```json
+{
+  "workspaceId": "your-workspace-id",
+  "authCookie": "your-auth-cookie"
+}
+```
+
+Supported config paths:
+
+- `~/.config/opencode-bar/opencode-go.json`
+- `~/.config/opencode-quota/opencode-go.json`
+
+Environment overrides:
+
+- `OPENCODE_GO_WORKSPACE_ID`
+- `OPENCODE_GO_AUTH_COOKIE`
+- `OPENCODE_GO_CONFIG_FILE`
+
+OpenCode Go is displayed with explicit 5-hour, weekly, and monthly used percentages. The official limits are value-based: 5h `$12`, weekly `$30`, monthly `$60`; the subscription preset is `Go ($10/m)`.
+
+The bundled [`scripts/query-opencode-go.sh`](/Users/kargnas/projects/opencode-bar/scripts/query-opencode-go.sh) validates the API key and prints the dashboard usage windows when dashboard config is available.
+
+---
+
+## 7. Antigravity (Dual Quota System)
 
 Antigravity has **two independent quota systems**:
 
@@ -499,6 +539,7 @@ Test scripts are located in the `scripts/` folder:
 | `query-codex.sh` | Codex (OpenAI) |
 | `query-copilot.sh` | GitHub Copilot |
 | `query-minimax.sh` | MiniMax Coding Plan |
+| `query-opencode-go.sh` | OpenCode Go |
 | `query-gemini-cli.sh` | Antigravity - Gemini CLI quota |
 | `query-gemini-oauth-creds.sh` | Gemini CLI oauth_creds identity/token inspection |
 | `query-antigravity-local.sh` | Antigravity - Local quota (cache reverse parsing alias) |

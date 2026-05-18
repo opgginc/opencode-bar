@@ -894,10 +894,25 @@ final class StatusBarController: NSObject {
     }
 
     private func selectedPinnedProvider() -> ProviderIdentifier? {
+        let visibleQuotaProviderIds = Set(
+            quotaAlertCandidates(logContext: menuBarDisplayProvider == nil ? "pinned-provider-auto" : "pinned-provider").map(\.identifier)
+        )
         if let selected = menuBarDisplayProvider {
             // If user explicitly pinned a provider but it's disabled, return nil
             // so the UI falls back to Total Cost instead of silently switching providers
-            return isProviderEnabled(selected) ? selected : nil
+            guard isProviderEnabled(selected) else { return nil }
+            if let result = providerResults[selected],
+               case .quotaBased = result.usage,
+               !visibleQuotaProviderIds.contains(selected) {
+                debugLog("selectedPinnedProvider: hiding pinned \(selected.displayName) because exhausted while other quota remains")
+                return nil
+            }
+            return selected
+        }
+        if let quotaProvider = ProviderIdentifier.allCases.first(where: {
+            visibleQuotaProviderIds.contains($0) && isProviderEnabled($0)
+        }) {
+            return quotaProvider
         }
         return ProviderIdentifier.allCases.first(where: { isProviderEnabled($0) })
     }
@@ -966,6 +981,10 @@ final class StatusBarController: NSObject {
             add(details?.sevenDayUsage, priority: .weekly)
             add(details?.fiveHourUsage, priority: .hourly)
         case .minimaxCodingPlan:
+            add(details?.sevenDayUsage, priority: .weekly)
+            add(details?.fiveHourUsage, priority: .hourly)
+        case .openCodeGo:
+            add(details?.openCodeGoMonthlyUsage, priority: .monthly)
             add(details?.sevenDayUsage, priority: .weekly)
             add(details?.fiveHourUsage, priority: .hourly)
         case .codex:
@@ -1098,7 +1117,8 @@ final class StatusBarController: NSObject {
                     details.cursorAutoUsage,
                     details.cursorApiUsage,
                     details.tokenUsagePercent,
-                    details.mcpUsagePercent
+                    details.mcpUsagePercent,
+                    details.openCodeGoMonthlyUsage
                 ]
                 for percent in extraPercents {
                     if let normalized = normalizedUsagePercent(percent) {
@@ -1152,6 +1172,9 @@ final class StatusBarController: NSObject {
             guard let snapshot = statusSnapshot(for: identifier, result: result) else { continue }
             currentSnapshots[identifier] = snapshot
         }
+        let visibleQuotaIdentifiers = Set(
+            quotaAlertCandidates(logContext: "recent-change").map(\.identifier)
+        )
 
         guard !currentSnapshots.isEmpty else {
             previousProviderSnapshots = [:]
@@ -1167,15 +1190,22 @@ final class StatusBarController: NSObject {
         }
 
         if currentSnapshots == previousProviderSnapshots {
-            if let existing = recentChangeCandidate, currentSnapshots[existing.identifier] == nil {
+            if let existing = recentChangeCandidate,
+               currentSnapshots[existing.identifier] == nil || !visibleQuotaIdentifiers.contains(existing.identifier) {
                 recentChangeCandidate = nil
+                debugLog("refreshRecentChangeCandidate: cleared hidden or missing candidate")
+            } else {
+                debugLog("refreshRecentChangeCandidate: snapshots unchanged, keeping previous candidate")
             }
-            debugLog("refreshRecentChangeCandidate: snapshots unchanged, keeping previous candidate")
             return
         }
 
         var bestCandidate: RecentChangeCandidate?
         for (identifier, newSnapshot) in currentSnapshots {
+            guard visibleQuotaIdentifiers.contains(identifier) else {
+                debugLog("refreshRecentChangeCandidate: skipping \(identifier.displayName) because exhausted while other quota remains")
+                continue
+            }
             guard let oldSnapshot = previousProviderSnapshots[identifier],
                   oldSnapshot.kind == newSnapshot.kind else {
                 continue
@@ -1197,22 +1227,28 @@ final class StatusBarController: NSObject {
         }
 
         previousProviderSnapshots = currentSnapshots
+        var didClearExistingCandidate = false
         if let bestCandidate {
             recentChangeCandidate = bestCandidate
-        } else if let existing = recentChangeCandidate, currentSnapshots[existing.identifier] == nil {
+        } else if let existing = recentChangeCandidate,
+                  currentSnapshots[existing.identifier] == nil || !visibleQuotaIdentifiers.contains(existing.identifier) {
             recentChangeCandidate = nil
+            didClearExistingCandidate = true
+            debugLog("refreshRecentChangeCandidate: cleared hidden or missing candidate after refresh")
         }
 
         if let bestCandidate {
             debugLog(
                 "refreshRecentChangeCandidate: provider=\(bestCandidate.identifier.displayName), kind=\(bestCandidate.kind), delta=\(String(format: "%.2f", bestCandidate.delta))"
             )
+        } else if didClearExistingCandidate {
+            debugLog("refreshRecentChangeCandidate: no significant change after clearing hidden candidate")
         } else {
             debugLog("refreshRecentChangeCandidate: no significant change, keeping previous candidate")
         }
     }
 
-    private func quotaAlertCandidates() -> [AlertProviderCandidate] {
+    private func rawQuotaAlertCandidates() -> [AlertProviderCandidate] {
         var candidates: [AlertProviderCandidate] = []
         for (identifier, result) in providerResults {
             guard isProviderEnabled(identifier) else { continue }
@@ -1223,14 +1259,48 @@ final class StatusBarController: NSObject {
         return candidates
     }
 
+    private func quotaAlertCandidates(logContext: String? = nil) -> [AlertProviderCandidate] {
+        let candidates = rawQuotaAlertCandidates()
+        let visibleCandidates = StatusBarQuotaVisibilityPolicy.visibleCandidates(
+            from: candidates,
+            usedPercent: { $0.usedPercent }
+        )
+        let allCandidatesExhausted = !candidates.isEmpty
+            && candidates.allSatisfy({ $0.usedPercent >= StatusBarQuotaVisibilityPolicy.exhaustedUsageThreshold })
+
+        if let logContext, !candidates.isEmpty {
+            debugLog(
+                "statusBarQuotaVisibility[\(logContext)]: checked candidates=\(candidates.count), visible=\(visibleCandidates.count), allExhausted=\(allCandidatesExhausted)"
+            )
+        }
+
+        if let logContext, visibleCandidates.count != candidates.count {
+            let visibleIdentifiers = Set(visibleCandidates.map(\.identifier))
+            let hiddenProviders = candidates
+                .filter { !visibleIdentifiers.contains($0.identifier) }
+                .map { "\($0.identifier.displayName)=\(UsagePercentDisplayFormatter.string(from: $0.usedPercent))" }
+                .joined(separator: ", ")
+            debugLog(
+                "statusBarQuotaVisibility[\(logContext)]: hiding exhausted providers while other quota remains: \(hiddenProviders)"
+            )
+        } else if let logContext,
+                  allCandidatesExhausted {
+            debugLog(
+                "statusBarQuotaVisibility[\(logContext)]: all quota providers exhausted; allowing exhausted provider display"
+            )
+        }
+
+        return visibleCandidates
+    }
+
     private func mostCriticalProvider(minUsagePercent: Double) -> AlertProviderCandidate? {
-        quotaAlertCandidates()
+        quotaAlertCandidates(logContext: "critical")
             .filter { $0.usedPercent >= minUsagePercent }
             .max(by: { $0.usedPercent < $1.usedPercent })
     }
 
     private func singleEnabledQuotaProvider(atOrAbove threshold: Double) -> AlertProviderCandidate? {
-        let candidates = quotaAlertCandidates()
+        let candidates = quotaAlertCandidates(logContext: "single-at-or-above")
         guard candidates.count == 1, let candidate = candidates.first, candidate.usedPercent >= threshold else {
             return nil
         }
@@ -1875,6 +1945,7 @@ final class StatusBarController: NSObject {
             .claude,
             .kimi,
             .minimaxCodingPlan,
+            .openCodeGo,
             .codex,
             .cursor,
             .zaiCodingPlan,
@@ -2014,6 +2085,13 @@ final class StatusBarController: NSObject {
                                   let fiveHour = account.details?.fiveHourUsage,
                                   let sevenDay = account.details?.sevenDayUsage {
                             usedPercents = [fiveHour, sevenDay]
+                        } else if identifier == .openCodeGo {
+                            let percents = [
+                                account.details?.fiveHourUsage,
+                                account.details?.sevenDayUsage,
+                                account.details?.openCodeGoMonthlyUsage
+                            ].compactMap { $0 }
+                            usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else if identifier == .kimi,
                                   let fiveHour = account.details?.fiveHourUsage,
                                   let sevenDay = account.details?.sevenDayUsage {
@@ -2087,6 +2165,13 @@ final class StatusBarController: NSObject {
                               let fiveHour = result.details?.fiveHourUsage,
                               let sevenDay = result.details?.sevenDayUsage {
                         usedPercents = [fiveHour, sevenDay]
+                    } else if identifier == .openCodeGo {
+                        let percents = [
+                            result.details?.fiveHourUsage,
+                            result.details?.sevenDayUsage,
+                            result.details?.openCodeGoMonthlyUsage
+                        ].compactMap { $0 }
+                        usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else if identifier == .kimi,
                               let fiveHour = result.details?.fiveHourUsage,
                               let sevenDay = result.details?.sevenDayUsage {
@@ -2940,6 +3025,8 @@ final class StatusBarController: NSObject {
         case .antigravity:
             image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
         case .openCodeZen:
+            image = NSImage(named: "OpencodeIcon")
+        case .openCodeGo:
             image = NSImage(named: "OpencodeIcon")
         case .kimi:
             image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
@@ -4104,6 +4191,20 @@ extension StatusBarController {
                     fiveHourReset: fiveHoursFromNow,
                     sevenDayUsage: 68.0,
                     sevenDayReset: sevenDaysFromNow,
+                    authSource: "OpenCode"
+                )
+            ),
+            .openCodeGo: ProviderResult(
+                usage: .quotaBased(remaining: 42, entitlement: 100, overagePermitted: false),
+                details: DetailedUsage(
+                    fiveHourUsage: 58.0,
+                    fiveHourReset: fiveHoursFromNow,
+                    sevenDayUsage: 41.0,
+                    sevenDayReset: sevenDaysFromNow,
+                    planType: "Go",
+                    openCodeGoMonthlyUsage: 24.0,
+                    openCodeGoMonthlyReset: sevenDaysFromNow,
+                    openCodeGoModelCount: 12,
                     authSource: "OpenCode"
                 )
             ),

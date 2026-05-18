@@ -49,6 +49,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 | **Nano-GPT** | Quota-based | Weekly input tokens quota, USD/NANO balance |
 | **Kimi for Coding (Kimi K2.5)** | Quota-based | Usage limits, membership level, reset time |
 | **MiniMax Coding Plan** | Quota-based | 5h/weekly quotas, Anthropic-style dual-window submenu, OpenCode auth |
+| **OpenCode Go** | Quota-based | 5h/weekly/monthly usage windows, model API validation, OpenCode auth |
 | **Z.AI Coding Plan** | Quota-based | Token/MCP quotas, model usage, tool usage (24h) |
 | **Brave Search** | Quota-based | Monthly search quota, reset schedule |
 | **Tavily** | Quota-based | Monthly search quota, plan usage |
@@ -176,6 +177,7 @@ opencodebar list
 opencodebar provider claude
 opencodebar provider gemini_cli
 opencodebar provider minimax_coding_plan
+opencodebar provider opencode_go
 
 # Output as JSON (for scripting)
 opencodebar status --json
@@ -198,6 +200,7 @@ Gemini CLI (user1@gmail.com) Quota-based      0%          100% remaining
 Gemini CLI (user2@company.com) Quota-based    15%         85% remaining
 Kimi for Coding       Quota-based      26%         74/100 remaining
 MiniMax Coding Plan   Quota-based      0%,0%      100/100 remaining
+OpenCode Go           Quota-based      12%,25%,50% 50/100 remaining
 OpenCode Zen          Pay-as-you-go    -           $12.50 spent
 OpenRouter            Pay-as-you-go    -           $37.42 spent
 ```
@@ -207,6 +210,12 @@ OpenRouter            Pay-as-you-go    -           $37.42 spent
 - MiniMax Coding Plan is resolved from the OpenCode auth entry `minimax-coding-plan` in `auth.json`.
 - OpenCode Bar uses the Coding Plan remains endpoint and converts it into used percentages for the menu bar app and CLI.
 - MiniMax response fields `current_interval_usage_count` and `current_weekly_usage_count` behave as remaining counts despite their names, so OpenCode Bar calculates used percent as `total - remaining`.
+
+#### OpenCode Go Notes
+
+- OpenCode Go is resolved from the OpenCode auth entry `opencode-go` in `auth.json`.
+- OpenCode Bar validates the API key against `https://opencode.ai/zen/go/v1/models`.
+- Usage windows come from the OpenCode dashboard and require `OPENCODE_GO_WORKSPACE_ID` plus `OPENCODE_GO_AUTH_COOKIE`, or `~/.config/opencode-bar/opencode-go.json`.
 
 #### JSON Output Example
 
@@ -367,6 +376,8 @@ Quit (⌘Q)
 5. **Graceful Degradation**: Shows available providers even if some fail
 
 MiniMax Coding Plan uses `https://api.minimax.io/v1/api/openplatform/coding_plan/remains` and is displayed with explicit 5h used and weekly used windows in the provider submenu.
+
+OpenCode Go reads the API key from the OpenCode auth entry `opencode-go`. Current usage is exposed by the OpenCode dashboard, so live usage also needs `OPENCODE_GO_WORKSPACE_ID` and `OPENCODE_GO_AUTH_COOKIE`, or a local `~/.config/opencode-bar/opencode-go.json` file with `workspaceId` and `authCookie`.
 
 ### Privacy & Security
 

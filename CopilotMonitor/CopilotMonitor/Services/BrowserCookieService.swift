@@ -6,7 +6,7 @@ import os.log
 
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "BrowserCookieService")
 
-/// Service for extracting and decrypting GitHub cookies from Chromium-based browsers.
+/// Service for extracting and decrypting cookies from Chromium-based browsers.
 /// Supports Chrome, Brave, Arc, and Edge on macOS.
 /// Uses macOS Keychain for encryption key retrieval and PBKDF2 + AES-CBC for decryption.
 class BrowserCookieService {
@@ -56,6 +56,78 @@ class BrowserCookieService {
 
         debugLog("No browser found with valid GitHub cookies")
         throw BrowserCookieError.noBrowserFound
+    }
+
+    func getCookies(hostSuffix: String, names: Set<String>) throws -> [BrowserCookie] {
+        var allCookies: [BrowserCookie] = []
+        let normalizedHost = hostSuffix.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for browser in SupportedBrowser.allCases {
+            let paths = browser.cookieDBPaths
+            guard !paths.isEmpty else { continue }
+
+            do {
+                let encryptionKey = try getEncryptionKey(for: browser)
+                let aesKey = try deriveAESKey(from: encryptionKey)
+
+                for path in paths {
+                    do {
+                        let cookies = try readBrowserCookies(
+                            from: path,
+                            aesKey: aesKey,
+                            hostSuffix: normalizedHost,
+                            names: names
+                        )
+                        allCookies.append(contentsOf: cookies)
+                    } catch {
+                        debugLog("Failed to read browser cookies from \(path): \(error.localizedDescription)")
+                    }
+                }
+            } catch {
+                debugLog("Failed to prepare \(browser.displayName) cookie extraction: \(error.localizedDescription)")
+            }
+        }
+
+        guard !allCookies.isEmpty else {
+            throw BrowserCookieError.noBrowserFound
+        }
+
+        return allCookies
+    }
+
+    func getHistoryEntries(hostSuffix: String, pathPrefix: String, limit: Int = 100) throws -> [BrowserHistoryEntry] {
+        var allEntries: [BrowserHistoryEntry] = []
+        let normalizedHost = hostSuffix.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for browser in SupportedBrowser.allCases {
+            for cookieDBPath in browser.cookieDBPaths {
+                let historyPath = URL(fileURLWithPath: cookieDBPath)
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("History")
+                    .path
+
+                guard FileManager.default.fileExists(atPath: historyPath) else { continue }
+
+                do {
+                    let entries = try readHistoryEntries(
+                        from: historyPath,
+                        browser: browser,
+                        hostSuffix: normalizedHost,
+                        pathPrefix: pathPrefix,
+                        limit: limit
+                    )
+                    allEntries.append(contentsOf: entries)
+                } catch {
+                    debugLog("Failed to read browser history from \(historyPath): \(error.localizedDescription)")
+                }
+            }
+        }
+
+        guard !allEntries.isEmpty else {
+            throw BrowserCookieError.noBrowserFound
+        }
+
+        return allEntries.sorted { $0.lastVisitTime > $1.lastVisitTime }
     }
 
     // MARK: - Browser Detection & Cookie Extraction
@@ -231,6 +303,138 @@ class BrowserCookieService {
         )
     }
 
+    private func readBrowserCookies(
+        from dbPath: String,
+        aesKey: Data,
+        hostSuffix: String,
+        names: Set<String>
+    ) throws -> [BrowserCookie] {
+        let tempPath = NSTemporaryDirectory() + "browser_cookies_temp_\(UUID().uuidString).db"
+        try? FileManager.default.removeItem(atPath: tempPath)
+        try FileManager.default.copyItem(atPath: dbPath, toPath: tempPath)
+        defer { try? FileManager.default.removeItem(atPath: tempPath) }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(tempPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            logger.error("Failed to open SQLite database at \(tempPath)")
+            throw BrowserCookieError.invalidCookieFormat
+        }
+        defer { sqlite3_close(db) }
+
+        let escapedHost = hostSuffix.replacingOccurrences(of: "'", with: "''")
+        let query = "SELECT name, encrypted_value, value, host_key FROM cookies WHERE host_key LIKE '%\(escapedHost)%' ORDER BY expires_utc DESC"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
+            logger.error("Failed to prepare generic cookie SQLite statement")
+            throw BrowserCookieError.invalidCookieFormat
+        }
+        defer { sqlite3_finalize(statement) }
+
+        let dbURL = URL(fileURLWithPath: dbPath)
+        let profileName = dbURL.deletingLastPathComponent().lastPathComponent
+        let browser = SupportedBrowser.browser(forCookieDBPath: dbPath)
+        var cookies: [BrowserCookie] = []
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let namePtr = sqlite3_column_text(statement, 0),
+                  let domainPtr = sqlite3_column_text(statement, 3) else {
+                continue
+            }
+
+            let name = String(cString: namePtr)
+            guard names.isEmpty || names.contains(name) else { continue }
+
+            var value: String?
+            if let encryptedBlob = sqlite3_column_blob(statement, 1) {
+                let encryptedLength = Int(sqlite3_column_bytes(statement, 1))
+                if encryptedLength > 0 {
+                    let encryptedData = Data(bytes: encryptedBlob, count: encryptedLength)
+                    value = try? decryptCookie(encryptedData, aesKey: aesKey)
+                }
+            }
+
+            if value?.isEmpty ?? true,
+               let valuePtr = sqlite3_column_text(statement, 2) {
+                value = String(cString: valuePtr)
+            }
+
+            guard let value, !value.isEmpty else { continue }
+
+            cookies.append(BrowserCookie(
+                name: name,
+                value: value,
+                domain: String(cString: domainPtr),
+                browserName: browser?.displayName ?? "Browser",
+                profileName: profileName,
+                databasePath: dbPath
+            ))
+        }
+
+        return cookies
+    }
+
+    private func readHistoryEntries(
+        from dbPath: String,
+        browser: SupportedBrowser,
+        hostSuffix: String,
+        pathPrefix: String,
+        limit: Int
+    ) throws -> [BrowserHistoryEntry] {
+        let tempPath = NSTemporaryDirectory() + "browser_history_temp_\(UUID().uuidString).db"
+        try? FileManager.default.removeItem(atPath: tempPath)
+        try FileManager.default.copyItem(atPath: dbPath, toPath: tempPath)
+        defer { try? FileManager.default.removeItem(atPath: tempPath) }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(tempPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            logger.error("Failed to open SQLite history database at \(tempPath)")
+            throw BrowserCookieError.invalidCookieFormat
+        }
+        defer { sqlite3_close(db) }
+
+        let escapedHost = hostSuffix.replacingOccurrences(of: "'", with: "''")
+        let escapedPrefix = pathPrefix.replacingOccurrences(of: "'", with: "''")
+        let cappedLimit = max(1, min(limit, 500))
+        let query = """
+            SELECT url, title, last_visit_time
+            FROM urls
+            WHERE url LIKE 'http%://%\(escapedHost)\(escapedPrefix)%'
+            ORDER BY last_visit_time DESC
+            LIMIT \(cappedLimit)
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
+            logger.error("Failed to prepare browser history SQLite statement")
+            throw BrowserCookieError.invalidCookieFormat
+        }
+        defer { sqlite3_finalize(statement) }
+
+        let dbURL = URL(fileURLWithPath: dbPath)
+        let profileName = dbURL.deletingLastPathComponent().lastPathComponent
+        var entries: [BrowserHistoryEntry] = []
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let urlPtr = sqlite3_column_text(statement, 0),
+                  let url = URL(string: String(cString: urlPtr)) else {
+                continue
+            }
+
+            let title = sqlite3_column_text(statement, 1).map { String(cString: $0) }
+            let lastVisitTime = sqlite3_column_int64(statement, 2)
+
+            entries.append(BrowserHistoryEntry(
+                url: url,
+                title: title,
+                browserName: browser.displayName,
+                profileName: profileName,
+                databasePath: dbPath,
+                lastVisitTime: lastVisitTime
+            ))
+        }
+
+        return entries
+    }
+
     // MARK: - AES-CBC Decryption
 
     /// Chromium cookies: v10/v11 prefix, IV=16 spaces (0x20), skip first 32 garbage bytes
@@ -368,6 +572,12 @@ enum SupportedBrowser: CaseIterable {
             .map { "\(baseDir)/\($0)/Cookies" }
     }
 
+    static func browser(forCookieDBPath path: String) -> SupportedBrowser? {
+        allCases.first { browser in
+            browser.cookieDBPaths.contains(path)
+        }
+    }
+
     var keychainService: String {
         switch self {
         case .chrome: return "Chrome Safe Storage"
@@ -412,6 +622,40 @@ struct GitHubCookies {
             parts.append("logged_in=\(loggedIn)")
         }
         return parts.joined(separator: "; ")
+    }
+}
+
+struct BrowserCookie {
+    let name: String
+    let value: String
+    let domain: String
+    let browserName: String
+    let profileName: String
+    let databasePath: String
+
+    var profileKey: String {
+        "\(browserName)::\(profileName)::\(URL(fileURLWithPath: databasePath).deletingLastPathComponent().path)"
+    }
+
+    var displaySource: String {
+        "\(browserName) \(profileName)"
+    }
+}
+
+struct BrowserHistoryEntry {
+    let url: URL
+    let title: String?
+    let browserName: String
+    let profileName: String
+    let databasePath: String
+    let lastVisitTime: Int64
+
+    var profileKey: String {
+        "\(browserName)::\(profileName)::\(URL(fileURLWithPath: databasePath).deletingLastPathComponent().path)"
+    }
+
+    var displaySource: String {
+        "\(browserName) \(profileName)"
     }
 }
 

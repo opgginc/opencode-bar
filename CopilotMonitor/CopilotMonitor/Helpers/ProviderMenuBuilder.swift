@@ -526,6 +526,57 @@ extension StatusBarController {
 
             addSubscriptionItems(to: submenu, provider: .minimaxCodingPlan, accountId: subscriptionAccountId)
 
+        case .openCodeGo:
+            if let fiveHour = details.fiveHourUsage {
+                let items = createUsageWindowRow(
+                    label: "5h",
+                    usagePercent: fiveHour,
+                    resetDate: details.fiveHourReset,
+                    windowHours: 5
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if details.fiveHourUsage != nil, details.sevenDayUsage != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let weekly = details.sevenDayUsage {
+                let items = createUsageWindowRow(
+                    label: "Weekly",
+                    usagePercent: weekly,
+                    resetDate: details.sevenDayReset,
+                    windowHours: 168
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if details.sevenDayUsage != nil, details.openCodeGoMonthlyUsage != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let monthly = details.openCodeGoMonthlyUsage {
+                let items = createUsageWindowRow(
+                    label: "Monthly",
+                    usagePercent: monthly,
+                    resetDate: details.openCodeGoMonthlyReset,
+                    isMonthly: true
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+
+            if details.planType != nil || details.openCodeGoModelCount != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let plan = details.planType {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Plan: \(plan)")
+                submenu.addItem(item)
+            }
+            if let modelCount = details.openCodeGoModelCount {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Models: \(modelCount)")
+                submenu.addItem(item)
+            }
+
+            addSubscriptionItems(to: submenu, provider: .openCodeGo, accountId: subscriptionAccountId)
+
         case .zaiCodingPlan:
             // === Token Usage ===
             if let tokenUsage = details.tokenUsagePercent {
