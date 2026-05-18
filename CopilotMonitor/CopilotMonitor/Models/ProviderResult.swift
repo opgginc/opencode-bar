@@ -653,6 +653,47 @@ struct JSONFormatter {
                 }
             }
 
+            if identifier == .grok {
+                if let monthlyUsage = result.details?.monthlyUsage {
+                    providerDict["monthlyUsagePercent"] = monthlyUsage
+                }
+                if let resetDate = result.details?.primaryReset {
+                    let formatter = ISO8601DateFormatter()
+                    providerDict["monthlyResetsAt"] = formatter.string(from: resetDate)
+                }
+                if let email = result.details?.email {
+                    providerDict["email"] = email
+                }
+                if let sessions = result.details?.sessions {
+                    providerDict["localSessions"] = sessions
+                }
+                if let tokens = result.details?.messages {
+                    providerDict["localTokens"] = tokens
+                }
+                if let modelBreakdown = result.details?.modelBreakdown {
+                    providerDict["localModelCounts"] = modelBreakdown
+                }
+                if let accounts = result.accounts, !accounts.isEmpty {
+                    var accountsArray: [[String: Any]] = []
+                    for account in accounts {
+                        var accountDict: [String: Any] = [:]
+                        accountDict["index"] = account.accountIndex
+                        if let accountId = account.accountId {
+                            accountDict["accountId"] = accountId
+                        }
+                        if let email = account.details?.email {
+                            accountDict["email"] = email
+                        }
+                        if let subscriptionId = account.subscriptionId {
+                            accountDict["subscriptionId"] = subscriptionId
+                        }
+                        accountDict["usagePercentage"] = account.usage.usagePercentage
+                        accountsArray.append(accountDict)
+                    }
+                    providerDict["accounts"] = accountsArray
+                }
+            }
+
             // Z.AI: include both token and MCP usage percentages
             if identifier == .zaiCodingPlan {
                 if let tokenPercent = result.details?.tokenUsagePercent {
@@ -945,6 +986,9 @@ struct TableFormatter {
                     return percents.map { UsagePercentDisplayFormatter.string(from: $0) }.joined(separator: ",")
                 }
             }
+            if identifier == .grok, let monthlyUsage = result.details?.monthlyUsage {
+                return UsagePercentDisplayFormatter.string(from: monthlyUsage)
+            }
             // Z.AI: show both token and MCP percentages when both are available
             if identifier == .zaiCodingPlan {
                 let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
@@ -1152,7 +1196,7 @@ enum ProviderDisplayPolicy {
         guard let result else { return false }
 
         switch identifier {
-        case .claude, .codex, .copilot:
+        case .claude, .codex, .copilot, .grok:
             guard let accounts = result.accounts else { return false }
             return !accounts.isEmpty
         case .geminiCLI:

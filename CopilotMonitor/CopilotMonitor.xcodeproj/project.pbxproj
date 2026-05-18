@@ -35,6 +35,7 @@
 		A454D8C42F30548900E355E3 /* ZaiCodingPlanProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A454D8C32F30548900E355E3 /* ZaiCodingPlanProvider.swift */; };
 		MINIMAXAPP11111111111111 /* MiniMaxProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXFILE2222222222222 /* MiniMaxProvider.swift */; };
 		OCGOAPP11111111111111 /* OpenCodeGoProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OCGOFILE2222222222222 /* OpenCodeGoProvider.swift */; };
+		GROKAPP11111111111111 /* GrokProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = GROKFILE2222222222222 /* GrokProvider.swift */; };
 		NANOGPTAPP11111111111111 /* NanoGptProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = NANOGPTFILE222222222222 /* NanoGptProvider.swift */; };
 		A55555555555555555555555 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A66666666666666666666666 /* Assets.xcassets */; };
 		AD95EBD6AE3134DF4C797577 /* ClaudeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DDC1B4DE6B5118CE4AE8F82 /* ClaudeProvider.swift */; };
@@ -57,6 +58,7 @@
 		CLIKIMI1111111111111111 /* KimiProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = KI2222222222222222222222 /* KimiProvider.swift */; };
 		CLIMINIMAX11111111111111 /* MiniMaxProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXFILE2222222222222 /* MiniMaxProvider.swift */; };
 		OCGOCLI11111111111111 /* OpenCodeGoProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OCGOFILE2222222222222 /* OpenCodeGoProvider.swift */; };
+		GROKCLI11111111111111 /* GrokProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = GROKFILE2222222222222 /* GrokProvider.swift */; };
 		CLIZAI11111111111111111 /* ZaiCodingPlanProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A454D8C32F30548900E355E3 /* ZaiCodingPlanProvider.swift */; };
 		NANOGPTCLI11111111111111 /* NanoGptProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = NANOGPTFILE222222222222 /* NanoGptProvider.swift */; };
 		CLIOPENCZEN1111111111111 /* OpenCodeZenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OZ2222222222222222222222 /* OpenCodeZenProvider.swift */; };
@@ -74,6 +76,7 @@
 		KI1111111111111111111111 /* KimiProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = KI2222222222222222222222 /* KimiProvider.swift */; };
 		MINIMAXTESTBF11111111111 /* MiniMaxProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXTESTFR11111111111 /* MiniMaxProviderTests.swift */; };
 		OCGOTESTBF11111111111 /* OpenCodeGoProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = OCGOTESTFR11111111111 /* OpenCodeGoProviderTests.swift */; };
+		GROKTESTBF11111111111 /* GrokProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = GROKTESTFR11111111111 /* GrokProviderTests.swift */; };
 		MINIMAXJSONBF11111111111 /* minimax_response.json in Resources */ = {isa = PBXBuildFile; fileRef = MINIMAXJSONFR11111111111 /* minimax_response.json */; };
 		BRAVEAPP1111111111111111 /* BraveSearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = BRAVEFILE22222222222222 /* BraveSearchProvider.swift */; };
 		TAVILYAPP111111111111111 /* TavilySearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = TAVILYFILE22222222222222 /* TavilySearchProvider.swift */; };
@@ -166,6 +169,7 @@
 		A454D8C32F30548900E355E3 /* ZaiCodingPlanProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZaiCodingPlanProvider.swift; sourceTree = "<group>"; };
 		MINIMAXFILE2222222222222 /* MiniMaxProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniMaxProvider.swift; sourceTree = "<group>"; };
 		OCGOFILE2222222222222 /* OpenCodeGoProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoProvider.swift; sourceTree = "<group>"; };
+		GROKFILE2222222222222 /* GrokProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokProvider.swift; sourceTree = "<group>"; };
 		NANOGPTFILE222222222222 /* NanoGptProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanoGptProvider.swift; sourceTree = "<group>"; };
 		A66666666666666666666666 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A77777777777777777777777 /* OpenCode Bar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OpenCode Bar.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -194,6 +198,7 @@
 		KI2222222222222222222222 /* KimiProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KimiProvider.swift; sourceTree = "<group>"; };
 		MINIMAXTESTFR11111111111 /* MiniMaxProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniMaxProviderTests.swift; sourceTree = "<group>"; };
 		OCGOTESTFR11111111111 /* OpenCodeGoProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoProviderTests.swift; sourceTree = "<group>"; };
+		GROKTESTFR11111111111 /* GrokProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokProviderTests.swift; sourceTree = "<group>"; };
 		MINIMAXJSONFR11111111111 /* minimax_response.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = minimax_response.json; sourceTree = "<group>"; };
 		BRAVEFILE22222222222222 /* BraveSearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveSearchProvider.swift; sourceTree = "<group>"; };
 		TAVILYFILE22222222222222 /* TavilySearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TavilySearchProvider.swift; sourceTree = "<group>"; };
@@ -281,6 +286,7 @@
 				F1DA8E47F4CFEFC3571708AD /* AntigravityProvider.swift */,
 				OZ2222222222222222222222 /* OpenCodeZenProvider.swift */,
 				OCGOFILE2222222222222 /* OpenCodeGoProvider.swift */,
+				GROKFILE2222222222222 /* GrokProvider.swift */,
 				KI2222222222222222222222 /* KimiProvider.swift */,
 				MINIMAXFILE2222222222222 /* MiniMaxProvider.swift */,
 				283349002F313176004DADE1 /* ChutesProvider.swift */,
@@ -434,6 +440,7 @@
 				NANOGPTTESTFR1111111111 /* NanoGptProviderTests.swift */,
 				MINIMAXTESTFR11111111111 /* MiniMaxProviderTests.swift */,
 				OCGOTESTFR11111111111 /* OpenCodeGoProviderTests.swift */,
+				GROKTESTFR11111111111 /* GrokProviderTests.swift */,
 				CURSORTSTFR11111111111 /* CursorProviderTests.swift */,
 				TOKENTESTFR1111111111111 /* TokenManagerTests.swift */,
 				CODEXTESTFR111111111111 /* CodexProviderTests.swift */,
@@ -607,6 +614,7 @@
 			CLIKIMI1111111111111111 /* KimiProvider.swift in Sources */,
 			CLIMINIMAX11111111111111 /* MiniMaxProvider.swift in Sources */,
 			OCGOCLI11111111111111 /* OpenCodeGoProvider.swift in Sources */,
+			GROKCLI11111111111111 /* GrokProvider.swift in Sources */,
 			CLIZAI11111111111111111 /* ZaiCodingPlanProvider.swift in Sources */,
 			NANOGPTCLI11111111111111 /* NanoGptProvider.swift in Sources */,
 			283349022F313176004DADE1 /* ChutesProvider.swift in Sources */,
@@ -652,6 +660,7 @@
 				KI1111111111111111111111 /* KimiProvider.swift in Sources */,
 				MINIMAXAPP11111111111111 /* MiniMaxProvider.swift in Sources */,
 				OCGOAPP11111111111111 /* OpenCodeGoProvider.swift in Sources */,
+				GROKAPP11111111111111 /* GrokProvider.swift in Sources */,
 				283349012F313176004DADE1 /* ChutesProvider.swift in Sources */,
 				TAVILYAPP111111111111111 /* TavilySearchProvider.swift in Sources */,
 				BRAVEAPP1111111111111111 /* BraveSearchProvider.swift in Sources */,
@@ -683,6 +692,7 @@
 			NANOGPTTESTBF1111111111 /* NanoGptProviderTests.swift in Sources */,
 			MINIMAXTESTBF11111111111 /* MiniMaxProviderTests.swift in Sources */,
 			OCGOTESTBF11111111111 /* OpenCodeGoProviderTests.swift in Sources */,
+			GROKTESTBF11111111111 /* GrokProviderTests.swift in Sources */,
 			CURSORTSTBF11111111111 /* CursorProviderTests.swift in Sources */,
 			TOKENTESTBF1111111111111 /* TokenManagerTests.swift in Sources */,
 			CODEXTESTBF111111111111 /* CodexProviderTests.swift in Sources */,
