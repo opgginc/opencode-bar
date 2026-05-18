@@ -128,6 +128,7 @@ final class GrokProvider: ProviderProtocol {
             primaryReset: billing.resetsAt,
             planType: auth.loginMethod,
             sessions: localSessions.sessionCount,
+            // Grok stores local token totals here to avoid widening DetailedUsage for one provider.
             messages: localSessions.totalTokens,
             email: auth.email,
             authSource: auth.source,
@@ -218,6 +219,8 @@ final class GrokProvider: ProviderProtocol {
                 }
                 return lhs.order < rhs.order
             }
+        let preferredUsageCandidates = usageCandidates.filter { $0.path == [1, 1] }
+        let orderedUsageCandidates = preferredUsageCandidates.isEmpty ? usageCandidates : preferredUsageCandidates
 
         let resetCandidates = scan.varints.compactMap { field -> ([Int], Date)? in
             guard (1_700_000_000...2_100_000_000).contains(field.value) else { return nil }
@@ -235,7 +238,7 @@ final class GrokProvider: ProviderProtocol {
             Array(field.path.prefix(2)) == [1, 6]
         }
         let usedPercent: Double?
-        if let first = usageCandidates.first {
+        if let first = orderedUsageCandidates.first {
             usedPercent = first.value
         } else if scan.fixed32.isEmpty, resetAt != nil, hasLocalResetMarker {
             usedPercent = 0
@@ -279,6 +282,7 @@ final class GrokProvider: ProviderProtocol {
         var modelCounts: [String: Int] = [:]
 
         for case let fileURL as URL in enumerator where fileURL.lastPathComponent == "signals.json" {
+            // Grok CLI session paths vary by project, so any recent signals.json under sessions/ is intentional.
             let mtime = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
                 ?? Date.distantPast
             guard mtime >= cutoff else { continue }

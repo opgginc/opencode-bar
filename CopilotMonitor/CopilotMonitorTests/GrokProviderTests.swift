@@ -42,21 +42,15 @@ final class GrokProviderTests: XCTestCase {
     func testParseGrpcWebBillingResponseReadsPercentAndPreferredReset() throws {
         let resetEpoch: UInt64 = 1_800_000_000
         var inner = Data()
-        inner.append(13)
-        inner.append(float32LittleEndian(42.5))
+        inner.append(fixed32Field(1, 42.5))
 
         var resetMessage = Data()
-        resetMessage.append(8)
-        resetMessage.append(encodeVarint(resetEpoch))
+        resetMessage.append(varintField(1, resetEpoch))
 
-        inner.append(42)
-        inner.append(encodeVarint(UInt64(resetMessage.count)))
-        inner.append(resetMessage)
+        inner.append(lengthDelimitedField(5, resetMessage))
 
         var message = Data()
-        message.append(10)
-        message.append(encodeVarint(UInt64(inner.count)))
-        message.append(inner)
+        message.append(lengthDelimitedField(1, inner))
 
         let response = grpcWebFrame(message)
         let parsed = try GrokProvider.parseGrpcWebBillingResponse(
@@ -66,6 +60,62 @@ final class GrokProviderTests: XCTestCase {
 
         XCTAssertEqual(parsed.monthlyUsedPercent, 42.5, accuracy: 0.001)
         XCTAssertEqual(parsed.resetsAt, Date(timeIntervalSince1970: TimeInterval(resetEpoch)))
+    }
+
+    func testParseGrpcWebBillingResponsePrefersObservedUsagePath() throws {
+        let resetEpoch: UInt64 = 1_800_000_000
+        var inner = Data()
+        inner.append(fixed32Field(1, 42.5))
+        inner.append(lengthDelimitedField(5, varintField(1, resetEpoch)))
+
+        var message = Data()
+        message.append(fixed32Field(1, 99.0))
+        message.append(lengthDelimitedField(1, inner))
+
+        let parsed = try GrokProvider.parseGrpcWebBillingResponse(
+            grpcWebFrame(message),
+            now: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        XCTAssertEqual(parsed.monthlyUsedPercent, 42.5, accuracy: 0.001)
+    }
+
+    func testParseGrpcWebBillingResponseUsesResetMarkerFallback() throws {
+        let resetEpoch: UInt64 = 1_800_000_000
+        var inner = Data()
+        inner.append(lengthDelimitedField(5, varintField(1, resetEpoch)))
+        inner.append(lengthDelimitedField(6, varintField(1, 1)))
+
+        let parsed = try GrokProvider.parseGrpcWebBillingResponse(
+            grpcWebFrame(lengthDelimitedField(1, inner)),
+            now: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        XCTAssertEqual(parsed.monthlyUsedPercent, 0)
+        XCTAssertEqual(parsed.resetsAt, Date(timeIntervalSince1970: TimeInterval(resetEpoch)))
+    }
+
+    func testValidateGrpcStatusThrowsForHeaderStatus() {
+        XCTAssertThrowsError(try GrokProvider.validateGrpcStatus(
+            data: Data(),
+            headers: ["grpc-status": "16", "grpc-message": "Invalid%20token"]
+        )) { error in
+            guard case ProviderError.networkError(let message) = error else {
+                return XCTFail("Expected networkError, got \(error)")
+            }
+            XCTAssertTrue(message.contains("Invalid token"))
+        }
+    }
+
+    func testValidateGrpcStatusThrowsForTrailerStatus() {
+        let trailer = grpcWebFrame(Data("grpc-status: 13\r\ngrpc-message: bad%20status\r\n".utf8), flags: 0x80)
+
+        XCTAssertThrowsError(try GrokProvider.validateGrpcStatus(data: trailer, headers: [:])) { error in
+            guard case ProviderError.networkError(let message) = error else {
+                return XCTFail("Expected networkError, got \(error)")
+            }
+            XCTAssertTrue(message.contains("bad status"))
+        }
     }
 
     func testSummarizeLocalSessionsReadsRecentSignals() throws {
@@ -98,6 +148,39 @@ final class GrokProviderTests: XCTestCase {
         XCTAssertEqual(summary.modelCounts["grok-code-fast"], 1)
     }
 
+    func testSummarizeLocalSessionsSkipsStaleSignals() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grok-provider-tests-\(UUID().uuidString)")
+        let recentSessionDir = root.appendingPathComponent("project/recent")
+        let staleSessionDir = root.appendingPathComponent("project/stale")
+        try FileManager.default.createDirectory(at: recentSessionDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: staleSessionDir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let json = """
+        {
+          "totalTokensBeforeCompaction": 100,
+          "contextTokensUsed": 25,
+          "primaryModelId": "grok-build"
+        }
+        """
+        let recentSignalsURL = recentSessionDir.appendingPathComponent("signals.json")
+        let staleSignalsURL = staleSessionDir.appendingPathComponent("signals.json")
+        try Data(json.utf8).write(to: recentSignalsURL)
+        try Data(json.utf8).write(to: staleSignalsURL)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let staleDate = now.addingTimeInterval(-31 * 24 * 60 * 60)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: recentSignalsURL.path)
+        try FileManager.default.setAttributes([.modificationDate: staleDate], ofItemAtPath: staleSignalsURL.path)
+
+        let summary = GrokProvider.summarizeLocalSessions(root: root, now: now)
+
+        XCTAssertEqual(summary.sessionCount, 1)
+        XCTAssertEqual(summary.totalTokens, 125)
+    }
+
     func testAccountSubscriptionIDPrefersEmail() {
         let usage = ProviderUsage.quotaBased(remaining: 80, entitlement: 100, overagePermitted: false)
         let details = DetailedUsage(email: "User@Example.COM")
@@ -122,6 +205,25 @@ final class GrokProviderTests: XCTestCase {
         return data
     }
 
+    private func varintField(_ fieldNumber: UInt8, _ value: UInt64) -> Data {
+        var data = Data([(fieldNumber << 3) | 0])
+        data.append(encodeVarint(value))
+        return data
+    }
+
+    private func lengthDelimitedField(_ fieldNumber: UInt8, _ payload: Data) -> Data {
+        var data = Data([(fieldNumber << 3) | 2])
+        data.append(encodeVarint(UInt64(payload.count)))
+        data.append(payload)
+        return data
+    }
+
+    private func fixed32Field(_ fieldNumber: UInt8, _ value: Float) -> Data {
+        var data = Data([(fieldNumber << 3) | 5])
+        data.append(float32LittleEndian(value))
+        return data
+    }
+
     private func float32LittleEndian(_ value: Float) -> Data {
         let bits = value.bitPattern
         return Data([
@@ -132,8 +234,8 @@ final class GrokProviderTests: XCTestCase {
         ])
     }
 
-    private func grpcWebFrame(_ payload: Data) -> Data {
-        var frame = Data([0])
+    private func grpcWebFrame(_ payload: Data, flags: UInt8 = 0) -> Data {
+        var frame = Data([flags])
         frame.append(UInt8((payload.count >> 24) & 0xFF))
         frame.append(UInt8((payload.count >> 16) & 0xFF))
         frame.append(UInt8((payload.count >> 8) & 0xFF))
