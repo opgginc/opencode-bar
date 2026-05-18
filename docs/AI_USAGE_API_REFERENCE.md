@@ -11,6 +11,7 @@
 | Copilot, Nano-GPT, MiniMax, OpenCode Go | `~/.local/share/opencode/auth.json` |
 | Antigravity (Gemini) | `~/.config/opencode/antigravity-accounts.json` |
 | Antigravity (Local cache) | `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb` |
+| Grok | `~/.grok/auth.json`, `~/.grok/sessions/**/signals.json`, optional grok.com browser cookies |
 
 ---
 
@@ -311,7 +312,42 @@ The bundled [`scripts/query-opencode-go.sh`](/Users/kargnas/projects/opencode-ba
 
 ---
 
-## 7. Antigravity (Dual Quota System)
+## 7. Grok
+
+**Identity source:** `~/.grok/auth.json`
+
+The Grok CLI stores login records under top-level OIDC/session scope keys. Prefer entries whose key starts with `https://auth.x.ai::`, then fall back to `https://accounts.x.ai/sign-in`.
+
+```bash
+jq '
+  to_entries
+  | map(select(.value.key != null and .value.key != ""))
+  | sort_by(if (.key | startswith("https://auth.x.ai::")) then 0 else 1 end)
+  | .[0].value
+  | {email, team_id, user_id, auth_mode, expires_at}
+' ~/.grok/auth.json
+```
+
+**Billing sources:**
+
+1. `grok agent stdio` JSON-RPC method `x.ai/billing`
+2. `POST https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` with a grok.com browser session cookie
+3. Best-effort bearer token probe using the `key` from `~/.grok/auth.json`
+
+```bash
+./scripts/query-grok.sh
+./scripts/query-grok.sh --json
+GROK_COOKIE_HEADER='auth=...' ./scripts/query-grok.sh --no-rpc
+CODEXBAR_ALLOW_BROWSER_COOKIE_IMPORT=1 ./scripts/query-grok.sh --no-rpc
+```
+
+The script also scans `~/.grok/sessions/**/signals.json` for recent local session counts, token totals, and model names.
+
+OpenCode Bar's native Grok provider uses the same identity selection rule. It currently supports one active Grok CLI login, but returns a single account row keyed by normalized email so subscription settings are already stored in the same email-scoped shape used by multi-account providers.
+
+---
+
+## 8. Antigravity (Dual Quota System)
 
 Antigravity has **two independent quota systems**:
 
@@ -540,6 +576,7 @@ Test scripts are located in the `scripts/` folder:
 | `query-copilot.sh` | GitHub Copilot |
 | `query-minimax.sh` | MiniMax Coding Plan |
 | `query-opencode-go.sh` | OpenCode Go |
+| `query-grok.sh` | Grok |
 | `query-gemini-cli.sh` | Antigravity - Gemini CLI quota |
 | `query-gemini-oauth-creds.sh` | Gemini CLI oauth_creds identity/token inspection |
 | `query-antigravity-local.sh` | Antigravity - Local quota (cache reverse parsing alias) |
