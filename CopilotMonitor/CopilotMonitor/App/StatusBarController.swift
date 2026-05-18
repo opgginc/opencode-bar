@@ -987,6 +987,8 @@ final class StatusBarController: NSObject {
             add(details?.openCodeGoMonthlyUsage, priority: .monthly)
             add(details?.sevenDayUsage, priority: .weekly)
             add(details?.fiveHourUsage, priority: .hourly)
+        case .grok:
+            add(details?.monthlyUsage, priority: .monthly)
         case .codex:
             add(
                 details?.secondaryUsage,
@@ -1946,6 +1948,7 @@ final class StatusBarController: NSObject {
             .kimi,
             .minimaxCodingPlan,
             .openCodeGo,
+            .grok,
             .codex,
             .cursor,
             .zaiCodingPlan,
@@ -2034,6 +2037,10 @@ final class StatusBarController: NSObject {
                            let detailsEmail,
                            !detailsEmail.isEmpty {
                             accountDisplayLabel = detailsEmail
+                        } else if identifier == .grok,
+                           let detailsEmail,
+                           !detailsEmail.isEmpty {
+                            accountDisplayLabel = detailsEmail
                         } else if identifier == .codex,
                                   let detailsEmail,
                                   !detailsEmail.isEmpty {
@@ -2091,6 +2098,9 @@ final class StatusBarController: NSObject {
                                 account.details?.sevenDayUsage,
                                 account.details?.openCodeGoMonthlyUsage
                             ].compactMap { $0 }
+                            usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
+                        } else if identifier == .grok {
+                            let percents = [account.details?.monthlyUsage].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else if identifier == .kimi,
                                   let fiveHour = account.details?.fiveHourUsage,
@@ -2171,6 +2181,9 @@ final class StatusBarController: NSObject {
                             result.details?.sevenDayUsage,
                             result.details?.openCodeGoMonthlyUsage
                         ].compactMap { $0 }
+                        usedPercents = percents.isEmpty ? [singlePercent] : percents
+                    } else if identifier == .grok {
+                        let percents = [result.details?.monthlyUsage].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else if identifier == .kimi,
                               let fiveHour = result.details?.fiveHourUsage,
@@ -2510,6 +2523,10 @@ final class StatusBarController: NSObject {
                     || lowercased.contains("/.gemini/oauth_creds.json")
                     || lowercased.contains("oauth_creds.json") {
                     return "Gemini CLI"
+                }
+            case .grok:
+                if lowercased.contains(".grok/auth.json") || lowercased.contains("/.grok/auth.json") {
+                    return "Grok CLI"
                 }
             default:
                 break
@@ -3028,6 +3045,8 @@ final class StatusBarController: NSObject {
             image = NSImage(named: "OpencodeIcon")
         case .openCodeGo:
             image = NSImage(named: "OpencodeIcon")
+        case .grok:
+            image = NSImage(named: "GrokIcon")
         case .kimi:
             image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
         case .minimaxCodingPlan:

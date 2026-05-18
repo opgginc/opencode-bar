@@ -39,6 +39,7 @@ actor ProviderManager {
             AntigravityProvider(),
             OpenCodeZenProvider(),
             OpenCodeGoProvider(),
+            GrokProvider(),
             KimiProvider(),
             ChutesProvider(),
             SyntheticProvider(),

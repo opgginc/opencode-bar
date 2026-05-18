@@ -50,6 +50,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 | **Kimi for Coding (Kimi K2.5)** | Quota-based | Usage limits, membership level, reset time |
 | **MiniMax Coding Plan** | Quota-based | 5h/weekly quotas, Anthropic-style dual-window submenu, OpenCode auth |
 | **OpenCode Go** | Quota-based | 5h/weekly/monthly usage windows, model API validation, OpenCode auth |
+| **Grok** | Quota-based | Monthly usage, reset time, email-scoped subscription settings, local session tokens |
 | **Z.AI Coding Plan** | Quota-based | Token/MCP quotas, model usage, tool usage (24h) |
 | **Brave Search** | Quota-based | Monthly search quota, reset schedule |
 | **Tavily** | Quota-based | Monthly search quota, plan usage |
@@ -201,6 +202,7 @@ Gemini CLI (user2@company.com) Quota-based    15%         85% remaining
 Kimi for Coding       Quota-based      26%         74/100 remaining
 MiniMax Coding Plan   Quota-based      0%,0%      100/100 remaining
 OpenCode Go           Quota-based      12%,25%,50% 50/100 remaining
+Grok                  Quota-based      15%         85/100 remaining
 OpenCode Zen          Pay-as-you-go    -           $12.50 spent
 OpenRouter            Pay-as-you-go    -           $37.42 spent
 ```
@@ -217,6 +219,12 @@ OpenRouter            Pay-as-you-go    -           $37.42 spent
 - OpenCode Bar validates the API key against `https://opencode.ai/zen/go/v1/models`.
 - Usage windows come from the OpenCode dashboard and require `OPENCODE_GO_WORKSPACE_ID` plus `OPENCODE_GO_AUTH_COOKIE`, or `~/.config/opencode-bar/opencode-go.json`.
 - The monthly dashboard window is a usage cap signal; the app's subscription preset for the Go plan remains `$10.00`.
+
+#### Grok Notes
+
+- Grok is resolved from `~/.grok/auth.json`; run `grok login` before using this provider.
+- OpenCode Bar prefers the OIDC record whose scope starts with `https://auth.x.ai::` and stores subscription settings by the normalized email address.
+- Billing usage comes from Grok's gRPC-web billing endpoint with the Grok CLI bearer token. Local `~/.grok/sessions/**/signals.json` files are summarized for recent session/token details.
 
 #### JSON Output Example
 
@@ -379,6 +387,8 @@ Quit (⌘Q)
 MiniMax Coding Plan uses `https://api.minimax.io/v1/api/openplatform/coding_plan/remains` and is displayed with explicit 5h used and weekly used windows in the provider submenu.
 
 OpenCode Go reads the API key from the OpenCode auth entry `opencode-go`. Current usage is exposed by the OpenCode dashboard, so live usage also needs `OPENCODE_GO_WORKSPACE_ID` and `OPENCODE_GO_AUTH_COOKIE`, or a local `~/.config/opencode-bar/opencode-go.json` file with `workspaceId` and `authCookie`.
+
+Grok reads identity from `~/.grok/auth.json`, uses the email address as the subscription scope, and fetches monthly billing usage from Grok's gRPC-web billing endpoint with the Grok CLI bearer token.
 
 ### Privacy & Security
 

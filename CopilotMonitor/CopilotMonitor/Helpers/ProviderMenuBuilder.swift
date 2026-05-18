@@ -577,6 +577,68 @@ extension StatusBarController {
 
             addSubscriptionItems(to: submenu, provider: .openCodeGo, accountId: subscriptionAccountId)
 
+        case .grok:
+            if let monthly = details.monthlyUsage {
+                let items = createUsageWindowRow(
+                    label: "Monthly",
+                    usagePercent: monthly,
+                    resetDate: details.primaryReset,
+                    isMonthly: true
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+
+            if details.planType != nil || details.email != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let plan = details.planType {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Plan: \(plan)")
+                submenu.addItem(item)
+            }
+            if let email = details.email {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(
+                    text: "Account: \(email)",
+                    icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Account")
+                )
+                submenu.addItem(item)
+            }
+
+            if details.sessions != nil || details.messages != nil || details.modelBreakdown != nil {
+                submenu.addItem(NSMenuItem.separator())
+                let headerItem = NSMenuItem()
+                headerItem.view = createHeaderView(title: "Local Activity (30d)")
+                submenu.addItem(headerItem)
+            }
+            if let sessions = details.sessions {
+                let formatted = NumberFormatter.localizedString(from: NSNumber(value: sessions), number: .decimal)
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Sessions: \(formatted)")
+                submenu.addItem(item)
+            }
+            if let tokens = details.messages {
+                let formatted = NumberFormatter.localizedString(from: NSNumber(value: tokens), number: .decimal)
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Tokens: \(formatted)")
+                submenu.addItem(item)
+            }
+            if let models = details.modelBreakdown, !models.isEmpty {
+                let sortedModels = models.sorted {
+                    if $0.value != $1.value {
+                        return $0.value > $1.value
+                    }
+                    return $0.key.localizedStandardCompare($1.key) == .orderedAscending
+                }.prefix(5)
+                for (model, count) in sortedModels {
+                    let item = NSMenuItem()
+                    item.view = createDisabledLabelView(text: "\(model): \(Int(count)) session(s)")
+                    submenu.addItem(item)
+                }
+            }
+
+            addSubscriptionItems(to: submenu, provider: .grok, accountId: subscriptionAccountId)
+
         case .zaiCodingPlan:
             // === Token Usage ===
             if let tokenUsage = details.tokenUsagePercent {
@@ -786,7 +848,7 @@ extension StatusBarController {
             submenu.addItem(item)
         }
 
-        if let monthly = details.monthlyUsage {
+        if let monthly = details.monthlyUsage, identifier != .grok {
             let item = NSMenuItem()
             item.view = createDisabledLabelView(
                 text: String(format: "Monthly: $%.2f", monthly),
