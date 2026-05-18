@@ -28,7 +28,8 @@ struct CommandCodeCookieHeader: Equatable {
     static let supportedCookieNames = [
         "__Host-better-auth.session_token",
         "__Secure-better-auth.session_token",
-        "better-auth.session_token"
+        "better-auth.session_token",
+        "__Secure-commandcode_prod_.session_token"
     ]
     static let productionCookieName = "__Secure-better-auth.session_token"
 

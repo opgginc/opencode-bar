@@ -22,6 +22,16 @@ final class CommandCodeProviderTests: XCTestCase {
         XCTAssertEqual(header?.headerValue, "__Secure-better-auth.session_token=test-token")
     }
 
+    func testCookieHeaderParsesCommandCodeProductionCookie() {
+        let header = CommandCodeCookieHeader.override(
+            from: "foo=bar; __Secure-commandcode_prod_.session_token=test-token; other=value"
+        )
+
+        XCTAssertEqual(header?.name, "__Secure-commandcode_prod_.session_token")
+        XCTAssertEqual(header?.token, "test-token")
+        XCTAssertEqual(header?.headerValue, "__Secure-commandcode_prod_.session_token=test-token")
+    }
+
     func testCookieHeaderParsesBareToken() {
         let header = CommandCodeCookieHeader.override(from: "test-token")
 

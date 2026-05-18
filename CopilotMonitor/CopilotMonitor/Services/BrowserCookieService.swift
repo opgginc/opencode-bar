@@ -445,6 +445,7 @@ enum SupportedBrowser: CaseIterable {
     case brave
     case arc
     case edge
+    case comet
 
     var displayName: String {
         switch self {
@@ -452,6 +453,7 @@ enum SupportedBrowser: CaseIterable {
         case .brave: return "Brave"
         case .arc: return "Arc"
         case .edge: return "Edge"
+        case .comet: return "Comet"
         }
     }
 
@@ -480,6 +482,10 @@ enum SupportedBrowser: CaseIterable {
             let baseDir = "\(home)/Library/Application Support/Microsoft Edge"
             paths.append("\(baseDir)/Default/Cookies")
             paths.append(contentsOf: findProfilePaths(in: baseDir))
+        case .comet:
+            let baseDir = "\(home)/Library/Application Support/Comet"
+            paths.append("\(baseDir)/Default/Cookies")
+            paths.append(contentsOf: findProfilePaths(in: baseDir))
         }
 
         return paths.filter { FileManager.default.fileExists(atPath: $0) }
@@ -501,6 +507,7 @@ enum SupportedBrowser: CaseIterable {
         case .brave: return "Brave Safe Storage"
         case .arc: return "Arc Safe Storage"
         case .edge: return "Microsoft Edge Safe Storage"
+        case .comet: return "Comet Safe Storage"
         }
     }
 
@@ -510,6 +517,7 @@ enum SupportedBrowser: CaseIterable {
         case .brave: return "Brave"
         case .arc: return "Arc"
         case .edge: return "Microsoft Edge"
+        case .comet: return "Comet"
         }
     }
 }
