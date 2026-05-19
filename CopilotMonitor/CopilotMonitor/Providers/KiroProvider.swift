@@ -1,5 +1,4 @@
 import Foundation
-import Foundation
 import os.log
 
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "KiroProvider")
@@ -10,6 +9,29 @@ struct KiroUsageSnapshot: Equatable {
     let planName: String?
     let resetDate: Date?
     let overageStatus: String?
+    let bonusCreditsUsed: Double?
+    let bonusCreditsTotal: Double?
+    let bonusExpiryDays: Int?
+
+    init(
+        usedCredits: Double,
+        totalCredits: Double,
+        planName: String?,
+        resetDate: Date?,
+        overageStatus: String?,
+        bonusCreditsUsed: Double? = nil,
+        bonusCreditsTotal: Double? = nil,
+        bonusExpiryDays: Int? = nil
+    ) {
+        self.usedCredits = usedCredits
+        self.totalCredits = totalCredits
+        self.planName = planName
+        self.resetDate = resetDate
+        self.overageStatus = overageStatus
+        self.bonusCreditsUsed = bonusCreditsUsed
+        self.bonusCreditsTotal = bonusCreditsTotal
+        self.bonusExpiryDays = bonusExpiryDays
+    }
 
     var remainingCredits: Double {
         max(totalCredits - usedCredits, 0)
@@ -25,7 +47,7 @@ final class KiroProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .kiro
     let type: ProviderType = .quotaBased
     let fetchTimeout: TimeInterval = 25
-    let minimumFetchInterval: TimeInterval = 60
+    let minimumFetchInterval: TimeInterval = 300
 
     private let fileManager: FileManager
 
@@ -139,15 +161,21 @@ final class KiroProvider: ProviderProtocol {
         return try await withThrowingTaskGroup(of: String.self) { group in
             let process = Process()
             process.executableURL = binaryPath
-            process.arguments = ["chat", "--classic"]
+            process.arguments = ["chat", "--no-interactive", "/usage"]
+
+            defer {
+                group.cancelAll()
+                if process.isRunning {
+                    process.terminate()
+                }
+            }
 
             group.addTask {
                 try await withCheckedThrowingContinuation { continuation in
                     let outputPipe = Pipe()
-                    let inputPipe = Pipe()
                     process.standardOutput = outputPipe
                     process.standardError = outputPipe
-                    process.standardInput = inputPipe
+                    process.standardInput = FileHandle.nullDevice
 
                     nonisolated(unsafe) var outputData = Data()
 
@@ -180,10 +208,6 @@ final class KiroProvider: ProviderProtocol {
 
                     do {
                         try process.run()
-                        if let input = "/usage\n/quit\n".data(using: .utf8) {
-                            inputPipe.fileHandleForWriting.write(input)
-                        }
-                        try? inputPipe.fileHandleForWriting.close()
                     } catch {
                         outputPipe.fileHandleForReading.readabilityHandler = nil
                         continuation.resume(throwing: error)
@@ -200,10 +224,6 @@ final class KiroProvider: ProviderProtocol {
                 throw ProviderError.providerError("kiro-cli /usage task failed")
             }
 
-            group.cancelAll()
-            if process.isRunning {
-                process.terminate()
-            }
             return result
         }
     }
@@ -211,32 +231,49 @@ final class KiroProvider: ProviderProtocol {
     static func parseUsageOutput(_ output: String) throws -> KiroUsageSnapshot {
         let text = stripANSI(from: output)
         let normalized = text.replacingOccurrences(of: "\u{00A0}", with: " ")
+        let planName = parsePlanName(from: normalized)
 
-        guard let creditsMatch = firstMatch(
+        let creditsMatch = firstMatch(
             in: normalized,
-            pattern: #"Credits\s*\(\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s+of\s+([0-9][0-9,]*(?:\.[0-9]+)?)\s+covered\s+in\s+plan\s*\)"#
-        ),
-              creditsMatch.count >= 3,
-              let usedCredits = parseNumber(creditsMatch[1]),
-              let totalCredits = parseNumber(creditsMatch[2]),
-              totalCredits > 0 else {
+            pattern: #"Credits\s*\(\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s+of\s+([0-9][0-9,]*(?:\.[0-9]+)?)(?:\s+covered\s+in\s+plan)?\s*\)"#
+        )
+        let percent = parseProgressPercent(from: normalized)
+
+        let usedCredits = creditsMatch.flatMap { match in
+            match.count > 1 ? parseNumber(match[1]) : nil
+        }
+        let totalCredits = creditsMatch.flatMap { match in
+            match.count > 2 ? parseNumber(match[2]) : nil
+        }
+
+        let resolvedTotalCredits = totalCredits ?? planName.flatMap(planCreditTotal)
+        let resolvedUsedCredits = usedCredits ?? percent.flatMap { parsedPercent in
+            resolvedTotalCredits.map { ($0 * parsedPercent) / 100.0 }
+        }
+
+        guard let resolvedUsedCredits,
+              let resolvedTotalCredits,
+              resolvedTotalCredits > 0 else {
             throw ProviderError.decodingError("Kiro usage output did not include monthly credit usage")
         }
 
-        let resetDate = firstMatch(in: normalized, pattern: #"resets\s+on\s+(\d{4}-\d{2}-\d{2})"#).flatMap { match in
+        let resetDate = firstMatch(in: normalized, pattern: #"resets\s+on\s+(\d{4}-\d{2}-\d{2}|\d{2}/\d{2})"#).flatMap { match in
             match.count > 1 ? parseDate(match[1]) : nil
         }
-        let planName = parsePlanName(from: normalized)
         let overageStatus = firstMatch(in: normalized, pattern: #"Overages:\s*([A-Za-z]+)"#).flatMap { match in
             match.count > 1 ? match[1] : nil
         }
+        let bonusCredits = parseBonusCredits(from: normalized)
 
         return KiroUsageSnapshot(
-            usedCredits: usedCredits,
-            totalCredits: totalCredits,
+            usedCredits: resolvedUsedCredits,
+            totalCredits: resolvedTotalCredits,
             planName: planName,
             resetDate: resetDate,
-            overageStatus: overageStatus
+            overageStatus: overageStatus,
+            bonusCreditsUsed: bonusCredits.used,
+            bonusCreditsTotal: bonusCredits.total,
+            bonusExpiryDays: bonusCredits.expiryDays
         )
     }
 
@@ -245,6 +282,8 @@ final class KiroProvider: ProviderProtocol {
         let entitlement = max(Int((snapshot.totalCredits * scale).rounded()), 1)
         let remaining = max(Int((snapshot.remainingCredits * scale).rounded()), 0)
         let details = DetailedUsage(
+            secondaryUsage: bonusUsagePercent(from: snapshot),
+            secondaryReset: bonusExpiryDate(from: snapshot),
             primaryReset: snapshot.resetDate,
             planType: snapshot.planName,
             monthlyCost: snapshot.usedCredits,
@@ -276,7 +315,8 @@ final class KiroProvider: ProviderProtocol {
 
     private static func parsePlanName(from text: String) -> String? {
         let patterns = [
-            #"Estimated\s+Usage\s*\|\s*resets\s+on\s+\d{4}-\d{2}-\d{2}\s*\|\s*([A-Za-z0-9 +_-]+)(?:\s*\([^\n\r)]*\))?"#,
+            #"Estimated\s+Usage\s*\|\s*resets\s+on\s+(?:\d{4}-\d{2}-\d{2}|\d{2}/\d{2})\s*\|\s*([A-Za-z0-9 +_-]+)(?:\s*\([^\n\r)]*\))?"#,
+            #"\|\s*(KIRO\s+[A-Za-z0-9 +_-]+)"#,
             #"Plan:\s*([A-Za-z0-9 +_-]+)(?:\s*\([^\n\r)]*\))?"#
         ]
 
@@ -286,10 +326,84 @@ final class KiroProvider: ProviderProtocol {
                 .replacingOccurrences(of: #"\s*\([^)]*\)\s*$"#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !plan.isEmpty {
-                return plan
+                return normalizePlanName(plan)
             }
         }
         return nil
+    }
+
+    private static func normalizePlanName(_ planName: String) -> String {
+        let cleaned = planName
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let uppercased = cleaned.uppercased()
+
+        if uppercased.contains("POWER") {
+            return "Power"
+        }
+        if uppercased.contains("PRO+") || uppercased.contains("PRO PLUS") {
+            return "Pro+"
+        }
+        if uppercased.contains("PRO") {
+            return "Pro"
+        }
+        if uppercased.contains("FREE") {
+            return "Free"
+        }
+        return cleaned
+    }
+
+    private static func planCreditTotal(for planName: String) -> Double? {
+        switch normalizePlanName(planName).lowercased() {
+        case "free":
+            return 50
+        case "pro":
+            return 1_000
+        case "pro+":
+            return 2_000
+        case "power":
+            return 10_000
+        default:
+            return nil
+        }
+    }
+
+    private static func parseProgressPercent(from text: String) -> Double? {
+        firstMatch(in: text, pattern: #"(?:█|▓|▒|━|─|■)+\s*([0-9]+(?:\.[0-9]+)?)%"#).flatMap { match in
+            match.count > 1 ? parseNumber(match[1]) : nil
+        }
+    }
+
+    private static func parseBonusCredits(from text: String) -> (used: Double?, total: Double?, expiryDays: Int?) {
+        let bonusMatch = firstMatch(
+            in: text,
+            pattern: #"Bonus\s+credits:[\s\S]{0,160}?([0-9][0-9,]*(?:\.[0-9]+)?)/([0-9][0-9,]*(?:\.[0-9]+)?)\s+credits\s+used"#
+        )
+        let expiryMatch = firstMatch(in: text, pattern: #"expires\s+in\s+(\d+)\s+days?"#)
+
+        return (
+            used: bonusMatch.flatMap { $0.count > 1 ? parseNumber($0[1]) : nil },
+            total: bonusMatch.flatMap { $0.count > 2 ? parseNumber($0[2]) : nil },
+            expiryDays: expiryMatch.flatMap { $0.count > 1 ? Int($0[1]) : nil }
+        )
+    }
+
+    private static func bonusUsagePercent(from snapshot: KiroUsageSnapshot) -> Double? {
+        guard let used = snapshot.bonusCreditsUsed,
+              let total = snapshot.bonusCreditsTotal,
+              total > 0 else {
+            return nil
+        }
+        return min(max((used / total) * 100.0, 0), 999)
+    }
+
+    private static func bonusExpiryDate(from snapshot: KiroUsageSnapshot) -> Date? {
+        guard let days = snapshot.bonusExpiryDays else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        if let utc = TimeZone(identifier: "UTC") {
+            calendar.timeZone = utc
+        }
+        return calendar.date(byAdding: .day, value: days, to: Date())
     }
 
     private static func firstMatch(in text: String, pattern: String) -> [String]? {
@@ -309,6 +423,34 @@ final class KiroProvider: ProviderProtocol {
     }
 
     private static func parseDate(_ value: String) -> Date? {
+        if value.contains("/") {
+            let parts = value.split(separator: "/")
+            guard parts.count == 2,
+                  let month = Int(parts[0]),
+                  let day = Int(parts[1]) else {
+                return nil
+            }
+
+            var calendar = Calendar(identifier: .gregorian)
+            if let utc = TimeZone(identifier: "UTC") {
+                calendar.timeZone = utc
+            }
+
+            let now = Date()
+            let currentYear = calendar.component(.year, from: now)
+            var components = DateComponents()
+            components.year = currentYear
+            components.month = month
+            components.day = day
+
+            if let date = calendar.date(from: components), date >= calendar.startOfDay(for: now) {
+                return date
+            }
+
+            components.year = currentYear + 1
+            return calendar.date(from: components)
+        }
+
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"

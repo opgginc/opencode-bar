@@ -850,6 +850,16 @@ extension StatusBarController {
                 submenu.addItem(remainingItem)
             }
 
+            if let bonusUsage = details.secondaryUsage {
+                let rows = createUsageWindowRow(
+                    label: "Bonus Credits",
+                    usagePercent: bonusUsage,
+                    resetDate: details.secondaryReset,
+                    isMonthly: false
+                )
+                rows.forEach { submenu.addItem($0) }
+            }
+
             if let plan = details.planType {
                 let planItem = NSMenuItem()
                 planItem.view = createDisabledLabelView(
