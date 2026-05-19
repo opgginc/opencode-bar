@@ -987,6 +987,8 @@ final class StatusBarController: NSObject {
             add(details?.openCodeGoMonthlyUsage, priority: .monthly)
             add(details?.sevenDayUsage, priority: .weekly)
             add(details?.fiveHourUsage, priority: .hourly)
+        case .kiro:
+            add(usage.usagePercentage, priority: .monthly)
         case .grok:
             add(details?.monthlyUsage, priority: .monthly)
         case .codex:
@@ -1948,6 +1950,7 @@ final class StatusBarController: NSObject {
             .kimi,
             .minimaxCodingPlan,
             .openCodeGo,
+            .kiro,
             .grok,
             .codex,
             .cursor,
@@ -3045,6 +3048,8 @@ final class StatusBarController: NSObject {
             image = NSImage(named: "OpencodeIcon")
         case .openCodeGo:
             image = NSImage(named: "OpencodeIcon")
+        case .kiro:
+            image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
         case .grok:
             image = NSImage(named: "GrokIcon")
         case .kimi:

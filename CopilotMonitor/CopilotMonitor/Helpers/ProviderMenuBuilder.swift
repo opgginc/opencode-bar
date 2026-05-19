@@ -826,6 +826,43 @@ extension StatusBarController {
             addSubscriptionItems(to: submenu, provider: .synthetic, accountId: subscriptionAccountId)
             debugLog("createDetailSubmenu: added subscription items for Synthetic")
 
+        case .kiro:
+            if let total = details.creditsTotal, total > 0, let remaining = details.creditsRemaining {
+                let used = max(total - remaining, 0)
+                let usagePercent = min(max((used / total) * 100.0, 0), 999)
+                let rows = createUsageWindowRow(
+                    label: "Monthly Credits",
+                    usagePercent: usagePercent,
+                    resetDate: details.primaryReset,
+                    isMonthly: true
+                )
+                rows.forEach { submenu.addItem($0) }
+
+                let usedItem = NSMenuItem()
+                usedItem.view = createDisabledLabelView(
+                    text: String(format: "Credits Used: %.2f / %.2f", used, total),
+                    icon: NSImage(systemSymbolName: "creditcard", accessibilityDescription: "Credits")
+                )
+                submenu.addItem(usedItem)
+
+                let remainingItem = NSMenuItem()
+                remainingItem.view = createDisabledLabelView(text: String(format: "Credits Left: %.2f", remaining))
+                submenu.addItem(remainingItem)
+            }
+
+            if let plan = details.planType {
+                let planItem = NSMenuItem()
+                planItem.view = createDisabledLabelView(
+                    text: "Plan: \(plan)",
+                    icon: NSImage(systemSymbolName: "crown", accessibilityDescription: "Plan")
+                )
+                submenu.addItem(planItem)
+            }
+
+            submenu.addItem(NSMenuItem.separator())
+            addSubscriptionItems(to: submenu, provider: .kiro, accountId: subscriptionAccountId)
+            debugLog("createDetailSubmenu: added subscription items for Kiro")
+
         default:
             break
         }
