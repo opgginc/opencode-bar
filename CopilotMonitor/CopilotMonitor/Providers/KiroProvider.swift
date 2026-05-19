@@ -276,14 +276,14 @@ final class KiroProvider: ProviderProtocol {
 
     private static func parsePlanName(from text: String) -> String? {
         let patterns = [
-            #"Estimated\s+Usage\s*\|\s*resets\s+on\s+\d{4}-\d{2}-\d{2}\s*\|\s*([^\n\r]+)"#,
-            #"Plan:\s*([A-Za-z0-9 +_-]+)"#
+            #"Estimated\s+Usage\s*\|\s*resets\s+on\s+\d{4}-\d{2}-\d{2}\s*\|\s*([A-Za-z0-9 +_-]+)(?:\s*\([^\n\r)]*\))?"#,
+            #"Plan:\s*([A-Za-z0-9 +_-]+)(?:\s*\([^\n\r)]*\))?"#
         ]
 
         for pattern in patterns {
             guard let match = firstMatch(in: text, pattern: pattern), match.count > 1 else { continue }
             let plan = match[1]
-                .replacingOccurrences(of: "(/usage for more detail)", with: "")
+                .replacingOccurrences(of: #"\s*\([^)]*\)\s*$"#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !plan.isEmpty {
                 return plan

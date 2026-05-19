@@ -45,6 +45,14 @@ final class KiroProviderTests: XCTestCase {
         XCTAssertEqual(usage.overageStatus, "Enabled")
     }
 
+    func testUsageParserTrimsPlanHintText() throws {
+        let output = "Model: auto | Plan: KIRO PRO (/usage for more detail)\nCredits (3.66 of 1000 covered in plan)"
+
+        let usage = try KiroProvider.parseUsageOutput(output)
+
+        XCTAssertEqual(usage.planName, "KIRO PRO")
+    }
+
     func testUsageParserThrowsWhenCreditsAreMissing() {
         XCTAssertThrowsError(try KiroProvider.parseUsageOutput("Estimated Usage | KIRO PRO"))
     }
