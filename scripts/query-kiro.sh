@@ -1,6 +1,6 @@
-# Query Kiro billing usage through the authenticated Kiro CLI.
 #!/usr/bin/env bash
 
+# Query Kiro billing usage through the authenticated Kiro CLI.
 # Authentication remains owned by Kiro; this script does not read local token databases.
 
 set -euo pipefail
