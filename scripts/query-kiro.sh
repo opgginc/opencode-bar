@@ -153,7 +153,7 @@ def parse_usage(output):
         "plan": plan,
         "used_credits": used,
         "total_credits": total,
-        "remaining_credits": max(total - used, 0),
+        "remaining_credits": total - used,
         "used_percent": min(max((used / total) * 100.0, 0), 999),
         "reset_date": parse_date(reset_match.group(1)) if reset_match else None,
         "overages": overage_match.group(1) if overage_match else None,
