@@ -126,4 +126,30 @@ final class KiroProviderTests: XCTestCase {
         XCTAssertNotNil(result.details?.secondaryReset)
         XCTAssertEqual(result.details?.authSource, "kiro-cli at /Users/test/.local/bin/kiro-cli")
     }
+
+    func testMakeResultPreservesOverageAmount() throws {
+        let snapshot = KiroUsageSnapshot(
+            usedCredits: 1_050,
+            totalCredits: 1_000,
+            planName: "Pro",
+            resetDate: nil,
+            overageStatus: "Enabled"
+        )
+
+        let result = KiroProvider.makeResult(
+            from: snapshot,
+            binaryPath: URL(fileURLWithPath: "/Users/test/.local/bin/kiro-cli")
+        )
+
+        XCTAssertEqual(snapshot.remainingCredits, -50, accuracy: 0.001)
+        XCTAssertEqual(result.usage.totalEntitlement, 100_000)
+        XCTAssertEqual(result.usage.remainingQuota, -5_000)
+        XCTAssertEqual(result.usage.usagePercentage, 105, accuracy: 0.001)
+        if case .quotaBased(_, _, let overagePermitted) = result.usage {
+            XCTAssertTrue(overagePermitted)
+        } else {
+            XCTFail("Expected quota-based usage")
+        }
+        XCTAssertEqual(try XCTUnwrap(result.details?.creditsRemaining), -50, accuracy: 0.001)
+    }
 }

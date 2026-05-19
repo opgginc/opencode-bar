@@ -34,7 +34,7 @@ struct KiroUsageSnapshot: Equatable {
     }
 
     var remainingCredits: Double {
-        max(totalCredits - usedCredits, 0)
+        totalCredits - usedCredits
     }
 
     var usagePercent: Double {
@@ -280,7 +280,7 @@ final class KiroProvider: ProviderProtocol {
     static func makeResult(from snapshot: KiroUsageSnapshot, binaryPath: URL) -> ProviderResult {
         let scale = 100.0
         let entitlement = max(Int((snapshot.totalCredits * scale).rounded()), 1)
-        let remaining = max(Int((snapshot.remainingCredits * scale).rounded()), 0)
+        let remaining = Int((snapshot.remainingCredits * scale).rounded())
         let details = DetailedUsage(
             secondaryUsage: bonusUsagePercent(from: snapshot),
             secondaryReset: bonusExpiryDate(from: snapshot),
