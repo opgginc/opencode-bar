@@ -1155,6 +1155,83 @@ struct CandidateDedupe {
     }
 }
 
+struct CopilotCandidateDedupeInput {
+    let accountId: String?
+    let email: String?
+    let planType: String?
+    let totalEntitlement: Int?
+    let remainingQuota: Int?
+    let usedRequests: Int?
+    let limitRequests: Int?
+    let isPlaceholder: Bool
+}
+
+enum CopilotCandidateDedupe {
+    static func normalizedIdentity(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    static func shouldDropPlaceholder(
+        _ candidate: CopilotCandidateDedupeInput,
+        whenAnyCandidateHasRealUsage hasRealUsage: Bool
+    ) -> Bool {
+        guard hasRealUsage else { return false }
+        return candidate.isPlaceholder && (candidate.totalEntitlement ?? 0) == 0
+    }
+
+    static func isSameAccountUsage(
+        _ lhs: CopilotCandidateDedupeInput,
+        _ rhs: CopilotCandidateDedupeInput
+    ) -> Bool {
+        guard lhs.totalEntitlement == rhs.totalEntitlement,
+              lhs.remainingQuota == rhs.remainingQuota,
+              (lhs.totalEntitlement ?? 0) > 0 else {
+            return false
+        }
+
+        if let lhsUsed = lhs.usedRequests,
+           let rhsUsed = rhs.usedRequests,
+           lhsUsed != rhsUsed {
+            return false
+        }
+
+        if let lhsLimit = lhs.limitRequests,
+           let rhsLimit = rhs.limitRequests,
+           lhsLimit != rhsLimit {
+            return false
+        }
+
+        let lhsPlan = normalizedIdentity(lhs.planType)
+        let rhsPlan = normalizedIdentity(rhs.planType)
+        if let lhsPlan, let rhsPlan, lhsPlan != rhsPlan {
+            return false
+        }
+
+        let lhsIdentity = identityCandidates(lhs)
+        let rhsIdentity = identityCandidates(rhs)
+        guard !lhsIdentity.isEmpty, !rhsIdentity.isEmpty else {
+            return false
+        }
+
+        return !lhsIdentity.isDisjoint(with: rhsIdentity)
+    }
+
+    private static func identityCandidates(_ candidate: CopilotCandidateDedupeInput) -> Set<String> {
+        var identities = Set<String>()
+        if let accountId = normalizedIdentity(candidate.accountId) {
+            identities.insert(accountId)
+        }
+        if let email = normalizedIdentity(candidate.email) {
+            identities.insert(email)
+        }
+        return identities
+    }
+}
+
 /// Shared numeric parser for API response dictionaries.
 /// APIs may return Double, Int, NSNumber, or String for numeric fields.
 enum APIValueParser {

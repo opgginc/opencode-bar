@@ -168,6 +168,20 @@ final class CopilotProvider: ProviderProtocol {
         let usage: ProviderUsage
         let details: DetailedUsage
         let sourcePriority: Int
+        let isPlaceholder: Bool
+
+        var dedupeInput: CopilotCandidateDedupeInput {
+            CopilotCandidateDedupeInput(
+                accountId: accountId,
+                email: details.email,
+                planType: details.planType,
+                totalEntitlement: usage.totalEntitlement,
+                remainingQuota: usage.remainingQuota,
+                usedRequests: details.copilotUsedRequests,
+                limitRequests: details.copilotLimitRequests,
+                isPlaceholder: isPlaceholder
+            )
+        }
     }
 
     private func sourcePriority(_ source: CopilotAuthSource?) -> Int {
@@ -289,7 +303,8 @@ final class CopilotProvider: ProviderProtocol {
             accountId: login,
             usage: providerUsage,
             details: details,
-            sourcePriority: sourcePriority
+            sourcePriority: sourcePriority,
+            isPlaceholder: false
         )
     }
 
@@ -320,7 +335,8 @@ final class CopilotProvider: ProviderProtocol {
             accountId: info.accountId ?? info.login,
             usage: providerUsage,
             details: details,
-            sourcePriority: sourcePriority(info.source)
+            sourcePriority: sourcePriority(info.source),
+            isPlaceholder: false
         )
     }
 
@@ -331,7 +347,8 @@ final class CopilotProvider: ProviderProtocol {
             accountId: details.email,
             usage: cachedResult.usage,
             details: details,
-            sourcePriority: 0
+            sourcePriority: 0,
+            isPlaceholder: true
         )
     }
 
@@ -342,7 +359,7 @@ final class CopilotProvider: ProviderProtocol {
         let candidates = removePlaceholderCandidatesWhenRealUsageExists(candidates)
         let merged = CandidateDedupe.merge(
             candidates,
-            accountId: { normalizedCopilotIdentity($0.accountId) },
+            accountId: { CopilotCandidateDedupe.normalizedIdentity($0.accountId) },
             isSameUsage: { isDuplicateCopilotUsage($0, $1) },
             priority: { $0.sourcePriority }
         )
@@ -401,11 +418,10 @@ final class CopilotProvider: ProviderProtocol {
         guard hasRealUsage else { return candidates }
 
         return candidates.filter { candidate in
-            let entitlement = candidate.usage.totalEntitlement ?? 0
-            if entitlement > 0 { return true }
-
-            let authSource = candidate.details.authSource?.lowercased() ?? ""
-            return !authSource.contains("browser cookies")
+            !CopilotCandidateDedupe.shouldDropPlaceholder(
+                candidate.dedupeInput,
+                whenAnyCandidateHasRealUsage: hasRealUsage
+            )
         }
     }
 
@@ -413,56 +429,7 @@ final class CopilotProvider: ProviderProtocol {
         _ lhs: CopilotAccountCandidate,
         _ rhs: CopilotAccountCandidate
     ) -> Bool {
-        guard lhs.usage.totalEntitlement == rhs.usage.totalEntitlement,
-              lhs.usage.remainingQuota == rhs.usage.remainingQuota,
-              (lhs.usage.totalEntitlement ?? 0) > 0 else {
-            return false
-        }
-
-        if let lhsUsed = lhs.details.copilotUsedRequests,
-           let rhsUsed = rhs.details.copilotUsedRequests,
-           lhsUsed != rhsUsed {
-            return false
-        }
-
-        if let lhsLimit = lhs.details.copilotLimitRequests,
-           let rhsLimit = rhs.details.copilotLimitRequests,
-           lhsLimit != rhsLimit {
-            return false
-        }
-
-        let lhsPlan = normalizedCopilotIdentity(lhs.details.planType)
-        let rhsPlan = normalizedCopilotIdentity(rhs.details.planType)
-        if let lhsPlan, let rhsPlan, lhsPlan != rhsPlan {
-            return false
-        }
-
-        let lhsIdentity = copilotIdentityCandidates(lhs)
-        let rhsIdentity = copilotIdentityCandidates(rhs)
-        guard !lhsIdentity.isEmpty, !rhsIdentity.isEmpty else {
-            return false
-        }
-
-        return !lhsIdentity.isDisjoint(with: rhsIdentity)
-    }
-
-    private func copilotIdentityCandidates(_ candidate: CopilotAccountCandidate) -> Set<String> {
-        var identities = Set<String>()
-        if let accountId = normalizedCopilotIdentity(candidate.accountId) {
-            identities.insert(accountId)
-        }
-        if let email = normalizedCopilotIdentity(candidate.details.email) {
-            identities.insert(email)
-        }
-        return identities
-    }
-
-    private func normalizedCopilotIdentity(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let normalized = value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        return normalized.isEmpty ? nil : normalized
+        CopilotCandidateDedupe.isSameAccountUsage(lhs.dedupeInput, rhs.dedupeInput)
     }
 
     // MARK: - Customer ID Fetching

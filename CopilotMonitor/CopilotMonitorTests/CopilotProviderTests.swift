@@ -142,6 +142,87 @@ final class CopilotProviderTests: XCTestCase {
         XCTAssertEqual(CopilotAuthSource.vscodeApps.priority, 0)
     }
 
+    // MARK: - CopilotCandidateDedupe
+
+    func testCopilotDedupeRejectsMatchingUsageWithDifferentIdentities() {
+        let personal = makeDedupeInput(accountId: "personal", email: "personal@example.com")
+        let work = makeDedupeInput(accountId: "work", email: "work@example.com")
+
+        XCTAssertFalse(CopilotCandidateDedupe.isSameAccountUsage(personal, work))
+    }
+
+    func testCopilotDedupeAcceptsMatchingUsageWithCaseInsensitiveIdentity() {
+        let first = makeDedupeInput(accountId: "Foo", email: "Foo@Example.com")
+        let second = makeDedupeInput(accountId: "foo", email: "foo@example.com")
+
+        XCTAssertTrue(CopilotCandidateDedupe.isSameAccountUsage(first, second))
+    }
+
+    func testCopilotDedupeRejectsIdentitylessMatchingUsage() {
+        let identified = makeDedupeInput(accountId: "foo", email: "foo@example.com")
+        let identityless = makeDedupeInput(accountId: nil, email: nil)
+
+        XCTAssertFalse(CopilotCandidateDedupe.isSameAccountUsage(identified, identityless))
+    }
+
+    func testCopilotDedupeDropsOnlyPlaceholderWithoutRealUsage() {
+        let placeholder = makeDedupeInput(
+            accountId: nil,
+            email: nil,
+            entitlement: 0,
+            remaining: 0,
+            isPlaceholder: true
+        )
+        let emptyRealCandidate = makeDedupeInput(
+            accountId: nil,
+            email: nil,
+            entitlement: 0,
+            remaining: 0,
+            isPlaceholder: false
+        )
+
+        XCTAssertTrue(
+            CopilotCandidateDedupe.shouldDropPlaceholder(
+                placeholder,
+                whenAnyCandidateHasRealUsage: true
+            )
+        )
+        XCTAssertFalse(
+            CopilotCandidateDedupe.shouldDropPlaceholder(
+                emptyRealCandidate,
+                whenAnyCandidateHasRealUsage: true
+            )
+        )
+        XCTAssertFalse(
+            CopilotCandidateDedupe.shouldDropPlaceholder(
+                placeholder,
+                whenAnyCandidateHasRealUsage: false
+            )
+        )
+    }
+
+    private func makeDedupeInput(
+        accountId: String?,
+        email: String?,
+        entitlement: Int = 300,
+        remaining: Int = 284,
+        usedRequests: Int? = 16,
+        limitRequests: Int? = 300,
+        planType: String? = "Individual",
+        isPlaceholder: Bool = false
+    ) -> CopilotCandidateDedupeInput {
+        CopilotCandidateDedupeInput(
+            accountId: accountId,
+            email: email,
+            planType: planType,
+            totalEntitlement: entitlement,
+            remainingQuota: remaining,
+            usedRequests: usedRequests,
+            limitRequests: limitRequests,
+            isPlaceholder: isPlaceholder
+        )
+    }
+
     private func loadFixture(named: String) -> Data {
         let bundle = Bundle(for: type(of: self))
         guard let url = bundle.url(forResource: named, withExtension: nil) else {
