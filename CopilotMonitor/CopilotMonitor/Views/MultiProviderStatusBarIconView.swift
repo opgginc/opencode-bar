@@ -151,7 +151,7 @@ final class MultiProviderStatusBarIconView: NSView {
         case .openCodeGo:
             iconName = "OpencodeIcon"
         case .kiro:
-            iconName = "keyboard.badge.eye"
+            iconName = "KiroIcon"
         case .grok:
             iconName = "GrokIcon"
         case .kimi:

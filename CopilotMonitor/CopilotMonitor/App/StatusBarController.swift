@@ -3049,7 +3049,7 @@ final class StatusBarController: NSObject {
         case .openCodeGo:
             image = NSImage(named: "OpencodeIcon")
         case .kiro:
-            image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
+            image = NSImage(named: "KiroIcon")
         case .grok:
             image = NSImage(named: "GrokIcon")
         case .kimi:

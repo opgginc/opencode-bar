@@ -144,7 +144,7 @@ enum ProviderIdentifier: String, CaseIterable {
         case .openCodeGo:
             return "chevron.left.forwardslash.chevron.right"
         case .kiro:
-            return "keyboard.badge.eye"
+            return "KiroIcon"
         case .grok:
             return "GrokIcon"
         case .kimi:
