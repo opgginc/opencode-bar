@@ -9,6 +9,13 @@ private func runCommandAsync(executableURL: URL, arguments: [String], timeout: T
         process.executableURL = executableURL
         process.arguments = arguments
 
+        defer {
+            group.cancelAll()
+            if process.isRunning {
+                process.terminate()
+            }
+        }
+
         group.addTask {
             try await withCheckedThrowingContinuation { continuation in
                 let pipe = Pipe()
@@ -58,12 +65,6 @@ private func runCommandAsync(executableURL: URL, arguments: [String], timeout: T
             throw ProviderError.networkError("Task group failed")
         }
 
-        group.cancelAll()
-
-        if process.isRunning {
-            process.terminate()
-        }
-
         return result
     }
 }
@@ -90,11 +91,29 @@ private struct AntigravityParsedCacheUsage {
     let modelResetTimes: [String: Date]
 }
 
+private struct AntigravityKeychainPayload: Decodable {
+    struct Token: Decodable {
+        let refreshToken: String?
+
+        enum CodingKeys: String, CodingKey {
+            case refreshToken = "refresh_token"
+        }
+    }
+
+    let token: Token?
+}
+
+private struct AntigravityLanguageServerEndpoint {
+    let baseURL: URL
+    let csrfToken: String
+}
+
 /// Provider for Antigravity usage tracking using local cache reverse parsing.
 /// This no longer relies on the localhost language server API.
 final class AntigravityProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .antigravity
     let type: ProviderType = .quotaBased
+    let fetchTimeout: TimeInterval = 30
 
     private let tokenManager: TokenManager
     private let session: URLSession
@@ -114,14 +133,223 @@ final class AntigravityProvider: ProviderProtocol {
     }
 
     func fetch() async throws -> ProviderResult {
+        debugLog("fetch started")
+
+        do {
+            return try await fetchFromLanguageServer()
+        } catch {
+            logger.warning("Antigravity language server fetch failed, attempting cache: \(error.localizedDescription)")
+            debugLog("language server fetch failed: \(error.localizedDescription)")
+        }
+
         logger.info("Antigravity cache fetch started")
 
         do {
             return try await fetchFromCache()
         } catch {
-            logger.warning("Antigravity cache fetch failed, attempting accounts fallback: \(error.localizedDescription)")
+            logger.warning("Antigravity cache fetch failed, attempting keychain fallback: \(error.localizedDescription)")
+            do {
+                return try await fetchFromKeychainFallback(cacheError: error)
+            } catch {
+                logger.warning("Antigravity keychain fallback failed, attempting accounts fallback: \(error.localizedDescription)")
+            }
             return try await fetchFromAccountsFallback(cacheError: error)
         }
+    }
+
+    private func fetchFromLanguageServer() async throws -> ProviderResult {
+        let endpoint = try await resolveLanguageServerEndpoint()
+        let parsed = try await fetchLanguageServerModels(endpoint: endpoint)
+        let minRemaining = parsed.modelBreakdown.values.min() ?? 0.0
+        let modelLabels = parsed.modelBreakdown.keys.sorted().joined(separator: ", ")
+
+        logger.info(
+            "Antigravity language server fetch succeeded: \(parsed.modelBreakdown.count) models, min remaining \(String(format: "%.1f", minRemaining))%, labels=\(modelLabels)"
+        )
+        debugLog("language server fetch succeeded with labels: \(modelLabels)")
+
+        let details = DetailedUsage(
+            modelBreakdown: parsed.modelBreakdown,
+            modelResetTimes: parsed.modelResetTimes.isEmpty ? nil : parsed.modelResetTimes,
+            planType: "language-server",
+            email: nil,
+            authSource: "Antigravity 2.0 Language Server"
+        )
+
+        let usage = ProviderUsage.quotaBased(
+            remaining: Int(minRemaining),
+            entitlement: 100,
+            overagePermitted: false
+        )
+
+        return ProviderResult(usage: usage, details: details)
+    }
+
+    private func resolveLanguageServerEndpoint() async throws -> AntigravityLanguageServerEndpoint {
+        let processLine = try await runCommandAsync(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-lc",
+                "ps ax -o pid= -o command= | grep '/Applications/Antigravity.app/Contents/Resources/bin/language_server' | grep -v grep | head -1"
+            ],
+            timeout: 5
+        )
+        let trimmedProcessLine = processLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedProcessLine.isEmpty else {
+            throw ProviderError.authenticationFailed("Antigravity 2.0 language server is not running")
+        }
+
+        let parts = trimmedProcessLine.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        guard let pid = parts.first, let csrfIndex = parts.firstIndex(of: "--csrf_token"), parts.indices.contains(csrfIndex + 1) else {
+            throw ProviderError.decodingError("Unable to parse Antigravity language server process")
+        }
+        let csrfToken = parts[csrfIndex + 1]
+
+        let lsofOutput = try await runCommandAsync(
+            executableURL: URL(fileURLWithPath: "/usr/sbin/lsof"),
+            arguments: ["-nP", "-a", "-p", pid, "-iTCP", "-sTCP:LISTEN"],
+            timeout: 5
+        )
+
+        let ports = parseListeningPorts(from: lsofOutput)
+        debugLog("language server candidate ports: \(ports.map(String.init).joined(separator: ", "))")
+        for port in ports {
+            if let baseURL = URL(string: "http://127.0.0.1:\(port)"),
+               await isLanguageServerEndpointAvailable(baseURL: baseURL, csrfToken: csrfToken) {
+                debugLog("language server HTTP endpoint selected: \(baseURL.absoluteString)")
+                return AntigravityLanguageServerEndpoint(baseURL: baseURL, csrfToken: csrfToken)
+            }
+        }
+
+        throw ProviderError.networkError("Antigravity 2.0 language server HTTP endpoint not found")
+    }
+
+    private func parseListeningPorts(from output: String) -> [Int] {
+        let pattern = #"127\.0\.0\.1:(\d+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(output.startIndex..<output.endIndex, in: output)
+        let matches = regex.matches(in: output, range: range)
+        let ports = matches.compactMap { match -> Int? in
+            guard let portRange = Range(match.range(at: 1), in: output) else { return nil }
+            return Int(output[portRange])
+        }
+        return Array(Set(ports)).sorted()
+    }
+
+    private func isLanguageServerEndpointAvailable(baseURL: URL, csrfToken: String) async -> Bool {
+        do {
+            _ = try await fetchLanguageServerModels(
+                endpoint: AntigravityLanguageServerEndpoint(baseURL: baseURL, csrfToken: csrfToken)
+            )
+            return true
+        } catch {
+            debugLog("language server endpoint rejected: \(baseURL.absoluteString) (\(error.localizedDescription))")
+            return false
+        }
+    }
+
+    private func fetchLanguageServerModels(endpoint: AntigravityLanguageServerEndpoint) async throws -> AntigravityParsedCacheUsage {
+        guard let url = URL(
+            string: endpoint.baseURL.absoluteString
+                + "/exa.language_server_pb.LanguageServerService/GetAvailableModels"
+        ) else {
+            throw ProviderError.networkError("Invalid Antigravity language server endpoint")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 2
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(endpoint.csrfToken, forHTTPHeaderField: "x-codeium-csrf-token")
+        request.httpBody = "{}".data(using: .utf8)
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ProviderError.networkError("Invalid language server response type")
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw ProviderError.networkError("Language server HTTP \(httpResponse.statusCode)")
+        }
+
+        let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let responseObject = root?["response"] as? [String: Any],
+              let models = responseObject["models"] as? [String: Any] else {
+            throw ProviderError.decodingError("Unable to decode Antigravity language server models")
+        }
+
+        let modelIDs = preferredLanguageServerModelIDs(from: responseObject, models: models)
+        var modelBreakdown: [String: Double] = [:]
+        var modelResetTimes: [String: Date] = [:]
+
+        for modelID in modelIDs {
+            guard let model = models[modelID] as? [String: Any],
+                  let label = nonEmptyTrimmed(model["displayName"] as? String),
+                  let quotaInfo = model["quotaInfo"] as? [String: Any],
+                  let remainingFraction = doubleValue(quotaInfo["remainingFraction"]) else {
+                continue
+            }
+
+            let clampedFraction = max(0.0, min(1.0, remainingFraction))
+            modelBreakdown[label] = clampedFraction * 100.0
+
+            if let resetTime = nonEmptyTrimmed(quotaInfo["resetTime"] as? String),
+               let resetDate = parseISO8601Date(resetTime) {
+                modelResetTimes[label] = resetDate
+            }
+        }
+
+        guard !modelBreakdown.isEmpty else {
+            throw ProviderError.decodingError("No visible Antigravity model quota data in language server response")
+        }
+
+        return AntigravityParsedCacheUsage(
+            email: nil,
+            modelBreakdown: modelBreakdown,
+            modelResetTimes: modelResetTimes
+        )
+    }
+
+    private func preferredLanguageServerModelIDs(from response: [String: Any], models: [String: Any]) -> [String] {
+        if let sorts = response["agentModelSorts"] as? [[String: Any]] {
+            for sort in sorts {
+                guard let groups = sort["groups"] as? [[String: Any]] else { continue }
+                let ids = groups.flatMap { group -> [String] in
+                    guard let modelIDs = group["modelIds"] as? [String] else { return [] }
+                    return modelIDs
+                }
+                let visibleIDs = ids.filter { models[$0] != nil }
+                if !visibleIDs.isEmpty {
+                    return Array(NSOrderedSet(array: visibleIDs)) as? [String] ?? visibleIDs
+                }
+            }
+        }
+
+        return models.keys.sorted()
+    }
+
+    private func doubleValue(_ value: Any?) -> Double? {
+        switch value {
+        case let number as NSNumber:
+            return number.doubleValue
+        case let double as Double:
+            return double
+        case let string as String:
+            return Double(string)
+        default:
+            return nil
+        }
+    }
+
+    private func parseISO8601Date(_ value: String) -> Date? {
+        let formatterWithFractionalSeconds = ISO8601DateFormatter()
+        formatterWithFractionalSeconds.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatterWithFractionalSeconds.date(from: value) {
+            return date
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 
     private func fetchFromCache() async throws -> ProviderResult {
@@ -142,9 +370,11 @@ final class AntigravityProvider: ProviderProtocol {
         }
 
         let minRemaining = parsed.modelBreakdown.values.min() ?? 0.0
+        let modelLabels = parsed.modelBreakdown.keys.sorted().joined(separator: ", ")
         logger.info(
-            "Antigravity cache fetch succeeded: \(parsed.modelBreakdown.count) models, min remaining \(String(format: "%.1f", minRemaining))%"
+            "Antigravity cache fetch succeeded: \(parsed.modelBreakdown.count) models, min remaining \(String(format: "%.1f", minRemaining))%, labels=\(modelLabels)"
         )
+        debugLog("cache fetch succeeded with labels: \(modelLabels)")
 
         let details = DetailedUsage(
             modelBreakdown: parsed.modelBreakdown,
@@ -163,9 +393,99 @@ final class AntigravityProvider: ProviderProtocol {
         return ProviderResult(usage: usage, details: details)
     }
 
+    private func fetchFromKeychainFallback(cacheError: Error) async throws -> ProviderResult {
+        let refreshToken = try await loadKeychainRefreshToken()
+
+        guard let accessToken = await tokenManager.refreshGeminiAccessToken(refreshToken: refreshToken) else {
+            throw ProviderError.authenticationFailed("Unable to refresh Antigravity keychain token")
+        }
+
+        guard let url = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else {
+            throw ProviderError.networkError("Invalid API endpoint")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = "{}".data(using: .utf8)
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ProviderError.networkError("Invalid response type")
+        }
+
+        if httpResponse.statusCode == 401 {
+            throw ProviderError.authenticationFailed("Antigravity keychain token expired")
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
+        }
+
+        let quotaResponse = try JSONDecoder().decode(GeminiQuotaResponse.self, from: data)
+        guard !quotaResponse.buckets.isEmpty else {
+            throw ProviderError.decodingError("Empty buckets array")
+        }
+
+        let parsed = parseQuotaBuckets(quotaResponse.buckets)
+        let minRemaining = parsed.modelBreakdown.values.min() ?? 0.0
+        let modelLabels = parsed.modelBreakdown.keys.sorted().joined(separator: ", ")
+        logger.info(
+            "Antigravity keychain fallback fetch succeeded: \(parsed.modelBreakdown.count) models, min remaining \(String(format: "%.1f", minRemaining))%, labels=\(modelLabels)"
+        )
+        debugLog("keychain fallback fetch succeeded with labels: \(modelLabels)")
+        logger.info("Antigravity keychain fallback source selected because cache path failed: \(cacheError.localizedDescription)")
+
+        let details = DetailedUsage(
+            modelBreakdown: parsed.modelBreakdown,
+            modelResetTimes: parsed.modelResetTimes.isEmpty ? nil : parsed.modelResetTimes,
+            planType: "keychain-fallback",
+            email: nil,
+            authSource: "Antigravity Keychain (gemini/antigravity)"
+        )
+
+        let usage = ProviderUsage.quotaBased(
+            remaining: Int(minRemaining),
+            entitlement: 100,
+            overagePermitted: false
+        )
+
+        return ProviderResult(usage: usage, details: details)
+    }
+
+    private func loadKeychainRefreshToken() async throws -> String {
+        let output = try await runCommandAsync(
+            executableURL: URL(fileURLWithPath: "/usr/bin/security"),
+            arguments: ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"],
+            timeout: 10
+        )
+        let raw = output.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let jsonData: Data?
+        if raw.hasPrefix("go-keyring-base64:") {
+            let encoded = String(raw.dropFirst("go-keyring-base64:".count))
+            jsonData = Data(base64Encoded: encoded)
+        } else {
+            jsonData = raw.data(using: .utf8)
+        }
+
+        guard let jsonData else {
+            throw ProviderError.authenticationFailed("Antigravity keychain payload could not be decoded")
+        }
+
+        let payload = try JSONDecoder().decode(AntigravityKeychainPayload.self, from: jsonData)
+        guard let refreshToken = nonEmptyTrimmed(payload.token?.refreshToken) else {
+            throw ProviderError.authenticationFailed("Antigravity keychain refresh token is missing")
+        }
+
+        logger.info("Antigravity keychain refresh token loaded")
+        return refreshToken
+    }
+
     private func fetchFromAccountsFallback(cacheError: Error) async throws -> ProviderResult {
         guard let account = resolveFallbackAccount() else {
-            throw ProviderError.providerError(
+            throw ProviderError.authenticationFailed(
                 "Antigravity cache unavailable and no enabled antigravity-accounts.json account with project ID was found"
             )
         }
@@ -204,9 +524,11 @@ final class AntigravityProvider: ProviderProtocol {
 
         let parsed = parseQuotaBuckets(quotaResponse.buckets)
         let minRemaining = parsed.modelBreakdown.values.min() ?? 0.0
+        let modelLabels = parsed.modelBreakdown.keys.sorted().joined(separator: ", ")
         logger.info(
-            "Antigravity fallback fetch succeeded: \(parsed.modelBreakdown.count) models, min remaining \(String(format: "%.1f", minRemaining))%, email=\(account.email ?? "unknown")"
+            "Antigravity fallback fetch succeeded: \(parsed.modelBreakdown.count) models, min remaining \(String(format: "%.1f", minRemaining))%, labels=\(modelLabels), email=\(account.email ?? "unknown")"
         )
+        debugLog("accounts fallback fetch succeeded with labels: \(modelLabels)")
         logger.info("Antigravity fallback source selected because cache path failed: \(cacheError.localizedDescription)")
 
         let details = DetailedUsage(
@@ -305,11 +627,12 @@ final class AntigravityProvider: ProviderProtocol {
 
         for bucket in buckets {
             let clampedFraction = max(0.0, min(1.0, bucket.remainingFraction))
-            modelBreakdown[bucket.modelId] = clampedFraction * 100.0
+            let displayLabel = antigravityDisplayLabel(for: bucket.modelId)
+            modelBreakdown[displayLabel] = clampedFraction * 100.0
 
             if let resetDate = iso8601Formatter.date(from: bucket.resetTime)
                 ?? iso8601FormatterNoFrac.date(from: bucket.resetTime) {
-                modelResetTimes[bucket.modelId] = resetDate
+                modelResetTimes[displayLabel] = resetDate
             }
         }
 
@@ -380,11 +703,12 @@ final class AntigravityProvider: ProviderProtocol {
                 }
 
                 let clampedFraction = max(0.0, min(1.0, remainingFraction))
-                modelBreakdown[label] = clampedFraction * 100.0
+                let displayLabel = antigravityDisplayLabel(for: label)
+                modelBreakdown[displayLabel] = clampedFraction * 100.0
 
                 if let resetPayload = extractFirstLengthDelimited(from: quotaMessage[2]),
                    let resetDate = try? parseTimestampMessage(resetPayload) {
-                    modelResetTimes[label] = resetDate
+                    modelResetTimes[displayLabel] = resetDate
                 }
             }
         }
@@ -394,6 +718,21 @@ final class AntigravityProvider: ProviderProtocol {
             modelBreakdown: modelBreakdown,
             modelResetTimes: modelResetTimes
         )
+    }
+
+    private func antigravityDisplayLabel(for rawLabel: String) -> String {
+        switch rawLabel.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "gemini-2.5-flash":
+            return "Gemini 3.5 Flash (High)"
+        case "gemini-2.5-flash-lite":
+            return "Gemini 3.5 Flash (Medium)"
+        case "gemini-2.5-pro":
+            return "Gemini 3.1 Pro (High)"
+        case "gemini-3.1-flash-lite":
+            return "Gemini 3.1 Pro (Low)"
+        default:
+            return rawLabel
+        }
     }
 
     func parseTimestampMessage(_ data: Data) throws -> Date {
@@ -536,6 +875,22 @@ final class AntigravityProvider: ProviderProtocol {
             value |= UInt64(byte) << UInt64(index * 8)
         }
         return value
+    }
+
+    private func debugLog(_ message: String) {
+        #if DEBUG
+        let msg = "[\(Date())] AntigravityProvider: \(message)\n"
+        if let data = msg.data(using: .utf8) {
+            let path = "/tmp/provider_debug.log"
+            if FileManager.default.fileExists(atPath: path), let handle = FileHandle(forWritingAtPath: path) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            } else {
+                try? data.write(to: URL(fileURLWithPath: path))
+            }
+        }
+        #endif
     }
 
     private func nonEmptyTrimmed(_ value: String?) -> String? {
