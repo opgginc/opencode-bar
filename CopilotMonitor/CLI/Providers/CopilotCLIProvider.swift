@@ -397,11 +397,11 @@ actor CopilotCLIProvider: ProviderProtocol {
 
         let lhsIdentity = copilotIdentityCandidates(lhs)
         let rhsIdentity = copilotIdentityCandidates(rhs)
-        if !lhsIdentity.isEmpty && !rhsIdentity.isEmpty {
-            return !lhsIdentity.isDisjoint(with: rhsIdentity)
+        guard !lhsIdentity.isEmpty, !rhsIdentity.isEmpty else {
+            return false
         }
 
-        return lhs.details.copilotUsedRequests != nil || rhs.details.copilotUsedRequests != nil
+        return !lhsIdentity.isDisjoint(with: rhsIdentity)
     }
 
     private func copilotIdentityCandidates(_ candidate: CopilotAccountCandidate) -> Set<String> {
