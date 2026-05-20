@@ -58,7 +58,7 @@ final class KiroProvider: ProviderProtocol {
     func fetch() async throws -> ProviderResult {
         debugLog("fetch started")
 
-        guard let binaryPath = findKiroCLIBinary() else {
+        guard let binaryPath = await findKiroCLIBinary() else {
             debugLog("kiro-cli binary not found")
             throw ProviderError.authenticationFailed("Kiro CLI not found. Install and sign in to Kiro CLI first.")
         }
@@ -74,13 +74,13 @@ final class KiroProvider: ProviderProtocol {
         return result
     }
 
-    private func findKiroCLIBinary() -> URL? {
-        if let path = findBinaryViaWhich() {
+    private func findKiroCLIBinary() async -> URL? {
+        if let path = await findBinaryViaWhich() {
             debugLog("kiro-cli found via PATH at \(path.path)")
             return path
         }
 
-        if let path = findBinaryViaLoginShell() {
+        if let path = await findBinaryViaLoginShell() {
             debugLog("kiro-cli found via login shell at \(path.path)")
             return path
         }
@@ -101,58 +101,79 @@ final class KiroProvider: ProviderProtocol {
         return nil
     }
 
-    private func findBinaryViaWhich() -> URL? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = ["kiro-cli"]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            guard process.terminationStatus == 0 else { return nil }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !output.isEmpty,
-                  fileManager.isExecutableFile(atPath: output) else {
-                return nil
-            }
-            return URL(fileURLWithPath: output)
-        } catch {
-            debugLog("which kiro-cli failed: \(error.localizedDescription)")
-            return nil
-        }
+    private func findBinaryViaWhich() async -> URL? {
+        guard let output = try? await runLookupProcess(
+            executableURL: URL(fileURLWithPath: "/usr/bin/which"),
+            arguments: ["kiro-cli"]
+        ) else { return nil }
+        return validatedBinaryPath(from: output)
     }
 
-    private func findBinaryViaLoginShell() -> URL? {
+    private func findBinaryViaLoginShell() async -> URL? {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-lc", "which kiro-cli 2>/dev/null"]
+        guard let output = try? await runLookupProcess(
+            executableURL: URL(fileURLWithPath: shell),
+            arguments: ["-lc", "command -v kiro-cli 2>/dev/null"]
+        ) else { return nil }
+        return validatedBinaryPath(from: output)
+    }
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+    private func validatedBinaryPath(from output: String) -> URL? {
+        let path = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty, fileManager.isExecutableFile(atPath: path) else { return nil }
+        return URL(fileURLWithPath: path)
+    }
 
-        do {
-            try process.run()
-            process.waitUntilExit()
+    private func runLookupProcess(
+        executableURL: URL,
+        arguments: [String],
+        timeout: TimeInterval = 5
+    ) async throws -> String {
+        try await withThrowingTaskGroup(of: String.self) { group in
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = arguments
 
-            guard process.terminationStatus == 0 else { return nil }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !output.isEmpty,
-                  fileManager.isExecutableFile(atPath: output) else {
-                return nil
+            defer {
+                group.cancelAll()
+                if process.isRunning {
+                    process.terminate()
+                }
             }
-            return URL(fileURLWithPath: output)
-        } catch {
-            debugLog("login shell kiro-cli lookup failed: \(error.localizedDescription)")
-            return nil
+
+            group.addTask {
+                try await withCheckedThrowingContinuation { continuation in
+                    let pipe = Pipe()
+                    process.standardOutput = pipe
+                    process.standardError = FileHandle.nullDevice
+
+                    process.terminationHandler = { _ in
+                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                        guard process.terminationStatus == 0,
+                              let output = String(data: data, encoding: .utf8) else {
+                            continuation.resume(throwing: ProviderError.providerError("Kiro CLI lookup failed"))
+                            return
+                        }
+                        continuation.resume(returning: output)
+                    }
+
+                    do {
+                        try process.run()
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                throw ProviderError.networkError("Kiro CLI lookup timeout")
+            }
+
+            guard let result = try await group.next() else {
+                throw ProviderError.providerError("Kiro CLI lookup failed")
+            }
+            return result
         }
     }
 

@@ -59,6 +59,20 @@ def find_kiro_cli():
     if found:
         return found
 
+    shell = os.environ.get("SHELL", "/bin/zsh")
+    try:
+        login_shell = subprocess.run(
+            [shell, "-lc", "command -v kiro-cli 2>/dev/null"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        if login_shell and os.access(login_shell, os.X_OK):
+            return login_shell
+    except Exception:
+        pass
+
     home = str(Path.home())
     for path in [
         f"{home}/.local/bin/kiro-cli",
