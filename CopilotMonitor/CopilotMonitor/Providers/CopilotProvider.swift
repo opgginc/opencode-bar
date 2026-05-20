@@ -339,10 +339,11 @@ final class CopilotProvider: ProviderProtocol {
         candidates: [CopilotAccountCandidate],
         cookieCandidate: CopilotAccountCandidate?
     ) -> ProviderResult {
+        let candidates = removePlaceholderCandidatesWhenRealUsageExists(candidates)
         let merged = CandidateDedupe.merge(
             candidates,
-            accountId: { $0.accountId },
-            isSameUsage: { _, _ in false },
+            accountId: { normalizedCopilotIdentity($0.accountId) },
+            isSameUsage: { isDuplicateCopilotUsage($0, $1) },
             priority: { $0.sourcePriority }
         )
         let sorted = merged.sorted { $0.sourcePriority > $1.sourcePriority }
@@ -389,6 +390,79 @@ final class CopilotProvider: ProviderProtocol {
             details: primaryDetails,
             accounts: accountResults
         )
+    }
+
+    private func removePlaceholderCandidatesWhenRealUsageExists(
+        _ candidates: [CopilotAccountCandidate]
+    ) -> [CopilotAccountCandidate] {
+        let hasRealUsage = candidates.contains { candidate in
+            (candidate.usage.totalEntitlement ?? 0) > 0
+        }
+        guard hasRealUsage else { return candidates }
+
+        return candidates.filter { candidate in
+            let entitlement = candidate.usage.totalEntitlement ?? 0
+            if entitlement > 0 { return true }
+
+            let authSource = candidate.details.authSource?.lowercased() ?? ""
+            return !authSource.contains("browser cookies")
+        }
+    }
+
+    private func isDuplicateCopilotUsage(
+        _ lhs: CopilotAccountCandidate,
+        _ rhs: CopilotAccountCandidate
+    ) -> Bool {
+        guard lhs.usage.totalEntitlement == rhs.usage.totalEntitlement,
+              lhs.usage.remainingQuota == rhs.usage.remainingQuota,
+              (lhs.usage.totalEntitlement ?? 0) > 0 else {
+            return false
+        }
+
+        if let lhsUsed = lhs.details.copilotUsedRequests,
+           let rhsUsed = rhs.details.copilotUsedRequests,
+           lhsUsed != rhsUsed {
+            return false
+        }
+
+        if let lhsLimit = lhs.details.copilotLimitRequests,
+           let rhsLimit = rhs.details.copilotLimitRequests,
+           lhsLimit != rhsLimit {
+            return false
+        }
+
+        let lhsPlan = normalizedCopilotIdentity(lhs.details.planType)
+        let rhsPlan = normalizedCopilotIdentity(rhs.details.planType)
+        if let lhsPlan, let rhsPlan, lhsPlan != rhsPlan {
+            return false
+        }
+
+        let lhsIdentity = copilotIdentityCandidates(lhs)
+        let rhsIdentity = copilotIdentityCandidates(rhs)
+        if !lhsIdentity.isEmpty && !rhsIdentity.isEmpty && !lhsIdentity.isDisjoint(with: rhsIdentity) {
+            return true
+        }
+
+        return lhs.details.copilotUsedRequests != nil || rhs.details.copilotUsedRequests != nil
+    }
+
+    private func copilotIdentityCandidates(_ candidate: CopilotAccountCandidate) -> Set<String> {
+        var identities = Set<String>()
+        if let accountId = normalizedCopilotIdentity(candidate.accountId) {
+            identities.insert(accountId)
+        }
+        if let email = normalizedCopilotIdentity(candidate.details.email) {
+            identities.insert(email)
+        }
+        return identities
+    }
+
+    private func normalizedCopilotIdentity(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized.isEmpty ? nil : normalized
     }
 
     // MARK: - Customer ID Fetching
