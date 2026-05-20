@@ -108,8 +108,13 @@ private struct AntigravityLanguageServerEndpoint {
     let csrfToken: String
 }
 
-/// Provider for Antigravity usage tracking using local cache reverse parsing.
-/// This no longer relies on the localhost language server API.
+private struct AntigravityResolvedLanguageServer {
+    let endpoint: AntigravityLanguageServerEndpoint
+    let parsedUsage: AntigravityParsedCacheUsage
+}
+
+/// Provider for Antigravity usage tracking using the local Antigravity 2.0 language server first,
+/// with cache and token-based fallbacks for older or non-running installations.
 final class AntigravityProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .antigravity
     let type: ProviderType = .quotaBased
@@ -158,8 +163,8 @@ final class AntigravityProvider: ProviderProtocol {
     }
 
     private func fetchFromLanguageServer() async throws -> ProviderResult {
-        let endpoint = try await resolveLanguageServerEndpoint()
-        let parsed = try await fetchLanguageServerModels(endpoint: endpoint)
+        let resolved = try await resolveLanguageServerEndpoint()
+        let parsed = resolved.parsedUsage
         let minRemaining = parsed.modelBreakdown.values.min() ?? 0.0
         let modelLabels = parsed.modelBreakdown.keys.sorted().joined(separator: ", ")
 
@@ -185,12 +190,12 @@ final class AntigravityProvider: ProviderProtocol {
         return ProviderResult(usage: usage, details: details)
     }
 
-    private func resolveLanguageServerEndpoint() async throws -> AntigravityLanguageServerEndpoint {
+    private func resolveLanguageServerEndpoint() async throws -> AntigravityResolvedLanguageServer {
         let processLine = try await runCommandAsync(
             executableURL: URL(fileURLWithPath: "/bin/sh"),
             arguments: [
                 "-lc",
-                "ps ax -o pid= -o command= | grep '/Applications/Antigravity.app/Contents/Resources/bin/language_server' | grep -v grep | head -1"
+                "ps ax -o pid= -o command= | grep '[l]anguage_server' | grep -- '--app_data_dir antigravity' | head -1"
             ],
             timeout: 5
         )
@@ -200,10 +205,9 @@ final class AntigravityProvider: ProviderProtocol {
         }
 
         let parts = trimmedProcessLine.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        guard let pid = parts.first, let csrfIndex = parts.firstIndex(of: "--csrf_token"), parts.indices.contains(csrfIndex + 1) else {
+        guard let pid = parts.first, let csrfToken = parseCSRFToken(from: parts) else {
             throw ProviderError.decodingError("Unable to parse Antigravity language server process")
         }
-        let csrfToken = parts[csrfIndex + 1]
 
         let lsofOutput = try await runCommandAsync(
             executableURL: URL(fileURLWithPath: "/usr/sbin/lsof"),
@@ -214,18 +218,35 @@ final class AntigravityProvider: ProviderProtocol {
         let ports = parseListeningPorts(from: lsofOutput)
         debugLog("language server candidate ports: \(ports.map(String.init).joined(separator: ", "))")
         for port in ports {
-            if let baseURL = URL(string: "http://127.0.0.1:\(port)"),
-               await isLanguageServerEndpointAvailable(baseURL: baseURL, csrfToken: csrfToken) {
+            guard let baseURL = URL(string: "http://127.0.0.1:\(port)") else { continue }
+            if let parsedUsage = await probeLanguageServerEndpoint(baseURL: baseURL, csrfToken: csrfToken) {
                 debugLog("language server HTTP endpoint selected: \(baseURL.absoluteString)")
-                return AntigravityLanguageServerEndpoint(baseURL: baseURL, csrfToken: csrfToken)
+                return AntigravityResolvedLanguageServer(
+                    endpoint: AntigravityLanguageServerEndpoint(baseURL: baseURL, csrfToken: csrfToken),
+                    parsedUsage: parsedUsage
+                )
             }
         }
 
         throw ProviderError.networkError("Antigravity 2.0 language server HTTP endpoint not found")
     }
 
+    private func parseCSRFToken(from processArguments: [String]) -> String? {
+        for (index, argument) in processArguments.enumerated() {
+            if argument == "--csrf_token", processArguments.indices.contains(index + 1) {
+                return nonEmptyTrimmed(processArguments[index + 1])
+            }
+
+            if argument.hasPrefix("--csrf_token=") {
+                return nonEmptyTrimmed(String(argument.dropFirst("--csrf_token=".count)))
+            }
+        }
+
+        return nil
+    }
+
     private func parseListeningPorts(from output: String) -> [Int] {
-        let pattern = #"127\.0\.0\.1:(\d+)"#
+        let pattern = #":(\d+)\s+\(LISTEN\)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let range = NSRange(output.startIndex..<output.endIndex, in: output)
         let matches = regex.matches(in: output, range: range)
@@ -236,23 +257,19 @@ final class AntigravityProvider: ProviderProtocol {
         return Array(Set(ports)).sorted()
     }
 
-    private func isLanguageServerEndpointAvailable(baseURL: URL, csrfToken: String) async -> Bool {
+    private func probeLanguageServerEndpoint(baseURL: URL, csrfToken: String) async -> AntigravityParsedCacheUsage? {
         do {
-            _ = try await fetchLanguageServerModels(
+            return try await fetchLanguageServerModels(
                 endpoint: AntigravityLanguageServerEndpoint(baseURL: baseURL, csrfToken: csrfToken)
             )
-            return true
         } catch {
             debugLog("language server endpoint rejected: \(baseURL.absoluteString) (\(error.localizedDescription))")
-            return false
+            return nil
         }
     }
 
     private func fetchLanguageServerModels(endpoint: AntigravityLanguageServerEndpoint) async throws -> AntigravityParsedCacheUsage {
-        guard let url = URL(
-            string: endpoint.baseURL.absoluteString
-                + "/exa.language_server_pb.LanguageServerService/GetAvailableModels"
-        ) else {
+        guard let url = languageServerModelsURL(baseURL: endpoint.baseURL) else {
             throw ProviderError.networkError("Invalid Antigravity language server endpoint")
         }
         var request = URLRequest(url: url)
@@ -309,6 +326,18 @@ final class AntigravityProvider: ProviderProtocol {
         )
     }
 
+    private func languageServerModelsURL(baseURL: URL) -> URL? {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
+        let trimmedBasePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let pathComponents = [
+            trimmedBasePath,
+            "exa.language_server_pb.LanguageServerService",
+            "GetAvailableModels"
+        ].filter { !$0.isEmpty }
+        components.path = "/" + pathComponents.joined(separator: "/")
+        return components.url
+    }
+
     private func preferredLanguageServerModelIDs(from response: [String: Any], models: [String: Any]) -> [String] {
         if let sorts = response["agentModelSorts"] as? [[String: Any]] {
             for sort in sorts {
@@ -319,12 +348,17 @@ final class AntigravityProvider: ProviderProtocol {
                 }
                 let visibleIDs = ids.filter { models[$0] != nil }
                 if !visibleIDs.isEmpty {
-                    return Array(NSOrderedSet(array: visibleIDs)) as? [String] ?? visibleIDs
+                    return orderedUnique(visibleIDs)
                 }
             }
         }
 
         return models.keys.sorted()
+    }
+
+    private func orderedUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter { seen.insert($0).inserted }
     }
 
     private func doubleValue(_ value: Any?) -> Double? {
@@ -396,6 +430,10 @@ final class AntigravityProvider: ProviderProtocol {
     private func fetchFromKeychainFallback(cacheError: Error) async throws -> ProviderResult {
         let refreshToken = try await loadKeychainRefreshToken()
 
+        // Antigravity 2.0 stores its OAuth token in the macOS Keychain under
+        // the `gemini` service and `antigravity` account. The Cloud Code quota
+        // endpoint accepts the refreshed access token as a fallback when the
+        // local language server is unavailable.
         guard let accessToken = await tokenManager.refreshGeminiAccessToken(refreshToken: refreshToken) else {
             throw ProviderError.authenticationFailed("Unable to refresh Antigravity keychain token")
         }
@@ -723,13 +761,13 @@ final class AntigravityProvider: ProviderProtocol {
     private func antigravityDisplayLabel(for rawLabel: String) -> String {
         switch rawLabel.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "gemini-2.5-flash":
-            return "Gemini 3.5 Flash (High)"
+            return "Gemini 2.5 Flash"
         case "gemini-2.5-flash-lite":
-            return "Gemini 3.5 Flash (Medium)"
+            return "Gemini 2.5 Flash Lite"
         case "gemini-2.5-pro":
-            return "Gemini 3.1 Pro (High)"
+            return "Gemini 2.5 Pro"
         case "gemini-3.1-flash-lite":
-            return "Gemini 3.1 Pro (Low)"
+            return "Gemini 3.1 Flash Lite"
         default:
             return rawLabel
         }
