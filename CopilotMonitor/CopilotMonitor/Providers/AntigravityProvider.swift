@@ -438,7 +438,7 @@ final class AntigravityProvider: ProviderProtocol {
             throw ProviderError.authenticationFailed("Unable to refresh Antigravity keychain token")
         }
 
-        guard let url = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else {
+        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else {
             throw ProviderError.networkError("Invalid API endpoint")
         }
 
