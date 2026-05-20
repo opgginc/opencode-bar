@@ -381,7 +381,7 @@ final class CopilotProvider: ProviderProtocol {
             )
         }
 
-        let primaryDetails = cookieCandidate?.details ?? accountResults.first?.details
+        let primaryDetails = accountResults.first?.details ?? cookieCandidate?.details
 
         logger.info("CopilotProvider: Finalized \(accountResults.count) account row(s)")
 
@@ -439,8 +439,8 @@ final class CopilotProvider: ProviderProtocol {
 
         let lhsIdentity = copilotIdentityCandidates(lhs)
         let rhsIdentity = copilotIdentityCandidates(rhs)
-        if !lhsIdentity.isEmpty && !rhsIdentity.isEmpty && !lhsIdentity.isDisjoint(with: rhsIdentity) {
-            return true
+        if !lhsIdentity.isEmpty && !rhsIdentity.isEmpty {
+            return !lhsIdentity.isDisjoint(with: rhsIdentity)
         }
 
         return lhs.details.copilotUsedRequests != nil || rhs.details.copilotUsedRequests != nil
