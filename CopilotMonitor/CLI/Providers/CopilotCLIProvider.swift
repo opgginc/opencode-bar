@@ -313,14 +313,12 @@ actor CopilotCLIProvider: ProviderProtocol {
         candidates: [CopilotAccountCandidate],
         cookieCandidate: CopilotAccountCandidate?
     ) -> ProviderResult {
-        let candidates = removePlaceholderCandidatesWhenRealUsageExists(candidates)
-        let merged = CandidateDedupe.merge(
+        let sorted = CopilotCandidateDedupe.mergeAccountCandidates(
             candidates,
-            accountId: { CopilotCandidateDedupe.normalizedIdentity($0.accountId) },
-            isSameUsage: { isDuplicateCopilotUsage($0, $1) },
+            accountId: { $0.accountId },
+            input: { $0.dedupeInput },
             priority: { $0.sourcePriority }
-        )
-        let sorted = merged.sorted { $0.sourcePriority > $1.sourcePriority }
+        ).sorted { $0.sourcePriority > $1.sourcePriority }
 
         let accountResults: [ProviderAccountResult] = sorted.enumerated().map { index, candidate in
             ProviderAccountResult(
@@ -364,29 +362,6 @@ actor CopilotCLIProvider: ProviderProtocol {
             details: primaryDetails,
             accounts: accountResults
         )
-    }
-
-    private func removePlaceholderCandidatesWhenRealUsageExists(
-        _ candidates: [CopilotAccountCandidate]
-    ) -> [CopilotAccountCandidate] {
-        let hasRealUsage = candidates.contains { candidate in
-            (candidate.usage.totalEntitlement ?? 0) > 0
-        }
-        guard hasRealUsage else { return candidates }
-
-        return candidates.filter { candidate in
-            !CopilotCandidateDedupe.shouldDropPlaceholder(
-                candidate.dedupeInput,
-                whenAnyCandidateHasRealUsage: hasRealUsage
-            )
-        }
-    }
-
-    private func isDuplicateCopilotUsage(
-        _ lhs: CopilotAccountCandidate,
-        _ rhs: CopilotAccountCandidate
-    ) -> Bool {
-        CopilotCandidateDedupe.isSameAccountUsage(lhs.dedupeInput, rhs.dedupeInput)
     }
 
     // MARK: - Cookie-based Fetching (fallback)

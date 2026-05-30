@@ -1175,12 +1175,32 @@ enum CopilotCandidateDedupe {
         return normalized.isEmpty ? nil : normalized
     }
 
-    static func shouldDropPlaceholder(
-        _ candidate: CopilotCandidateDedupeInput,
-        whenAnyCandidateHasRealUsage hasRealUsage: Bool
-    ) -> Bool {
-        guard hasRealUsage else { return false }
-        return candidate.isPlaceholder && (candidate.totalEntitlement ?? 0) == 0
+    static func shouldDropPlaceholder(_ candidate: CopilotCandidateDedupeInput) -> Bool {
+        candidate.isPlaceholder && (candidate.totalEntitlement ?? 0) == 0
+    }
+
+    static func filterRemovingPlaceholders<C>(
+        _ candidates: [C],
+        input: (C) -> CopilotCandidateDedupeInput
+    ) -> [C] {
+        let hasRealUsage = candidates.contains { (input($0).totalEntitlement ?? 0) > 0 }
+        guard hasRealUsage else { return candidates }
+        return candidates.filter { !shouldDropPlaceholder(input($0)) }
+    }
+
+    static func mergeAccountCandidates<C>(
+        _ candidates: [C],
+        accountId: (C) -> String?,
+        input: (C) -> CopilotCandidateDedupeInput,
+        priority: (C) -> Int
+    ) -> [C] {
+        let filtered = filterRemovingPlaceholders(candidates, input: input)
+        return CandidateDedupe.merge(
+            filtered,
+            accountId: { normalizedIdentity(accountId($0)) },
+            isSameUsage: { isSameAccountUsage(input($0), input($1)) },
+            priority: priority
+        )
     }
 
     static func isSameAccountUsage(

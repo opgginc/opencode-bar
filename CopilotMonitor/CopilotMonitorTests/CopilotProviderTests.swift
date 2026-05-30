@@ -174,31 +174,41 @@ final class CopilotProviderTests: XCTestCase {
             isPlaceholder: true
         )
         let emptyRealCandidate = makeDedupeInput(
-            accountId: nil,
-            email: nil,
-            entitlement: 0,
-            remaining: 0,
+            accountId: "real-user",
+            email: "real@example.com",
+            entitlement: 300,
+            remaining: 300,
             isPlaceholder: false
         )
 
-        XCTAssertTrue(
-            CopilotCandidateDedupe.shouldDropPlaceholder(
-                placeholder,
-                whenAnyCandidateHasRealUsage: true
-            )
-        )
-        XCTAssertFalse(
-            CopilotCandidateDedupe.shouldDropPlaceholder(
-                emptyRealCandidate,
-                whenAnyCandidateHasRealUsage: true
-            )
-        )
-        XCTAssertFalse(
-            CopilotCandidateDedupe.shouldDropPlaceholder(
-                placeholder,
-                whenAnyCandidateHasRealUsage: false
-            )
-        )
+        XCTAssertTrue(CopilotCandidateDedupe.shouldDropPlaceholder(placeholder))
+        XCTAssertFalse(CopilotCandidateDedupe.shouldDropPlaceholder(emptyRealCandidate))
+
+        let candidates = [placeholder, emptyRealCandidate]
+        let filtered = CopilotCandidateDedupe.filterRemovingPlaceholders(candidates, input: { $0 })
+        XCTAssertEqual(filtered.count, 1)
+        XCTAssertFalse(filtered[0].isPlaceholder)
+    }
+
+    func testCopilotDedupeRejectsPlanMismatch() {
+        let individual = makeDedupeInput(accountId: "user", email: "user@example.com", planType: "Individual")
+        let business = makeDedupeInput(accountId: "user", email: "user@example.com", planType: "Business")
+
+        XCTAssertFalse(CopilotCandidateDedupe.isSameAccountUsage(individual, business))
+    }
+
+    func testCopilotDedupeRejectsUsedRequestMismatch() {
+        let first = makeDedupeInput(accountId: "user", email: "user@example.com", usedRequests: 16)
+        let second = makeDedupeInput(accountId: "user", email: "user@example.com", usedRequests: 17)
+
+        XCTAssertFalse(CopilotCandidateDedupe.isSameAccountUsage(first, second))
+    }
+
+    func testCopilotDedupeRejectsLimitRequestMismatch() {
+        let first = makeDedupeInput(accountId: "user", email: "user@example.com", limitRequests: 300)
+        let second = makeDedupeInput(accountId: "user", email: "user@example.com", limitRequests: 500)
+
+        XCTAssertFalse(CopilotCandidateDedupe.isSameAccountUsage(first, second))
     }
 
     private func makeDedupeInput(
