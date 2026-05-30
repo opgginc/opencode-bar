@@ -1363,6 +1363,36 @@ enum APIValueParser {
         }
         return 0
     }
+
+    static func parseDate(from rawValue: String?) -> Date? {
+        guard let rawValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !rawValue.isEmpty else {
+            return nil
+        }
+
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractionalFormatter.date(from: rawValue) { return date }
+
+        let plainFormatter = ISO8601DateFormatter()
+        plainFormatter.formatOptions = [.withInternetDateTime]
+        if let date = plainFormatter.date(from: rawValue) { return date }
+
+        let dateOnlyFormatter = DateFormatter()
+        dateOnlyFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateOnlyFormatter.dateFormat = "yyyy-MM-dd"
+        if let utc = TimeZone(identifier: "UTC") {
+            dateOnlyFormatter.timeZone = utc
+        }
+        return dateOnlyFormatter.date(from: rawValue)
+    }
+
+    static func formatResetDate(_ date: Date?) -> String? {
+        guard let date = date else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter.string(from: date)
+    }
 }
 
 enum ProviderDisplayPolicy {
