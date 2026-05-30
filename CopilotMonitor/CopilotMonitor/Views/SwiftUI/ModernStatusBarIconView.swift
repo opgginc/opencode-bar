@@ -113,6 +113,20 @@ struct SwiftUIProviderAlertView: View {
                 .scaledToFit()
                 .frame(width: 12, height: 12)
                 .foregroundColor(.red)
+        } else if identifier == .grok {
+            Image("GrokIcon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 12, height: 12)
+                .foregroundColor(.red)
+        } else if identifier == .kiro {
+            Image("KiroIcon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 12, height: 12)
+                .foregroundColor(.red)
         } else if let systemIconName = systemIconName(for: identifier) {
             Image(systemName: systemIconName)
                 .font(.system(size: 12))
@@ -129,7 +143,9 @@ struct SwiftUIProviderAlertView: View {
         case .geminiCLI: return "sparkles"
         case .copilot: return "airplane"
         case .openRouter: return "dollarsign.circle"
-        case .openCode, .openCodeZen: return "chevron.left.forwardslash.chevron.right"
+        case .openCode, .openCodeZen, .openCodeGo: return "chevron.left.forwardslash.chevron.right"
+        case .kiro: return nil
+        case .grok: return nil
         case .antigravity: return "arrow.up.circle"
         case .kimi: return "k.circle"
         case .zaiCodingPlan: return "globe"

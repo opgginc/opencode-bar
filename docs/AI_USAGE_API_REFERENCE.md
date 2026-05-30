@@ -8,9 +8,11 @@
 |----------|-----------|
 | Claude | `~/.config/opencode/opencode-anthropic-auth/accounts.json`, `~/.local/share/opencode/auth.json`, `~/.config/claude-code/auth.json`, macOS Keychain (`Claude Code-credentials`, `Claude Code`) |
 | Codex / ChatGPT | `~/.local/share/opencode/auth.json`, `~/.opencode/auth/openai.json`, `~/.opencode/openai-codex-accounts.json`, `~/.opencode/projects/*/openai-codex-accounts.json`, `~/.codex/auth.json`, `~/.codex-lb/` |
-| Copilot, Nano-GPT, MiniMax | `~/.local/share/opencode/auth.json` |
+| Copilot, Nano-GPT, MiniMax, OpenCode Go | `~/.local/share/opencode/auth.json` |
 | Antigravity (Gemini) | `~/.config/opencode/antigravity-accounts.json` |
 | Antigravity (Local cache) | `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb` |
+| Kiro | Authenticated `kiro-cli` session; OpenCode Bar does not read local Kiro token databases |
+| Grok | `~/.grok/auth.json`, `~/.grok/sessions/**/signals.json`, optional grok.com browser cookies |
 
 ---
 
@@ -271,7 +273,108 @@ The bundled [`scripts/query-minimax.sh`](/Users/kargnas/projects/opencode-bar/sc
 
 ---
 
-## 6. Antigravity (Dual Quota System)
+## 6. OpenCode Go
+
+**Model endpoint:** `GET https://opencode.ai/zen/go/v1/models`
+
+OpenCode Go credentials are stored in the OpenCode auth entry `opencode-go`.
+
+```bash
+API_KEY=$(jq -r '."opencode-go".key' ~/.local/share/opencode/auth.json)
+
+curl -s "https://opencode.ai/zen/go/v1/models" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Accept: application/json"
+```
+
+OpenCode Go usage is currently exposed through the OpenCode dashboard. OpenCode Bar reads the dashboard page when both a workspace ID and browser auth cookie are configured:
+
+```json
+{
+  "workspaceId": "your-workspace-id",
+  "authCookie": "your-auth-cookie"
+}
+```
+
+Supported config paths:
+
+- `~/.config/opencode-bar/opencode-go.json`
+- `~/.config/opencode-quota/opencode-go.json`
+
+Environment overrides:
+
+- `OPENCODE_GO_WORKSPACE_ID`
+- `OPENCODE_GO_AUTH_COOKIE`
+- `OPENCODE_GO_CONFIG_FILE`
+
+OpenCode Go is displayed with explicit 5-hour, weekly, and monthly used percentages. The official limits are value-based: 5h `$12`, weekly `$30`, monthly `$60`; the subscription preset is `Go ($10/m)`.
+
+The bundled [`scripts/query-opencode-go.sh`](/Users/kargnas/projects/opencode-bar/scripts/query-opencode-go.sh) validates the API key and prints the dashboard usage windows when dashboard config is available.
+
+---
+
+## 7. Kiro
+
+**Usage source:** `kiro-cli chat --no-interactive "/usage"`
+
+Kiro currently exposes billing usage through the authenticated Kiro CLI experience. OpenCode Bar uses `kiro-cli` as the integration boundary and does not read Kiro's local auth database or token storage directly.
+
+```bash
+kiro-cli chat --no-interactive "/usage"
+./scripts/query-kiro.sh
+./scripts/query-kiro.sh --json
+```
+
+The CLI output is ANSI-decorated and may appear in either a compact line format or a table-style format. OpenCode Bar strips ANSI escape sequences and reads:
+
+| Field | Description |
+|-------|-------------|
+| `Credits (X of Y covered in plan)` | Monthly credits used and total plan allowance |
+| Progress bar percent | Fallback used percentage when the credit tuple is omitted |
+| `resets on YYYY-MM-DD` or `resets on MM/DD` | Monthly reset date |
+| `Plan: ...` / `Estimated Usage ... | PLAN` | Kiro plan name, normalized to Free, Pro, Pro+, or Power when possible |
+| `Overages: Enabled/Disabled` | Whether paid overages are enabled |
+
+When only a progress percentage is available, OpenCode Bar derives the credit allowance from Kiro's current public plan limits: Free 50, Pro 1,000, Pro+ 2,000, Power 10,000. The provider throttles fetches to avoid spawning the Kiro CLI too frequently.
+
+---
+
+## 8. Grok
+
+**Identity source:** `~/.grok/auth.json`
+
+The Grok CLI stores login records under top-level OIDC/session scope keys. Prefer entries whose key starts with `https://auth.x.ai::`, then fall back to `https://accounts.x.ai/sign-in`.
+
+```bash
+jq '
+  to_entries
+  | map(select(.value.key != null and .value.key != ""))
+  | sort_by(if (.key | startswith("https://auth.x.ai::")) then 0 else 1 end)
+  | .[0].value
+  | {email, team_id, user_id, auth_mode, expires_at}
+' ~/.grok/auth.json
+```
+
+**Billing sources:**
+
+1. `grok agent stdio` JSON-RPC method `x.ai/billing`
+2. `POST https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` with a grok.com browser session cookie
+3. Best-effort bearer token probe using the `key` from `~/.grok/auth.json`
+
+```bash
+./scripts/query-grok.sh
+./scripts/query-grok.sh --json
+GROK_COOKIE_HEADER='auth=...' ./scripts/query-grok.sh --no-rpc
+CODEXBAR_ALLOW_BROWSER_COOKIE_IMPORT=1 ./scripts/query-grok.sh --no-rpc
+```
+
+The script also scans `~/.grok/sessions/**/signals.json` for recent local session counts, token totals, and model names.
+
+OpenCode Bar's native Grok provider uses the same identity selection rule. It currently supports one active Grok CLI login, but returns a single account row keyed by normalized email so subscription settings are already stored in the same email-scoped shape used by multi-account providers.
+
+---
+
+## 9. Antigravity (Dual Quota System)
 
 Antigravity has **two independent quota systems**:
 
@@ -499,6 +602,9 @@ Test scripts are located in the `scripts/` folder:
 | `query-codex.sh` | Codex (OpenAI) |
 | `query-copilot.sh` | GitHub Copilot |
 | `query-minimax.sh` | MiniMax Coding Plan |
+| `query-opencode-go.sh` | OpenCode Go |
+| `query-kiro.sh` | Kiro |
+| `query-grok.sh` | Grok |
 | `query-gemini-cli.sh` | Antigravity - Gemini CLI quota |
 | `query-gemini-oauth-creds.sh` | Gemini CLI oauth_creds identity/token inspection |
 | `query-antigravity-local.sh` | Antigravity - Local quota (cache reverse parsing alias) |

@@ -572,6 +572,119 @@ extension StatusBarController {
 
             addSubscriptionItems(to: submenu, provider: .minimaxCodingPlan, accountId: subscriptionAccountId)
 
+        case .openCodeGo:
+            if let fiveHour = details.fiveHourUsage {
+                let items = createUsageWindowRow(
+                    label: "5h",
+                    usagePercent: fiveHour,
+                    resetDate: details.fiveHourReset,
+                    windowHours: 5
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if details.fiveHourUsage != nil, details.sevenDayUsage != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let weekly = details.sevenDayUsage {
+                let items = createUsageWindowRow(
+                    label: "Weekly",
+                    usagePercent: weekly,
+                    resetDate: details.sevenDayReset,
+                    windowHours: 168
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if details.sevenDayUsage != nil, details.openCodeGoMonthlyUsage != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let monthly = details.openCodeGoMonthlyUsage {
+                let items = createUsageWindowRow(
+                    label: "Monthly",
+                    usagePercent: monthly,
+                    resetDate: details.openCodeGoMonthlyReset,
+                    isMonthly: true
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+
+            if details.planType != nil || details.openCodeGoModelCount != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let plan = details.planType {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Plan: \(plan)")
+                submenu.addItem(item)
+            }
+            if let modelCount = details.openCodeGoModelCount {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Models: \(modelCount)")
+                submenu.addItem(item)
+            }
+
+            addSubscriptionItems(to: submenu, provider: .openCodeGo, accountId: subscriptionAccountId)
+
+        case .grok:
+            if let monthly = details.monthlyUsage {
+                let items = createUsageWindowRow(
+                    label: "Monthly",
+                    usagePercent: monthly,
+                    resetDate: details.primaryReset,
+                    isMonthly: true
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+
+            if details.planType != nil || details.email != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let plan = details.planType {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Plan: \(plan)")
+                submenu.addItem(item)
+            }
+            if let email = details.email {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(
+                    text: "Account: \(email)",
+                    icon: NSImage(systemSymbolName: "person.circle", accessibilityDescription: "User Account")
+                )
+                submenu.addItem(item)
+            }
+
+            if details.sessions != nil || details.messages != nil || details.modelBreakdown != nil {
+                submenu.addItem(NSMenuItem.separator())
+                let headerItem = NSMenuItem()
+                headerItem.view = createHeaderView(title: "Local Activity (30d)")
+                submenu.addItem(headerItem)
+            }
+            if let sessions = details.sessions {
+                let formatted = NumberFormatter.localizedString(from: NSNumber(value: sessions), number: .decimal)
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Sessions: \(formatted)")
+                submenu.addItem(item)
+            }
+            if let tokens = details.messages {
+                let formatted = NumberFormatter.localizedString(from: NSNumber(value: tokens), number: .decimal)
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: "Tokens: \(formatted)")
+                submenu.addItem(item)
+            }
+            if let models = details.modelBreakdown, !models.isEmpty {
+                let sortedModels = models.sorted {
+                    if $0.value != $1.value {
+                        return $0.value > $1.value
+                    }
+                    return $0.key.localizedStandardCompare($1.key) == .orderedAscending
+                }.prefix(5)
+                for (model, count) in sortedModels {
+                    let item = NSMenuItem()
+                    item.view = createDisabledLabelView(text: "\(model): \(Int(count)) session(s)")
+                    submenu.addItem(item)
+                }
+            }
+
+            addSubscriptionItems(to: submenu, provider: .grok, accountId: subscriptionAccountId)
+
         case .zaiCodingPlan:
             // === Token Usage ===
             if let tokenUsage = details.tokenUsagePercent {
@@ -759,6 +872,53 @@ extension StatusBarController {
             addSubscriptionItems(to: submenu, provider: .synthetic, accountId: subscriptionAccountId)
             debugLog("createDetailSubmenu: added subscription items for Synthetic")
 
+        case .kiro:
+            if let total = details.creditsTotal, total > 0, let remaining = details.creditsRemaining {
+                let used = max(total - remaining, 0)
+                let usagePercent = min(max((used / total) * 100.0, 0), 999)
+                let rows = createUsageWindowRow(
+                    label: "Monthly Credits",
+                    usagePercent: usagePercent,
+                    resetDate: details.primaryReset,
+                    isMonthly: true
+                )
+                rows.forEach { submenu.addItem($0) }
+
+                let usedItem = NSMenuItem()
+                usedItem.view = createDisabledLabelView(
+                    text: String(format: "Credits Used: %.2f / %.2f", used, total),
+                    icon: NSImage(systemSymbolName: "creditcard", accessibilityDescription: "Credits")
+                )
+                submenu.addItem(usedItem)
+
+                let remainingItem = NSMenuItem()
+                remainingItem.view = createDisabledLabelView(text: String(format: "Credits Left: %.2f", remaining))
+                submenu.addItem(remainingItem)
+            }
+
+            if let bonusUsage = details.secondaryUsage {
+                let rows = createUsageWindowRow(
+                    label: "Bonus Credits",
+                    usagePercent: bonusUsage,
+                    resetDate: details.secondaryReset,
+                    isMonthly: false
+                )
+                rows.forEach { submenu.addItem($0) }
+            }
+
+            if let plan = details.planType {
+                let planItem = NSMenuItem()
+                planItem.view = createDisabledLabelView(
+                    text: "Plan: \(plan)",
+                    icon: NSImage(systemSymbolName: "crown", accessibilityDescription: "Plan")
+                )
+                submenu.addItem(planItem)
+            }
+
+            submenu.addItem(NSMenuItem.separator())
+            addSubscriptionItems(to: submenu, provider: .kiro, accountId: subscriptionAccountId)
+            debugLog("createDetailSubmenu: added subscription items for Kiro")
+
         default:
             break
         }
@@ -781,7 +941,7 @@ extension StatusBarController {
             submenu.addItem(item)
         }
 
-        if let monthly = details.monthlyUsage {
+        if let monthly = details.monthlyUsage, identifier != .grok {
             let item = NSMenuItem()
             item.view = createDisabledLabelView(
                 text: String(format: "Monthly: $%.2f", monthly),

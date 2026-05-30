@@ -202,6 +202,35 @@ final class ProviderUsageTests: XCTestCase {
         XCTAssertEqual(UsagePercentDisplayFormatter.wholePercent(from: 0.4), 1)
     }
 
+    func testStatusBarQuotaVisibilityHidesExhaustedCandidatesWhenQuotaRemains() {
+        let candidates = [
+            (provider: ProviderIdentifier.claude, usedPercent: 100.0),
+            (provider: ProviderIdentifier.codex, usedPercent: 95.0),
+            (provider: ProviderIdentifier.kimi, usedPercent: 120.0)
+        ]
+
+        let visible = StatusBarQuotaVisibilityPolicy.visibleCandidates(
+            from: candidates,
+            usedPercent: { $0.usedPercent }
+        )
+
+        XCTAssertEqual(visible.map(\.provider), [.codex])
+    }
+
+    func testStatusBarQuotaVisibilityAllowsExhaustedCandidatesWhenAllQuotaIsExhausted() {
+        let candidates = [
+            (provider: ProviderIdentifier.claude, usedPercent: 100.0),
+            (provider: ProviderIdentifier.codex, usedPercent: 120.0)
+        ]
+
+        let visible = StatusBarQuotaVisibilityPolicy.visibleCandidates(
+            from: candidates,
+            usedPercent: { $0.usedPercent }
+        )
+
+        XCTAssertEqual(visible.map(\.provider), [.claude, .codex])
+    }
+
     func testTableFormatterShowsOnePercentForMiniMaxSubOnePercentUsage() {
         let usage = ProviderUsage.quotaBased(remaining: 99, entitlement: 100, overagePermitted: false)
         let details = DetailedUsage(fiveHourUsage: 0.4, sevenDayUsage: 0.2)

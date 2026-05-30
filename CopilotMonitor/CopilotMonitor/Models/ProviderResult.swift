@@ -18,6 +18,21 @@ enum UsagePercentDisplayFormatter {
     }
 }
 
+enum StatusBarQuotaVisibilityPolicy {
+    static let exhaustedUsageThreshold = 100.0
+
+    static func visibleCandidates<Candidate>(
+        from candidates: [Candidate],
+        usedPercent: (Candidate) -> Double
+    ) -> [Candidate] {
+        let candidatesWithQuotaLeft = candidates.filter {
+            usedPercent($0) < exhaustedUsageThreshold
+        }
+
+        return candidatesWithQuotaLeft.isEmpty ? candidates : candidatesWithQuotaLeft
+    }
+}
+
 struct ProviderResult {
     let usage: ProviderUsage
     let details: DetailedUsage?
@@ -145,6 +160,11 @@ struct DetailedUsage {
     let chutesMonthlyValueUsedUSD: Double?
     let chutesMonthlyValueUsedPercent: Double?
 
+    // OpenCode Go usage windows
+    let openCodeGoMonthlyUsage: Double?
+    let openCodeGoMonthlyReset: Date?
+    let openCodeGoModelCount: Int?
+
     // Claude extra usage toggle
     let extraUsageEnabled: Bool?
     // Claude extra usage (monthly credits limit + usage)
@@ -244,6 +264,9 @@ struct DetailedUsage {
         chutesMonthlyValueCapUSD: Double? = nil,
         chutesMonthlyValueUsedUSD: Double? = nil,
         chutesMonthlyValueUsedPercent: Double? = nil,
+        openCodeGoMonthlyUsage: Double? = nil,
+        openCodeGoMonthlyReset: Date? = nil,
+        openCodeGoModelCount: Int? = nil,
         extraUsageEnabled: Bool? = nil,
         extraUsageMonthlyLimitUSD: Double? = nil,
         extraUsageUsedUSD: Double? = nil,
@@ -322,6 +345,9 @@ struct DetailedUsage {
         self.chutesMonthlyValueCapUSD = chutesMonthlyValueCapUSD
         self.chutesMonthlyValueUsedUSD = chutesMonthlyValueUsedUSD
         self.chutesMonthlyValueUsedPercent = chutesMonthlyValueUsedPercent
+        self.openCodeGoMonthlyUsage = openCodeGoMonthlyUsage
+        self.openCodeGoMonthlyReset = openCodeGoMonthlyReset
+        self.openCodeGoModelCount = openCodeGoModelCount
         self.extraUsageEnabled = extraUsageEnabled
         self.extraUsageMonthlyLimitUSD = extraUsageMonthlyLimitUSD
         self.extraUsageUsedUSD = extraUsageUsedUSD
@@ -375,6 +401,7 @@ extension DetailedUsage: Codable {
         case sparkPrimaryWindowLabel, sparkPrimaryWindowHours, sparkSecondaryWindowLabel, sparkSecondaryWindowHours
         case creditsBalance, planType
         case chutesMonthlyValueCapUSD, chutesMonthlyValueUsedUSD, chutesMonthlyValueUsedPercent
+        case openCodeGoMonthlyUsage, openCodeGoMonthlyReset, openCodeGoModelCount
         case extraUsageEnabled
         case extraUsageMonthlyLimitUSD, extraUsageUsedUSD, extraUsageUtilizationPercent
         case sessions, messages, avgCostPerDay, email
@@ -429,6 +456,9 @@ extension DetailedUsage: Codable {
         chutesMonthlyValueCapUSD = try container.decodeIfPresent(Double.self, forKey: .chutesMonthlyValueCapUSD)
         chutesMonthlyValueUsedUSD = try container.decodeIfPresent(Double.self, forKey: .chutesMonthlyValueUsedUSD)
         chutesMonthlyValueUsedPercent = try container.decodeIfPresent(Double.self, forKey: .chutesMonthlyValueUsedPercent)
+        openCodeGoMonthlyUsage = try container.decodeIfPresent(Double.self, forKey: .openCodeGoMonthlyUsage)
+        openCodeGoMonthlyReset = try container.decodeIfPresent(Date.self, forKey: .openCodeGoMonthlyReset)
+        openCodeGoModelCount = try container.decodeIfPresent(Int.self, forKey: .openCodeGoModelCount)
         extraUsageEnabled = try container.decodeIfPresent(Bool.self, forKey: .extraUsageEnabled)
         extraUsageMonthlyLimitUSD = try container.decodeIfPresent(Double.self, forKey: .extraUsageMonthlyLimitUSD)
         extraUsageUsedUSD = try container.decodeIfPresent(Double.self, forKey: .extraUsageUsedUSD)
@@ -510,6 +540,9 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(chutesMonthlyValueCapUSD, forKey: .chutesMonthlyValueCapUSD)
         try container.encodeIfPresent(chutesMonthlyValueUsedUSD, forKey: .chutesMonthlyValueUsedUSD)
         try container.encodeIfPresent(chutesMonthlyValueUsedPercent, forKey: .chutesMonthlyValueUsedPercent)
+        try container.encodeIfPresent(openCodeGoMonthlyUsage, forKey: .openCodeGoMonthlyUsage)
+        try container.encodeIfPresent(openCodeGoMonthlyReset, forKey: .openCodeGoMonthlyReset)
+        try container.encodeIfPresent(openCodeGoModelCount, forKey: .openCodeGoModelCount)
         try container.encodeIfPresent(extraUsageEnabled, forKey: .extraUsageEnabled)
         try container.encodeIfPresent(extraUsageMonthlyLimitUSD, forKey: .extraUsageMonthlyLimitUSD)
         try container.encodeIfPresent(extraUsageUsedUSD, forKey: .extraUsageUsedUSD)
@@ -602,6 +635,62 @@ struct JSONFormatter {
                 }
                 if let sevenDayUsage = result.details?.sevenDayUsage {
                     providerDict["sevenDayUsage"] = sevenDayUsage
+                }
+            }
+
+            if identifier == .openCodeGo {
+                if let fiveHourUsage = result.details?.fiveHourUsage {
+                    providerDict["fiveHourUsage"] = fiveHourUsage
+                }
+                if let sevenDayUsage = result.details?.sevenDayUsage {
+                    providerDict["sevenDayUsage"] = sevenDayUsage
+                }
+                if let monthlyUsage = result.details?.openCodeGoMonthlyUsage {
+                    providerDict["monthlyUsagePercent"] = monthlyUsage
+                }
+                if let modelCount = result.details?.openCodeGoModelCount {
+                    providerDict["modelCount"] = modelCount
+                }
+            }
+
+            if identifier == .grok {
+                if let monthlyUsage = result.details?.monthlyUsage {
+                    providerDict["monthlyUsagePercent"] = monthlyUsage
+                }
+                if let resetDate = result.details?.primaryReset {
+                    let formatter = ISO8601DateFormatter()
+                    providerDict["monthlyResetsAt"] = formatter.string(from: resetDate)
+                }
+                if let email = result.details?.email {
+                    providerDict["email"] = email
+                }
+                if let sessions = result.details?.sessions {
+                    providerDict["localSessions"] = sessions
+                }
+                if let tokens = result.details?.messages {
+                    providerDict["localTokens"] = tokens
+                }
+                if let modelBreakdown = result.details?.modelBreakdown {
+                    providerDict["localModelCounts"] = modelBreakdown
+                }
+                if let accounts = result.accounts, !accounts.isEmpty {
+                    var accountsArray: [[String: Any]] = []
+                    for account in accounts {
+                        var accountDict: [String: Any] = [:]
+                        accountDict["index"] = account.accountIndex
+                        if let accountId = account.accountId {
+                            accountDict["accountId"] = accountId
+                        }
+                        if let email = account.details?.email {
+                            accountDict["email"] = email
+                        }
+                        if let subscriptionId = account.subscriptionId {
+                            accountDict["subscriptionId"] = subscriptionId
+                        }
+                        accountDict["usagePercentage"] = account.usage.usagePercentage
+                        accountsArray.append(accountDict)
+                    }
+                    providerDict["accounts"] = accountsArray
                 }
             }
 
@@ -887,6 +976,19 @@ struct TableFormatter {
                     return percents.map { UsagePercentDisplayFormatter.string(from: $0) }.joined(separator: ",")
                 }
             }
+            if identifier == .openCodeGo {
+                let percents = [
+                    result.details?.fiveHourUsage,
+                    result.details?.sevenDayUsage,
+                    result.details?.openCodeGoMonthlyUsage
+                ].compactMap { $0 }
+                if percents.count >= 2 {
+                    return percents.map { UsagePercentDisplayFormatter.string(from: $0) }.joined(separator: ",")
+                }
+            }
+            if identifier == .grok, let monthlyUsage = result.details?.monthlyUsage {
+                return UsagePercentDisplayFormatter.string(from: monthlyUsage)
+            }
             // Z.AI: show both token and MCP percentages when both are available
             if identifier == .zaiCodingPlan {
                 let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
@@ -1094,7 +1196,7 @@ enum ProviderDisplayPolicy {
         guard let result else { return false }
 
         switch identifier {
-        case .claude, .codex, .copilot:
+        case .claude, .codex, .copilot, .grok:
             guard let accounts = result.accounts else { return false }
             return !accounts.isEmpty
         case .geminiCLI:
@@ -1128,6 +1230,7 @@ extension DetailedUsage {
             || sparkUsage != nil || sparkReset != nil || sparkSecondaryUsage != nil || sparkSecondaryReset != nil || sparkWindowLabel != nil
             || creditsBalance != nil || planType != nil
             || chutesMonthlyValueCapUSD != nil || chutesMonthlyValueUsedUSD != nil || chutesMonthlyValueUsedPercent != nil
+            || openCodeGoMonthlyUsage != nil || openCodeGoMonthlyReset != nil || openCodeGoModelCount != nil
             || extraUsageEnabled != nil
             || extraUsageMonthlyLimitUSD != nil || extraUsageUsedUSD != nil || extraUsageUtilizationPercent != nil
             || sessions != nil || messages != nil || avgCostPerDay != nil

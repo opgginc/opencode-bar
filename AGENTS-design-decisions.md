@@ -62,6 +62,8 @@ Quit (⌘Q)
   - **GitHub Copilot** - Credits-based quotas with overage billing (Overage billing will be charged as `Add-on` in Pay-as-you-go)
   - **Gemini CLI** - Per-model quota limits
   - **Antigravity** - Local server monitoring by Antigravity IDE
+  - **OpenCode Go** - Time-window based quotas (5h/weekly/monthly)
+  - **Grok** - Monthly quota, email-scoped subscription settings
   - **Z.AI Coding Plan** - Time-window based & tool usage based quotas
   - **Chutes AI** - Time-window based quotas, credits balance
 - **Features**
@@ -127,6 +129,7 @@ Quit (⌘Q)
   - Kimi: `Kimi: 5h%, 7d%` format showing 5-hour and 7-day windows
   - Example: `Claude: 0%, 100%` where 0% is 5h usage, 100% is 7d usage
   - Example: `Codex: 0%, 100%, 3%, 50%` where 0% is 5h usage, 100% is 7d usage, 3% is 5h Spark usage, 50% is 7d Spark usage
+  - Grok: `Grok: monthly%` format showing the monthly Grok billing window
   - Each percentage is individually colored based on thresholds  
 
 ### Status Bar Icon Rules (IMMUTABLE)
