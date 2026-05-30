@@ -100,7 +100,20 @@ private struct AntigravityKeychainPayload: Decodable {
         }
     }
 
+    let refreshToken: String?
+    let accessToken: String?
     let token: Token?
+
+    enum CodingKeys: String, CodingKey {
+        case refreshToken = "refresh_token"
+        case accessToken = "access_token"
+        case token
+    }
+}
+
+private enum AntigravityKeychainToken {
+    case refreshToken(String)
+    case accessToken(String)
 }
 
 private struct AntigravityLanguageServerEndpoint {
@@ -218,17 +231,19 @@ final class AntigravityProvider: ProviderProtocol {
         let ports = parseListeningPorts(from: lsofOutput)
         debugLog("language server candidate ports: \(ports.map(String.init).joined(separator: ", "))")
         for port in ports {
-            guard let baseURL = URL(string: "http://127.0.0.1:\(port)") else { continue }
-            if let parsedUsage = await probeLanguageServerEndpoint(baseURL: baseURL, csrfToken: csrfToken) {
-                debugLog("language server HTTP endpoint selected: \(baseURL.absoluteString)")
-                return AntigravityResolvedLanguageServer(
-                    endpoint: AntigravityLanguageServerEndpoint(baseURL: baseURL, csrfToken: csrfToken),
-                    parsedUsage: parsedUsage
-                )
+            for scheme in ["https", "http"] {
+                guard let baseURL = URL(string: "\(scheme)://127.0.0.1:\(port)") else { continue }
+                if let parsedUsage = await probeLanguageServerEndpoint(baseURL: baseURL, csrfToken: csrfToken) {
+                    debugLog("language server \(scheme.uppercased()) endpoint selected: \(baseURL.absoluteString)")
+                    return AntigravityResolvedLanguageServer(
+                        endpoint: AntigravityLanguageServerEndpoint(baseURL: baseURL, csrfToken: csrfToken),
+                        parsedUsage: parsedUsage
+                    )
+                }
             }
         }
 
-        throw ProviderError.networkError("Antigravity 2.0 language server HTTP endpoint not found")
+        throw ProviderError.networkError("Antigravity 2.0 language server HTTP/HTTPS endpoint not found")
     }
 
     private func parseCSRFToken(from processArguments: [String]) -> String? {
@@ -428,14 +443,21 @@ final class AntigravityProvider: ProviderProtocol {
     }
 
     private func fetchFromKeychainFallback(cacheError: Error) async throws -> ProviderResult {
-        let refreshToken = try await loadKeychainRefreshToken()
+        let keychainToken = try await loadKeychainRefreshToken()
 
         // Antigravity 2.0 stores its OAuth token in the macOS Keychain under
         // the `gemini` service and `antigravity` account. The Cloud Code quota
         // endpoint accepts the refreshed access token as a fallback when the
         // local language server is unavailable.
-        guard let accessToken = await tokenManager.refreshGeminiAccessToken(refreshToken: refreshToken) else {
-            throw ProviderError.authenticationFailed("Unable to refresh Antigravity keychain token")
+        let accessToken: String
+        switch keychainToken {
+        case .refreshToken(let refreshToken):
+            guard let refreshedToken = await tokenManager.refreshGeminiAccessToken(refreshToken: refreshToken) else {
+                throw ProviderError.authenticationFailed("Unable to refresh Antigravity keychain token")
+            }
+            accessToken = refreshedToken
+        case .accessToken(let token):
+            accessToken = token
         }
 
         guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else {
@@ -446,6 +468,10 @@ final class AntigravityProvider: ProviderProtocol {
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // The project field is intentionally omitted in the keychain fallback path.
+        // Unlike GeminiCLIProvider and the accounts fallback, this path has no projectId.
+        // That can return partial model buckets (missing gemini-3 variants), which is
+        // acceptable for a fallback when cache and accounts data are unavailable.
         request.httpBody = "{}".data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
@@ -492,7 +518,7 @@ final class AntigravityProvider: ProviderProtocol {
         return ProviderResult(usage: usage, details: details)
     }
 
-    private func loadKeychainRefreshToken() async throws -> String {
+    private func loadKeychainRefreshToken() async throws -> AntigravityKeychainToken {
         let output = try await runCommandAsync(
             executableURL: URL(fileURLWithPath: "/usr/bin/security"),
             arguments: ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"],
@@ -513,12 +539,22 @@ final class AntigravityProvider: ProviderProtocol {
         }
 
         let payload = try JSONDecoder().decode(AntigravityKeychainPayload.self, from: jsonData)
-        guard let refreshToken = nonEmptyTrimmed(payload.token?.refreshToken) else {
-            throw ProviderError.authenticationFailed("Antigravity keychain refresh token is missing")
+        if let refreshToken = nonEmptyTrimmed(payload.refreshToken) {
+            logger.info("Antigravity keychain top-level refresh token loaded")
+            return .refreshToken(refreshToken)
         }
 
-        logger.info("Antigravity keychain refresh token loaded")
-        return refreshToken
+        if let accessToken = nonEmptyTrimmed(payload.accessToken) {
+            logger.info("Antigravity keychain top-level access token loaded")
+            return .accessToken(accessToken)
+        }
+
+        if let nestedRefreshToken = nonEmptyTrimmed(payload.token?.refreshToken) {
+            logger.info("Antigravity keychain nested refresh token loaded")
+            return .refreshToken(nestedRefreshToken)
+        }
+
+        throw ProviderError.authenticationFailed("Antigravity keychain token is missing")
     }
 
     private func fetchFromAccountsFallback(cacheError: Error) async throws -> ProviderResult {
