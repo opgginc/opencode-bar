@@ -1166,6 +1166,15 @@ struct CopilotCandidateDedupeInput {
     let isPlaceholder: Bool
 }
 
+struct CopilotCandidateDedupeSelectors<C> {
+    let accountId: (C) -> String?
+    let input: (C) -> CopilotCandidateDedupeInput
+    let usage: (C) -> ProviderUsage
+    let details: (C) -> DetailedUsage
+    let priority: (C) -> Int
+    let isPlaceholder: (C) -> Bool
+}
+
 enum CopilotCandidateDedupe {
     static func normalizedIdentity(_ value: String?) -> String? {
         guard let value else { return nil }
@@ -1203,6 +1212,68 @@ enum CopilotCandidateDedupe {
         )
     }
 
+    static func finalizeProviderResult<C>(
+        candidates: [C],
+        cookieCandidate: C?,
+        selectors: CopilotCandidateDedupeSelectors<C>
+    ) -> (result: ProviderResult, accountCount: Int) {
+        let sorted = mergeAccountCandidates(
+            candidates,
+            accountId: selectors.accountId,
+            input: selectors.input,
+            priority: selectors.priority
+        ).sorted { selectors.priority($0) > selectors.priority($1) }
+
+        let accountResults: [ProviderAccountResult] = sorted.enumerated().map { index, candidate in
+            ProviderAccountResult(
+                accountIndex: index,
+                accountId: selectors.accountId(candidate),
+                usage: selectors.usage(candidate),
+                details: selectors.details(candidate)
+            )
+        }
+
+        let usageCandidates = accountResults.compactMap { result -> (remaining: Int, entitlement: Int)? in
+            guard let remaining = result.usage.remainingQuota,
+                  let entitlement = result.usage.totalEntitlement,
+                  entitlement > 0 else {
+                return nil
+            }
+            return (remaining: remaining, entitlement: entitlement)
+        }
+
+        let aggregateUsage: ProviderUsage
+        if let minCandidate = usageCandidates.min(by: { $0.remaining < $1.remaining }) {
+            aggregateUsage = ProviderUsage.quotaBased(
+                remaining: max(0, minCandidate.remaining),
+                entitlement: max(0, minCandidate.entitlement),
+                overagePermitted: true
+            )
+        } else {
+            aggregateUsage = ProviderUsage.quotaBased(
+                remaining: 0,
+                entitlement: 0,
+                overagePermitted: true
+            )
+        }
+
+        let primaryDetails = primaryDetails(
+            accountResults: accountResults,
+            cookieCandidate: cookieCandidate,
+            details: selectors.details,
+            isPlaceholder: selectors.isPlaceholder
+        )
+
+        return (
+            ProviderResult(
+                usage: aggregateUsage,
+                details: primaryDetails,
+                accounts: accountResults
+            ),
+            accountResults.count
+        )
+    }
+
     static func isSameAccountUsage(
         _ lhs: CopilotCandidateDedupeInput,
         _ rhs: CopilotCandidateDedupeInput
@@ -1213,6 +1284,7 @@ enum CopilotCandidateDedupe {
             return false
         }
 
+        // Missing request counts are compatible so partial auth sources can still dedupe by identity.
         if let lhsUsed = lhs.usedRequests,
            let rhsUsed = rhs.usedRequests,
            lhsUsed != rhsUsed {
@@ -1238,6 +1310,23 @@ enum CopilotCandidateDedupe {
         }
 
         return !lhsIdentity.isDisjoint(with: rhsIdentity)
+    }
+
+    private static func primaryDetails<C>(
+        accountResults: [ProviderAccountResult],
+        cookieCandidate: C?,
+        details: (C) -> DetailedUsage,
+        isPlaceholder: (C) -> Bool
+    ) -> DetailedUsage? {
+        if let cookieCandidate,
+           !isPlaceholder(cookieCandidate) {
+            let cookieDetails = details(cookieCandidate)
+            if cookieDetails.copilotOverageCost != nil || cookieDetails.copilotOverageRequests != nil {
+                return cookieDetails
+            }
+        }
+
+        return accountResults.first?.details ?? cookieCandidate.map(details)
     }
 
     private static func identityCandidates(_ candidate: CopilotCandidateDedupeInput) -> Set<String> {

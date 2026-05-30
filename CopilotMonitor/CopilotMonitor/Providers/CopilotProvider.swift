@@ -80,8 +80,8 @@ final class CopilotProvider: ProviderProtocol {
 
                     saveCache(usage: usage)
 
-        // Clamp to 0 to avoid negative display when in overage (usedRequests > limitRequests)
-        let remaining = max(0, usage.limitRequests - usage.usedRequests)
+                    // Clamp to 0 to avoid negative display when in overage (usedRequests > limitRequests)
+                    let remaining = max(0, usage.limitRequests - usage.usedRequests)
                     logger.info("CopilotProvider: Fetch successful - used: \(usage.usedRequests), limit: \(usage.limitRequests), remaining: \(remaining)")
 
                     var dailyHistory: [DailyUsage]?
@@ -356,55 +356,22 @@ final class CopilotProvider: ProviderProtocol {
         candidates: [CopilotAccountCandidate],
         cookieCandidate: CopilotAccountCandidate?
     ) -> ProviderResult {
-        let sorted = CopilotCandidateDedupe.mergeAccountCandidates(
-            candidates,
-            accountId: { $0.accountId },
-            input: { $0.dedupeInput },
-            priority: { $0.sourcePriority }
-        ).sorted { $0.sourcePriority > $1.sourcePriority }
-
-        let accountResults: [ProviderAccountResult] = sorted.enumerated().map { index, candidate in
-            ProviderAccountResult(
-                accountIndex: index,
-                accountId: candidate.accountId,
-                usage: candidate.usage,
-                details: candidate.details
+        let finalized = CopilotCandidateDedupe.finalizeProviderResult(
+            candidates: candidates,
+            cookieCandidate: cookieCandidate,
+            selectors: CopilotCandidateDedupeSelectors(
+                accountId: { $0.accountId },
+                input: { $0.dedupeInput },
+                usage: { $0.usage },
+                details: { $0.details },
+                priority: { $0.sourcePriority },
+                isPlaceholder: { $0.isPlaceholder }
             )
-        }
-
-        let usageCandidates = accountResults.compactMap { result -> (remaining: Int, entitlement: Int)? in
-            guard let remaining = result.usage.remainingQuota,
-                  let entitlement = result.usage.totalEntitlement,
-                  entitlement > 0 else {
-                return nil
-            }
-            return (remaining: remaining, entitlement: entitlement)
-        }
-
-        let aggregateUsage: ProviderUsage
-        if let minCandidate = usageCandidates.min(by: { $0.remaining < $1.remaining }) {
-            aggregateUsage = ProviderUsage.quotaBased(
-                remaining: max(0, minCandidate.remaining),
-                entitlement: max(0, minCandidate.entitlement),
-                overagePermitted: true
-            )
-        } else {
-            aggregateUsage = ProviderUsage.quotaBased(
-                remaining: 0,
-                entitlement: 0,
-                overagePermitted: true
-            )
-        }
-
-        let primaryDetails = accountResults.first?.details ?? cookieCandidate?.details
-
-        logger.info("CopilotProvider: Finalized \(accountResults.count) account row(s)")
-
-        return ProviderResult(
-            usage: aggregateUsage,
-            details: primaryDetails,
-            accounts: accountResults
         )
+
+        logger.info("CopilotProvider: Finalized \(finalized.accountCount) account row(s)")
+
+        return finalized.result
     }
 
     // MARK: - Customer ID Fetching
