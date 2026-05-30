@@ -1,5 +1,4 @@
 import Foundation
-import Foundation
 import os.log
 
 private let commandCodeLogger = Logger(subsystem: "com.opencodeproviders", category: "CommandCodeProvider")
@@ -64,7 +63,6 @@ enum CommandCodeProviderError: LocalizedError {
     case invalidCredentials
     case apiError(Int)
     case parseFailed(String)
-    case unknownPlan(String)
 
     var errorDescription: String? {
         switch self {
@@ -76,8 +74,6 @@ enum CommandCodeProviderError: LocalizedError {
             return "Command Code API returned HTTP \(status)."
         case .parseFailed(let message):
             return "Command Code response could not be parsed: \(message)"
-        case .unknownPlan(let planID):
-            return "Command Code returned an unknown active plan: \(planID)"
         }
     }
 }
@@ -230,7 +226,7 @@ final class CommandCodeProvider: ProviderProtocol {
         if let planID = subscription.planID,
            subscription.status?.lowercased() == "active",
            plan == nil {
-            throw CommandCodeProviderError.unknownPlan(planID)
+            commandCodeLogger.warning("Command Code returned an unknown active plan: \(planID)")
         }
 
         return CommandCodeUsageSnapshot(

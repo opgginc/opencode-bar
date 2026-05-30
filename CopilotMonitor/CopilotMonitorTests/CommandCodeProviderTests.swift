@@ -83,6 +83,40 @@ final class CommandCodeProviderTests: XCTestCase {
         XCTAssertNotNil(snapshot.billingPeriodEnd)
     }
 
+    func testDirectAPISnapshotDegradesGracefullyForUnknownActivePlan() throws {
+        let creditsJSON = """
+        {
+            "credits": {
+                "monthlyCredits": 8.7784,
+                "purchasedCredits": 0,
+                "premiumMonthlyCredits": 0,
+                "opensourceMonthlyCredits": 8.7784
+            }
+        }
+        """.data(using: .utf8)!
+        let subscriptionJSON = """
+        {
+            "success": true,
+            "data": {
+                "planId": "individual-enterprise",
+                "status": "active",
+                "currentPeriodEnd": "2026-06-06T07:28:50.000Z"
+            }
+        }
+        """.data(using: .utf8)!
+
+        let snapshot = try CommandCodeProvider.snapshotFromDirectAPI(
+            creditsData: creditsJSON,
+            subscriptionData: subscriptionJSON,
+            authSource: "test"
+        )
+
+        XCTAssertNil(snapshot.plan)
+        XCTAssertEqual(snapshot.subscriptionStatus, "active")
+        XCTAssertNil(snapshot.monthlyCreditsTotal)
+        XCTAssertEqual(snapshot.monthlyCreditsRemaining, 8.7784)
+    }
+
     func testOpenCommandUsageSnapshotParsesProxyPayload() throws {
         let data = """
         {
