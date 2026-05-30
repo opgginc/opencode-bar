@@ -193,18 +193,15 @@ final class CommandCodeProvider: ProviderProtocol {
             throw CommandCodeProviderError.parseFailed("Expected JSON object")
         }
 
-        let remaining = parseDouble(from: object, keys: ["credits_remaining", "creditsRemaining"])
-        let monthlySpend = parseDouble(from: object, keys: ["monthly_spend", "monthlySpend"])
-        var monthlyLimit = parseDouble(from: object, keys: ["monthly_limit", "monthlyLimit"])
+        let remaining = APIValueParser.parseDouble(from: object, keys: ["credits_remaining", "creditsRemaining"])
+        let monthlySpend = APIValueParser.parseDouble(from: object, keys: ["monthly_spend", "monthlySpend"])
+        var monthlyLimit = APIValueParser.parseDouble(from: object, keys: ["monthly_limit", "monthlyLimit"])
         if monthlyLimit <= 0 {
             monthlyLimit = monthlySpend + remaining
         }
-        guard monthlyLimit > 0 else {
-            throw CommandCodeProviderError.parseFailed("monthly_limit is missing")
-        }
 
         let resetDate = parseDate(from: object["reset_date"] as? String ?? object["resetDate"] as? String)
-        let plan = CommandCodePlan(id: "opencommand", displayName: "OpenCommand", monthlyCreditsUSD: monthlyLimit)
+        let plan = monthlyLimit > 0 ? CommandCodePlan(id: "opencommand", displayName: "OpenCommand", monthlyCreditsUSD: monthlyLimit) : nil
 
         return CommandCodeUsageSnapshot(
             monthlyCreditsRemaining: remaining,
@@ -410,10 +407,10 @@ final class CommandCodeProvider: ProviderProtocol {
         }
 
         return CreditsPayload(
-            monthlyCredits: parseDouble(from: credits, keys: ["monthlyCredits"]),
-            purchasedCredits: parseDouble(from: credits, keys: ["purchasedCredits"]),
-            premiumMonthlyCredits: parseDouble(from: credits, keys: ["premiumMonthlyCredits"]),
-            opensourceMonthlyCredits: parseDouble(from: credits, keys: ["opensourceMonthlyCredits"])
+            monthlyCredits: APIValueParser.parseDouble(from: credits, keys: ["monthlyCredits"]),
+            purchasedCredits: APIValueParser.parseDouble(from: credits, keys: ["purchasedCredits"]),
+            premiumMonthlyCredits: APIValueParser.parseDouble(from: credits, keys: ["premiumMonthlyCredits"]),
+            opensourceMonthlyCredits: APIValueParser.parseDouble(from: credits, keys: ["opensourceMonthlyCredits"])
         )
     }
 
@@ -435,16 +432,6 @@ final class CommandCodeProvider: ProviderProtocol {
         let currentPeriodEnd = parseDate(from: dataObject["currentPeriodEnd"] as? String)
 
         return SubscriptionPayload(planID: planID, status: status, currentPeriodEnd: currentPeriodEnd)
-    }
-
-    static func parseDouble(from dict: [String: Any], keys: [String]) -> Double {
-        for key in keys {
-            if let value = dict[key] as? Double { return value }
-            if let value = dict[key] as? Int { return Double(value) }
-            if let value = dict[key] as? NSNumber { return value.doubleValue }
-            if let value = dict[key] as? String, let parsed = Double(value) { return parsed }
-        }
-        return 0
     }
 
     static func parseDate(from rawValue: String?) -> Date? {
