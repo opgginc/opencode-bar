@@ -13,8 +13,8 @@ actor CLIProviderManager {
     private let fetchTimeout: TimeInterval = 10.0
     
     static let registeredProviders: [ProviderIdentifier] = [
-        .claude, .codex, .cursor, .geminiCLI, .openRouter,
-        .antigravity, .openCodeZen, .openCodeGo, .grok, .kimi, .minimaxCodingPlan, .zaiCodingPlan,
+        .claude, .codex, .commandCode, .cursor, .geminiCLI, .openRouter,
+        .antigravity, .openCodeZen, .openCodeGo, .kiro, .grok, .kimi, .minimaxCodingPlan, .zaiCodingPlan,
         .nanoGpt,
         .chutes, .copilot,
         .synthetic
@@ -27,12 +27,14 @@ actor CLIProviderManager {
         // Shared providers (no UI dependencies)
         let claudeProvider = ClaudeProvider()
         let codexProvider = CodexProvider()
+        let commandCodeProvider = CommandCodeProvider()
         let cursorProvider = CursorProvider()
         let geminiCLIProvider = GeminiCLIProvider()
         let openRouterProvider = OpenRouterProvider()
         let antigravityProvider = AntigravityProvider()
         let openCodeZenProvider = OpenCodeZenProvider()
         let openCodeGoProvider = OpenCodeGoProvider()
+        let kiroProvider = KiroProvider()
         let grokProvider = GrokProvider()
         let kimiProvider = KimiProvider()
         let minimaxProvider = MiniMaxProvider()
@@ -47,12 +49,14 @@ actor CLIProviderManager {
         self.providers = [
             claudeProvider,
             codexProvider,
+            commandCodeProvider,
             cursorProvider,
             geminiCLIProvider,
             openRouterProvider,
             antigravityProvider,
             openCodeZenProvider,
             openCodeGoProvider,
+            kiroProvider,
             grokProvider,
             kimiProvider,
             minimaxProvider,

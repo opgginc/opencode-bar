@@ -11,6 +11,7 @@
 | Copilot, Nano-GPT, MiniMax, OpenCode Go | `~/.local/share/opencode/auth.json` |
 | Antigravity (Gemini) | `~/.config/opencode/antigravity-accounts.json` |
 | Antigravity (Local cache) | `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb` |
+| Kiro | Authenticated `kiro-cli` session; OpenCode Bar does not read local Kiro token databases |
 | Grok | `~/.grok/auth.json`, `~/.grok/sessions/**/signals.json`, optional grok.com browser cookies |
 
 ---
@@ -312,7 +313,33 @@ The bundled [`scripts/query-opencode-go.sh`](/Users/kargnas/projects/opencode-ba
 
 ---
 
-## 7. Grok
+## 7. Kiro
+
+**Usage source:** `kiro-cli chat --no-interactive "/usage"`
+
+Kiro currently exposes billing usage through the authenticated Kiro CLI experience. OpenCode Bar uses `kiro-cli` as the integration boundary and does not read Kiro's local auth database or token storage directly.
+
+```bash
+kiro-cli chat --no-interactive "/usage"
+./scripts/query-kiro.sh
+./scripts/query-kiro.sh --json
+```
+
+The CLI output is ANSI-decorated and may appear in either a compact line format or a table-style format. OpenCode Bar strips ANSI escape sequences and reads:
+
+| Field | Description |
+|-------|-------------|
+| `Credits (X of Y covered in plan)` | Monthly credits used and total plan allowance |
+| Progress bar percent | Fallback used percentage when the credit tuple is omitted |
+| `resets on YYYY-MM-DD` or `resets on MM/DD` | Monthly reset date |
+| `Plan: ...` / `Estimated Usage ... | PLAN` | Kiro plan name, normalized to Free, Pro, Pro+, or Power when possible |
+| `Overages: Enabled/Disabled` | Whether paid overages are enabled |
+
+When only a progress percentage is available, OpenCode Bar derives the credit allowance from Kiro's current public plan limits: Free 50, Pro 1,000, Pro+ 2,000, Power 10,000. The provider throttles fetches to avoid spawning the Kiro CLI too frequently.
+
+---
+
+## 8. Grok
 
 **Identity source:** `~/.grok/auth.json`
 
@@ -347,7 +374,7 @@ OpenCode Bar's native Grok provider uses the same identity selection rule. It cu
 
 ---
 
-## 8. Antigravity (Dual Quota System)
+## 9. Antigravity (Dual Quota System)
 
 Antigravity has **two independent quota systems**:
 
@@ -576,6 +603,7 @@ Test scripts are located in the `scripts/` folder:
 | `query-copilot.sh` | GitHub Copilot |
 | `query-minimax.sh` | MiniMax Coding Plan |
 | `query-opencode-go.sh` | OpenCode Go |
+| `query-kiro.sh` | Kiro |
 | `query-grok.sh` | Grok |
 | `query-gemini-cli.sh` | Antigravity - Gemini CLI quota |
 | `query-gemini-oauth-creds.sh` | Gemini CLI oauth_creds identity/token inspection |

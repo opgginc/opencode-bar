@@ -10,6 +10,13 @@ struct CommandCodePlan: Equatable {
 }
 
 enum CommandCodePlanCatalog {
+    private static let displayOrder = [
+        "individual-go",
+        "individual-pro",
+        "individual-max",
+        "individual-ultra"
+    ]
+
     static let plans: [String: CommandCodePlan] = [
         "individual-go": CommandCodePlan(id: "individual-go", displayName: "Go", monthlyCreditsUSD: 10),
         "individual-pro": CommandCodePlan(id: "individual-pro", displayName: "Pro", monthlyCreditsUSD: 30),
@@ -20,6 +27,10 @@ enum CommandCodePlanCatalog {
     static func plan(for id: String?) -> CommandCodePlan? {
         guard let id else { return nil }
         return plans[id.lowercased()]
+    }
+
+    static var orderedPlans: [CommandCodePlan] {
+        displayOrder.compactMap { plans[$0] }
     }
 }
 
@@ -58,6 +69,11 @@ struct CommandCodeCookieHeader: Equatable {
     }
 }
 
+struct CommandCodeCookieCredential: Equatable {
+    let header: CommandCodeCookieHeader
+    let authSource: String
+}
+
 enum CommandCodeProviderError: LocalizedError {
     case missingCredentials
     case invalidCredentials
@@ -81,8 +97,6 @@ enum CommandCodeProviderError: LocalizedError {
 struct CommandCodeUsageSnapshot: Equatable {
     let monthlyCreditsRemaining: Double
     let purchasedCredits: Double
-    let premiumMonthlyCredits: Double
-    let opensourceMonthlyCredits: Double
     let plan: CommandCodePlan?
     let billingPeriodEnd: Date?
     let subscriptionStatus: String?
@@ -143,13 +157,16 @@ final class CommandCodeProvider: ProviderProtocol {
             }
         }
 
-        guard let cookieHeader = loadCookieHeader() else {
+        guard let credential = loadCookieHeader() else {
             debugLog("fetch failed: no Command Code credentials found")
             throw ProviderError.authenticationFailed(CommandCodeProviderError.missingCredentials.localizedDescription)
         }
 
         do {
-            let snapshot = try await fetchDirectUsage(cookieHeader: cookieHeader.headerValue)
+            let snapshot = try await fetchDirectUsage(
+                cookieHeader: credential.header.headerValue,
+                authSource: credential.authSource
+            )
             commandCodeLogger.info("Command Code usage fetched through direct billing API")
             debugLog("fetch completed through direct Command Code API")
             return Self.makeResult(from: snapshot)
@@ -193,24 +210,19 @@ final class CommandCodeProvider: ProviderProtocol {
             throw CommandCodeProviderError.parseFailed("Expected JSON object")
         }
 
-        let remaining = parseDouble(from: object, keys: ["credits_remaining", "creditsRemaining"])
-        let monthlySpend = parseDouble(from: object, keys: ["monthly_spend", "monthlySpend"])
-        var monthlyLimit = parseDouble(from: object, keys: ["monthly_limit", "monthlyLimit"])
+        let remaining = APIValueParser.parseDouble(from: object, keys: ["credits_remaining", "creditsRemaining"])
+        let monthlySpend = APIValueParser.parseDouble(from: object, keys: ["monthly_spend", "monthlySpend"])
+        var monthlyLimit = APIValueParser.parseDouble(from: object, keys: ["monthly_limit", "monthlyLimit"])
         if monthlyLimit <= 0 {
             monthlyLimit = monthlySpend + remaining
         }
-        guard monthlyLimit > 0 else {
-            throw CommandCodeProviderError.parseFailed("monthly_limit is missing")
-        }
 
-        let resetDate = parseDate(from: object["reset_date"] as? String ?? object["resetDate"] as? String)
-        let plan = CommandCodePlan(id: "opencommand", displayName: "OpenCommand", monthlyCreditsUSD: monthlyLimit)
+        let resetDate = APIValueParser.parseDate(from: object["reset_date"] as? String ?? object["resetDate"] as? String)
+        let plan = monthlyLimit > 0 ? CommandCodePlan(id: "opencommand", displayName: "OpenCommand", monthlyCreditsUSD: monthlyLimit) : nil
 
         return CommandCodeUsageSnapshot(
             monthlyCreditsRemaining: remaining,
             purchasedCredits: 0,
-            premiumMonthlyCredits: 0,
-            opensourceMonthlyCredits: remaining,
             plan: plan,
             billingPeriodEnd: resetDate,
             subscriptionStatus: "OpenCommand",
@@ -221,10 +233,12 @@ final class CommandCodeProvider: ProviderProtocol {
     static func snapshotFromDirectAPI(creditsData: Data, subscriptionData: Data, authSource: String) throws -> CommandCodeUsageSnapshot {
         let credits = try parseCreditsPayload(creditsData)
         let subscription = try parseSubscriptionPayload(subscriptionData)
-        let plan = CommandCodePlanCatalog.plan(for: subscription.planID)
+        
+        let isActive = subscription.status?.lowercased() == "active"
+        let plan = isActive ? CommandCodePlanCatalog.plan(for: subscription.planID) : nil
 
         if let planID = subscription.planID,
-           subscription.status?.lowercased() == "active",
+           isActive,
            plan == nil {
             commandCodeLogger.warning("Command Code returned an unknown active plan: \(planID)")
         }
@@ -232,8 +246,6 @@ final class CommandCodeProvider: ProviderProtocol {
         return CommandCodeUsageSnapshot(
             monthlyCreditsRemaining: credits.monthlyCredits,
             purchasedCredits: credits.purchasedCredits,
-            premiumMonthlyCredits: credits.premiumMonthlyCredits,
-            opensourceMonthlyCredits: credits.opensourceMonthlyCredits,
             plan: plan,
             billingPeriodEnd: subscription.currentPeriodEnd,
             subscriptionStatus: subscription.status,
@@ -294,14 +306,14 @@ final class CommandCodeProvider: ProviderProtocol {
 
     // MARK: - Direct Command Code API
 
-    private func fetchDirectUsage(cookieHeader: String) async throws -> CommandCodeUsageSnapshot {
+    private func fetchDirectUsage(cookieHeader: String, authSource: String) async throws -> CommandCodeUsageSnapshot {
         async let creditsTask = sendDirectRequest(path: "/internal/billing/credits", cookieHeader: cookieHeader)
         async let subscriptionTask = sendDirectRequest(path: "/internal/billing/subscriptions", cookieHeader: cookieHeader)
         let (creditsData, subscriptionData) = try await (creditsTask, subscriptionTask)
         return try Self.snapshotFromDirectAPI(
             creditsData: creditsData,
             subscriptionData: subscriptionData,
-            authSource: "Command Code browser session cookie"
+            authSource: authSource
         )
     }
 
@@ -335,23 +347,23 @@ final class CommandCodeProvider: ProviderProtocol {
         return data
     }
 
-    private func loadCookieHeader() -> CommandCodeCookieHeader? {
+    private func loadCookieHeader() -> CommandCodeCookieCredential? {
         for key in ["CC_SESSION_COOKIE", "COMMANDCODE_SESSION_COOKIE", "COMMAND_CODE_SESSION_COOKIE"] {
             if let header = CommandCodeCookieHeader.override(from: environment[key]) {
                 debugLog("Command Code cookie loaded from environment key \(key)")
-                return header
+                return CommandCodeCookieCredential(header: header, authSource: "Command Code environment variable (\(key))")
             }
         }
 
-        if let header = loadCookieHeaderFromOpenCommandSecrets() {
-            return header
+        if let credential = loadCookieHeaderFromOpenCommandSecrets() {
+            return credential
         }
 
         do {
             let headerValue = try BrowserCookieService.shared.getCommandCodeCookieHeader()
             if let header = CommandCodeCookieHeader.override(from: headerValue) {
                 debugLog("Command Code cookie loaded from browser cookie store")
-                return header
+                return CommandCodeCookieCredential(header: header, authSource: "Command Code browser session cookie")
             }
         } catch {
             debugLog("Browser cookie lookup failed: \(error.localizedDescription)")
@@ -360,7 +372,7 @@ final class CommandCodeProvider: ProviderProtocol {
         return nil
     }
 
-    private func loadCookieHeaderFromOpenCommandSecrets() -> CommandCodeCookieHeader? {
+    private func loadCookieHeaderFromOpenCommandSecrets() -> CommandCodeCookieCredential? {
         let secretsURL = openCommandDirectory().appendingPathComponent("opencommand-secrets.json")
         guard fileManager.fileExists(atPath: secretsURL.path), fileManager.isReadableFile(atPath: secretsURL.path) else {
             return nil
@@ -374,7 +386,7 @@ final class CommandCodeProvider: ProviderProtocol {
             for key in ["opencommand.cc_session_cookie", "opencommand.cc_session_token"] {
                 if let header = CommandCodeCookieHeader.override(from: object[key] as? String) {
                     debugLog("Command Code cookie loaded from OpenCommand secrets")
-                    return header
+                    return CommandCodeCookieCredential(header: header, authSource: "OpenCommand secrets (\(key))")
                 }
             }
         } catch {
@@ -393,8 +405,6 @@ final class CommandCodeProvider: ProviderProtocol {
     private struct CreditsPayload {
         let monthlyCredits: Double
         let purchasedCredits: Double
-        let premiumMonthlyCredits: Double
-        let opensourceMonthlyCredits: Double
     }
 
     private struct SubscriptionPayload {
@@ -410,10 +420,8 @@ final class CommandCodeProvider: ProviderProtocol {
         }
 
         return CreditsPayload(
-            monthlyCredits: parseDouble(from: credits, keys: ["monthlyCredits"]),
-            purchasedCredits: parseDouble(from: credits, keys: ["purchasedCredits"]),
-            premiumMonthlyCredits: parseDouble(from: credits, keys: ["premiumMonthlyCredits"]),
-            opensourceMonthlyCredits: parseDouble(from: credits, keys: ["opensourceMonthlyCredits"])
+            monthlyCredits: APIValueParser.parseDouble(from: credits, keys: ["monthlyCredits"]),
+            purchasedCredits: APIValueParser.parseDouble(from: credits, keys: ["purchasedCredits"])
         )
     }
 
@@ -432,41 +440,9 @@ final class CommandCodeProvider: ProviderProtocol {
 
         let planID = dataObject["planId"] as? String ?? dataObject["planID"] as? String
         let status = dataObject["status"] as? String ?? "unknown"
-        let currentPeriodEnd = parseDate(from: dataObject["currentPeriodEnd"] as? String)
+        let currentPeriodEnd = APIValueParser.parseDate(from: dataObject["currentPeriodEnd"] as? String)
 
         return SubscriptionPayload(planID: planID, status: status, currentPeriodEnd: currentPeriodEnd)
-    }
-
-    static func parseDouble(from dict: [String: Any], keys: [String]) -> Double {
-        for key in keys {
-            if let value = dict[key] as? Double { return value }
-            if let value = dict[key] as? Int { return Double(value) }
-            if let value = dict[key] as? NSNumber { return value.doubleValue }
-            if let value = dict[key] as? String, let parsed = Double(value) { return parsed }
-        }
-        return 0
-    }
-
-    static func parseDate(from rawValue: String?) -> Date? {
-        guard let rawValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !rawValue.isEmpty else {
-            return nil
-        }
-
-        let fractionalFormatter = ISO8601DateFormatter()
-        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractionalFormatter.date(from: rawValue) { return date }
-
-        let plainFormatter = ISO8601DateFormatter()
-        plainFormatter.formatOptions = [.withInternetDateTime]
-        if let date = plainFormatter.date(from: rawValue) { return date }
-
-        let dateOnlyFormatter = DateFormatter()
-        dateOnlyFormatter.locale = Locale(identifier: "en_US_POSIX")
-        dateOnlyFormatter.dateFormat = "yyyy-MM-dd"
-        if let utc = TimeZone(identifier: "UTC") {
-            dateOnlyFormatter.timeZone = utc
-        }
-        return dateOnlyFormatter.date(from: rawValue)
     }
 
     private func debugLog(_ message: String) {

@@ -13,6 +13,7 @@ enum ProviderIdentifier: String, CaseIterable {
     case copilot
     case claude
     case codex
+    case commandCode = "command_code"
     case cursor
     case geminiCLI = "gemini_cli"
     case openRouter = "openrouter"
@@ -20,6 +21,7 @@ enum ProviderIdentifier: String, CaseIterable {
     case antigravity
     case openCodeZen = "opencode_zen"
     case openCodeGo = "opencode_go"
+    case kiro
     case grok
     case kimi
     case minimaxCodingPlan = "minimax_coding_plan"
@@ -38,6 +40,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Claude"
         case .codex:
             return "ChatGPT"
+        case .commandCode:
+            return "Command Code"
         case .cursor:
             return "Cursor"
         case .geminiCLI:
@@ -52,6 +56,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "OpenCode Zen"
         case .openCodeGo:
             return "OpenCode Go"
+        case .kiro:
+            return "Kiro"
         case .grok:
             return "Grok"
         case .kimi:
@@ -81,6 +87,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Claude"
         case .codex:
             return "Codex"
+        case .commandCode:
+            return "Command"
         case .cursor:
             return "Cursor"
         case .geminiCLI:
@@ -95,6 +103,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Zen"
         case .openCodeGo:
             return "Go"
+        case .kiro:
+            return "Kiro"
         case .grok:
             return "Grok"
         case .kimi:
@@ -124,6 +134,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "brain.head.profile"
         case .codex:
             return "sparkles"
+        case .commandCode:
+            return "command"
         case .cursor:
             return "CursorIcon"
         case .geminiCLI:
@@ -138,6 +150,8 @@ enum ProviderIdentifier: String, CaseIterable {
             return "moon.stars"
         case .openCodeGo:
             return "chevron.left.forwardslash.chevron.right"
+        case .kiro:
+            return "KiroIcon"
         case .grok:
             return "GrokIcon"
         case .kimi:

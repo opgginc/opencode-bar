@@ -120,6 +120,13 @@ struct SwiftUIProviderAlertView: View {
                 .scaledToFit()
                 .frame(width: 12, height: 12)
                 .foregroundColor(.red)
+        } else if identifier == .kiro {
+            Image("KiroIcon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 12, height: 12)
+                .foregroundColor(.red)
         } else if let systemIconName = systemIconName(for: identifier) {
             Image(systemName: systemIconName)
                 .font(.system(size: 12))
@@ -131,11 +138,13 @@ struct SwiftUIProviderAlertView: View {
         switch identifier {
         case .claude: return "brain"
         case .codex: return "terminal"
+        case .commandCode: return "command"
         case .cursor: return nil
         case .geminiCLI: return "sparkles"
         case .copilot: return "airplane"
         case .openRouter: return "dollarsign.circle"
         case .openCode, .openCodeZen, .openCodeGo: return "chevron.left.forwardslash.chevron.right"
+        case .kiro: return "KiroIcon"
         case .grok: return nil
         case .antigravity: return "arrow.up.circle"
         case .kimi: return "k.circle"

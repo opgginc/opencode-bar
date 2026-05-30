@@ -142,8 +142,6 @@ final class CommandCodeProviderTests: XCTestCase {
         let snapshot = CommandCodeUsageSnapshot(
             monthlyCreditsRemaining: 8.7784,
             purchasedCredits: 0,
-            premiumMonthlyCredits: 0,
-            opensourceMonthlyCredits: 8.7784,
             plan: CommandCodePlan(id: "individual-go", displayName: "Go", monthlyCreditsUSD: 10),
             billingPeriodEnd: nil,
             subscriptionStatus: "active",
@@ -157,5 +155,16 @@ final class CommandCodeProviderTests: XCTestCase {
         XCTAssertEqual(result.usage.usagePercentage, 12.2, accuracy: 0.0001)
         XCTAssertEqual(result.details?.creditsRemaining, 8.7784)
         XCTAssertEqual(result.details?.creditsTotal, 10)
+    }
+
+    func testCommandCodeSubscriptionPresetsUsePlanCatalog() {
+        XCTAssertEqual(CommandCodePlanCatalog.orderedPlans.map(\.id), [
+            "individual-go",
+            "individual-pro",
+            "individual-max",
+            "individual-ultra"
+        ])
+        XCTAssertEqual(ProviderSubscriptionPresets.commandCode.map(\.name), ["Go", "Pro", "Max", "Ultra"])
+        XCTAssertEqual(ProviderSubscriptionPresets.commandCode.map(\.cost), [10, 30, 150, 300])
     }
 }

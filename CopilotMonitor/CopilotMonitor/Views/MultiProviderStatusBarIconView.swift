@@ -132,6 +132,8 @@ final class MultiProviderStatusBarIconView: NSView {
             iconName = "ClaudeIcon"
         case .codex:
             iconName = "CodexIcon"
+        case .commandCode:
+            iconName = "command"
         case .cursor:
             iconName = "CursorIcon"
         case .geminiCLI:
@@ -150,6 +152,8 @@ final class MultiProviderStatusBarIconView: NSView {
             iconName = "OpencodeIcon"
         case .openCodeGo:
             iconName = "OpencodeIcon"
+        case .kiro:
+            iconName = "KiroIcon"
         case .grok:
             iconName = "GrokIcon"
         case .kimi:

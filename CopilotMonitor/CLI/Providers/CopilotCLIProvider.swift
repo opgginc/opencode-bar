@@ -254,7 +254,7 @@ actor CopilotCLIProvider: ProviderProtocol {
         )
 
         let details = DetailedUsage(
-            resetPeriod: formatResetDate(usage.quotaResetDateUTC),
+            resetPeriod: APIValueParser.formatResetDate(usage.quotaResetDateUTC),
             planType: usage.copilotPlan,
             email: login,
             dailyHistory: dailyHistory,
@@ -455,16 +455,6 @@ actor CopilotCLIProvider: ProviderProtocol {
             userPremiumRequestEntitlement: limit,
             filteredUserPremiumRequestEntitlement: filteredLimit
         )
-    }
-
-    // MARK: - Helpers
-
-    private func formatResetDate(_ date: Date?) -> String? {
-        guard let date = date else { return nil }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        return formatter.string(from: date)
     }
 
 }

@@ -59,6 +59,24 @@ class BrowserCookieService {
         throw BrowserCookieError.noBrowserFound
     }
 
+    func getCommandCodeCookieHeader() throws -> String {
+        debugLog("Starting Command Code cookie extraction from browsers")
+        let cookies = try getCookies(
+            hostSuffix: "commandcode.ai",
+            names: Set(CommandCodeCookieHeader.supportedCookieNames)
+        )
+
+        for cookieName in CommandCodeCookieHeader.supportedCookieNames {
+            if let cookie = cookies.first(where: { $0.name == cookieName }), !cookie.value.isEmpty {
+                debugLog("Successfully extracted Command Code cookie named \(cookieName) from \(cookie.browserName)")
+                return "\(cookieName)=\(cookie.value)"
+            }
+        }
+
+        debugLog("No browser found with valid Command Code cookies")
+        throw BrowserCookieError.noBrowserFound
+    }
+
     func getCookies(hostSuffix: String, names: Set<String>) throws -> [BrowserCookie] {
         var allCookies: [BrowserCookie] = []
         guard let normalizedHost = normalizedDomainHost(hostSuffix) else {

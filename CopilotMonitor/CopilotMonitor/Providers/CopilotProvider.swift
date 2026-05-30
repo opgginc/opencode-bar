@@ -140,14 +140,6 @@ final class CopilotProvider: ProviderProtocol {
         return finalizeResult(candidates: candidates, cookieCandidate: cookieCandidate)
     }
 
-    private func formatResetDate(_ date: Date?) -> String? {
-        guard let date = date else { return nil }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        return formatter.string(from: date)
-    }
-
     // MARK: - Token & Account Helpers
 
     private struct CopilotTokenInfo {
@@ -227,7 +219,7 @@ final class CopilotProvider: ProviderProtocol {
             }
 
             if let login = info.login,
-               let index = results.firstIndex(where: { $0.login == login }) {
+               let index = results.firstIndex(where: { $0.login?.caseInsensitiveCompare(login) == .orderedSame }) {
                 if sourcePriority(info.source) > sourcePriority(results[index].source) {
                     results[index] = info
                 }
@@ -287,7 +279,7 @@ final class CopilotProvider: ProviderProtocol {
         )
 
         let details = DetailedUsage(
-            resetPeriod: formatResetDate(usage.quotaResetDateUTC),
+            resetPeriod: APIValueParser.formatResetDate(usage.quotaResetDateUTC),
             planType: usage.copilotPlan,
             email: login,
             dailyHistory: dailyHistory,
@@ -561,7 +553,7 @@ final class CopilotProvider: ProviderProtocol {
         return ProviderResult(
             usage: providerUsage,
             details: DetailedUsage(
-                resetPeriod: formatResetDate(usage.quotaResetDateUTC),
+                resetPeriod: APIValueParser.formatResetDate(usage.quotaResetDateUTC),
                 planType: usage.copilotPlan,
                 email: cachedUserEmail,
                 authSource: "Browser Cookies (Chrome/Brave/Arc/Edge)",
