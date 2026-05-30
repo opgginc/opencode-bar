@@ -177,7 +177,7 @@ final class CopilotProviderTests: XCTestCase {
             accountId: "real-user",
             email: "real@example.com",
             entitlement: 300,
-            remaining: 300,
+            remaining: 284,
             isPlaceholder: false
         )
 
