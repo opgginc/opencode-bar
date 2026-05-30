@@ -182,6 +182,12 @@ struct ProviderSubscriptionPresets {
     static let openCodeGo: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Go", cost: 10)
     ]
+    static let commandCode: [SubscriptionPreset] = [
+        SubscriptionPreset(name: "Go", cost: 10),
+        SubscriptionPreset(name: "Pro", cost: 30),
+        SubscriptionPreset(name: "Max", cost: 150),
+        SubscriptionPreset(name: "Ultra", cost: 300)
+    ]
     static let kiro: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Free", cost: 0),
         SubscriptionPreset(name: "Pro", cost: 20),
