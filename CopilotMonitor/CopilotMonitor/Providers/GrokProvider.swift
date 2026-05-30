@@ -525,21 +525,7 @@ final class GrokProvider: ProviderProtocol {
     }
 
     private static func parseDate(_ raw: Any?) -> Date? {
-        guard let value = nonEmptyString(raw) else { return nil }
-
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: value) {
-            return date
-        }
-
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-        if let date = standard.date(from: value) {
-            return date
-        }
-
-        return nil
+        return APIValueParser.parseDate(from: nonEmptyString(raw))
     }
 
     private static func nonEmptyString(_ value: Any?) -> String? {

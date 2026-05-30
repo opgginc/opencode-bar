@@ -33,6 +33,20 @@ actor CopilotCLIProvider: ProviderProtocol {
         let usage: ProviderUsage
         let details: DetailedUsage
         let sourcePriority: Int
+        let isPlaceholder: Bool
+
+        var dedupeInput: CopilotCandidateDedupeInput {
+            CopilotCandidateDedupeInput(
+                accountId: accountId,
+                email: details.email,
+                planType: details.planType,
+                totalEntitlement: usage.totalEntitlement,
+                remainingQuota: usage.remainingQuota,
+                usedRequests: details.copilotUsedRequests,
+                limitRequests: details.copilotLimitRequests,
+                isPlaceholder: isPlaceholder
+            )
+        }
     }
 
     // MARK: - ProviderProtocol Implementation
@@ -240,7 +254,7 @@ actor CopilotCLIProvider: ProviderProtocol {
         )
 
         let details = DetailedUsage(
-            resetPeriod: formatResetDate(usage.quotaResetDateUTC),
+            resetPeriod: APIValueParser.formatResetDate(usage.quotaResetDateUTC),
             planType: usage.copilotPlan,
             email: login,
             dailyHistory: dailyHistory,
@@ -256,7 +270,8 @@ actor CopilotCLIProvider: ProviderProtocol {
             accountId: login,
             usage: providerUsage,
             details: details,
-            sourcePriority: sourcePriority
+            sourcePriority: sourcePriority,
+            isPlaceholder: false
         )
     }
 
@@ -287,7 +302,8 @@ actor CopilotCLIProvider: ProviderProtocol {
             accountId: info.accountId ?? info.login,
             usage: providerUsage,
             details: details,
-            sourcePriority: sourcePriority(info.source)
+            sourcePriority: sourcePriority(info.source),
+            isPlaceholder: false
         )
     }
 
@@ -297,56 +313,22 @@ actor CopilotCLIProvider: ProviderProtocol {
         candidates: [CopilotAccountCandidate],
         cookieCandidate: CopilotAccountCandidate?
     ) -> ProviderResult {
-        let merged = CandidateDedupe.merge(
-            candidates,
-            accountId: { $0.accountId },
-            isSameUsage: { _, _ in false },
-            priority: { $0.sourcePriority }
+        let finalized = CopilotCandidateDedupe.finalizeProviderResult(
+            candidates: candidates,
+            cookieCandidate: cookieCandidate,
+            selectors: CopilotCandidateDedupeSelectors(
+                accountId: { $0.accountId },
+                input: { $0.dedupeInput },
+                usage: { $0.usage },
+                details: { $0.details },
+                priority: { $0.sourcePriority },
+                isPlaceholder: { $0.isPlaceholder }
+            )
         )
-        let sorted = merged.sorted { $0.sourcePriority > $1.sourcePriority }
 
-        let accountResults: [ProviderAccountResult] = sorted.enumerated().map { index, candidate in
-            ProviderAccountResult(
-                accountIndex: index,
-                accountId: candidate.accountId,
-                usage: candidate.usage,
-                details: candidate.details
-            )
-        }
+        logger.info("CopilotCLIProvider: Finalized \(finalized.accountCount) account row(s)")
 
-        let usageCandidates = accountResults.compactMap { result -> (remaining: Int, entitlement: Int)? in
-            guard let remaining = result.usage.remainingQuota,
-                  let entitlement = result.usage.totalEntitlement,
-                  entitlement > 0 else {
-                return nil
-            }
-            return (remaining: remaining, entitlement: entitlement)
-        }
-
-        let aggregateUsage: ProviderUsage
-        if let minCandidate = usageCandidates.min(by: { $0.remaining < $1.remaining }) {
-            aggregateUsage = ProviderUsage.quotaBased(
-                remaining: max(0, minCandidate.remaining),
-                entitlement: max(0, minCandidate.entitlement),
-                overagePermitted: true
-            )
-        } else {
-            aggregateUsage = ProviderUsage.quotaBased(
-                remaining: 0,
-                entitlement: 0,
-                overagePermitted: true
-            )
-        }
-
-        let primaryDetails = cookieCandidate?.details ?? accountResults.first?.details
-
-        logger.info("CopilotCLIProvider: Finalized \(accountResults.count) account row(s)")
-
-        return ProviderResult(
-            usage: aggregateUsage,
-            details: primaryDetails,
-            accounts: accountResults
-        )
+        return finalized.result
     }
 
     // MARK: - Cookie-based Fetching (fallback)
@@ -473,16 +455,6 @@ actor CopilotCLIProvider: ProviderProtocol {
             userPremiumRequestEntitlement: limit,
             filteredUserPremiumRequestEntitlement: filteredLimit
         )
-    }
-
-    // MARK: - Helpers
-
-    private func formatResetDate(_ date: Date?) -> String? {
-        guard let date = date else { return nil }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        return formatter.string(from: date)
     }
 
 }

@@ -217,7 +217,7 @@ final class CommandCodeProvider: ProviderProtocol {
             monthlyLimit = monthlySpend + remaining
         }
 
-        let resetDate = parseDate(from: object["reset_date"] as? String ?? object["resetDate"] as? String)
+        let resetDate = APIValueParser.parseDate(from: object["reset_date"] as? String ?? object["resetDate"] as? String)
         let plan = monthlyLimit > 0 ? CommandCodePlan(id: "opencommand", displayName: "OpenCommand", monthlyCreditsUSD: monthlyLimit) : nil
 
         return CommandCodeUsageSnapshot(
@@ -233,10 +233,12 @@ final class CommandCodeProvider: ProviderProtocol {
     static func snapshotFromDirectAPI(creditsData: Data, subscriptionData: Data, authSource: String) throws -> CommandCodeUsageSnapshot {
         let credits = try parseCreditsPayload(creditsData)
         let subscription = try parseSubscriptionPayload(subscriptionData)
-        let plan = CommandCodePlanCatalog.plan(for: subscription.planID)
+        
+        let isActive = subscription.status?.lowercased() == "active"
+        let plan = isActive ? CommandCodePlanCatalog.plan(for: subscription.planID) : nil
 
         if let planID = subscription.planID,
-           subscription.status?.lowercased() == "active",
+           isActive,
            plan == nil {
             commandCodeLogger.warning("Command Code returned an unknown active plan: \(planID)")
         }
@@ -438,31 +440,9 @@ final class CommandCodeProvider: ProviderProtocol {
 
         let planID = dataObject["planId"] as? String ?? dataObject["planID"] as? String
         let status = dataObject["status"] as? String ?? "unknown"
-        let currentPeriodEnd = parseDate(from: dataObject["currentPeriodEnd"] as? String)
+        let currentPeriodEnd = APIValueParser.parseDate(from: dataObject["currentPeriodEnd"] as? String)
 
         return SubscriptionPayload(planID: planID, status: status, currentPeriodEnd: currentPeriodEnd)
-    }
-
-    static func parseDate(from rawValue: String?) -> Date? {
-        guard let rawValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !rawValue.isEmpty else {
-            return nil
-        }
-
-        let fractionalFormatter = ISO8601DateFormatter()
-        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractionalFormatter.date(from: rawValue) { return date }
-
-        let plainFormatter = ISO8601DateFormatter()
-        plainFormatter.formatOptions = [.withInternetDateTime]
-        if let date = plainFormatter.date(from: rawValue) { return date }
-
-        let dateOnlyFormatter = DateFormatter()
-        dateOnlyFormatter.locale = Locale(identifier: "en_US_POSIX")
-        dateOnlyFormatter.dateFormat = "yyyy-MM-dd"
-        if let utc = TimeZone(identifier: "UTC") {
-            dateOnlyFormatter.timeZone = utc
-        }
-        return dateOnlyFormatter.date(from: rawValue)
     }
 
     private func debugLog(_ message: String) {
