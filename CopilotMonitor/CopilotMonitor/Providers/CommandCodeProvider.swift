@@ -10,6 +10,13 @@ struct CommandCodePlan: Equatable {
 }
 
 enum CommandCodePlanCatalog {
+    private static let displayOrder = [
+        "individual-go",
+        "individual-pro",
+        "individual-max",
+        "individual-ultra"
+    ]
+
     static let plans: [String: CommandCodePlan] = [
         "individual-go": CommandCodePlan(id: "individual-go", displayName: "Go", monthlyCreditsUSD: 10),
         "individual-pro": CommandCodePlan(id: "individual-pro", displayName: "Pro", monthlyCreditsUSD: 30),
@@ -20,6 +27,10 @@ enum CommandCodePlanCatalog {
     static func plan(for id: String?) -> CommandCodePlan? {
         guard let id else { return nil }
         return plans[id.lowercased()]
+    }
+
+    static var orderedPlans: [CommandCodePlan] {
+        displayOrder.compactMap { plans[$0] }
     }
 }
 
@@ -58,6 +69,11 @@ struct CommandCodeCookieHeader: Equatable {
     }
 }
 
+struct CommandCodeCookieCredential: Equatable {
+    let header: CommandCodeCookieHeader
+    let authSource: String
+}
+
 enum CommandCodeProviderError: LocalizedError {
     case missingCredentials
     case invalidCredentials
@@ -81,8 +97,6 @@ enum CommandCodeProviderError: LocalizedError {
 struct CommandCodeUsageSnapshot: Equatable {
     let monthlyCreditsRemaining: Double
     let purchasedCredits: Double
-    let premiumMonthlyCredits: Double
-    let opensourceMonthlyCredits: Double
     let plan: CommandCodePlan?
     let billingPeriodEnd: Date?
     let subscriptionStatus: String?
@@ -143,13 +157,16 @@ final class CommandCodeProvider: ProviderProtocol {
             }
         }
 
-        guard let cookieHeader = loadCookieHeader() else {
+        guard let credential = loadCookieHeader() else {
             debugLog("fetch failed: no Command Code credentials found")
             throw ProviderError.authenticationFailed(CommandCodeProviderError.missingCredentials.localizedDescription)
         }
 
         do {
-            let snapshot = try await fetchDirectUsage(cookieHeader: cookieHeader.headerValue)
+            let snapshot = try await fetchDirectUsage(
+                cookieHeader: credential.header.headerValue,
+                authSource: credential.authSource
+            )
             commandCodeLogger.info("Command Code usage fetched through direct billing API")
             debugLog("fetch completed through direct Command Code API")
             return Self.makeResult(from: snapshot)
@@ -206,8 +223,6 @@ final class CommandCodeProvider: ProviderProtocol {
         return CommandCodeUsageSnapshot(
             monthlyCreditsRemaining: remaining,
             purchasedCredits: 0,
-            premiumMonthlyCredits: 0,
-            opensourceMonthlyCredits: remaining,
             plan: plan,
             billingPeriodEnd: resetDate,
             subscriptionStatus: "OpenCommand",
@@ -229,8 +244,6 @@ final class CommandCodeProvider: ProviderProtocol {
         return CommandCodeUsageSnapshot(
             monthlyCreditsRemaining: credits.monthlyCredits,
             purchasedCredits: credits.purchasedCredits,
-            premiumMonthlyCredits: credits.premiumMonthlyCredits,
-            opensourceMonthlyCredits: credits.opensourceMonthlyCredits,
             plan: plan,
             billingPeriodEnd: subscription.currentPeriodEnd,
             subscriptionStatus: subscription.status,
@@ -291,14 +304,14 @@ final class CommandCodeProvider: ProviderProtocol {
 
     // MARK: - Direct Command Code API
 
-    private func fetchDirectUsage(cookieHeader: String) async throws -> CommandCodeUsageSnapshot {
+    private func fetchDirectUsage(cookieHeader: String, authSource: String) async throws -> CommandCodeUsageSnapshot {
         async let creditsTask = sendDirectRequest(path: "/internal/billing/credits", cookieHeader: cookieHeader)
         async let subscriptionTask = sendDirectRequest(path: "/internal/billing/subscriptions", cookieHeader: cookieHeader)
         let (creditsData, subscriptionData) = try await (creditsTask, subscriptionTask)
         return try Self.snapshotFromDirectAPI(
             creditsData: creditsData,
             subscriptionData: subscriptionData,
-            authSource: "Command Code browser session cookie"
+            authSource: authSource
         )
     }
 
@@ -332,23 +345,23 @@ final class CommandCodeProvider: ProviderProtocol {
         return data
     }
 
-    private func loadCookieHeader() -> CommandCodeCookieHeader? {
+    private func loadCookieHeader() -> CommandCodeCookieCredential? {
         for key in ["CC_SESSION_COOKIE", "COMMANDCODE_SESSION_COOKIE", "COMMAND_CODE_SESSION_COOKIE"] {
             if let header = CommandCodeCookieHeader.override(from: environment[key]) {
                 debugLog("Command Code cookie loaded from environment key \(key)")
-                return header
+                return CommandCodeCookieCredential(header: header, authSource: "Command Code environment variable (\(key))")
             }
         }
 
-        if let header = loadCookieHeaderFromOpenCommandSecrets() {
-            return header
+        if let credential = loadCookieHeaderFromOpenCommandSecrets() {
+            return credential
         }
 
         do {
             let headerValue = try BrowserCookieService.shared.getCommandCodeCookieHeader()
             if let header = CommandCodeCookieHeader.override(from: headerValue) {
                 debugLog("Command Code cookie loaded from browser cookie store")
-                return header
+                return CommandCodeCookieCredential(header: header, authSource: "Command Code browser session cookie")
             }
         } catch {
             debugLog("Browser cookie lookup failed: \(error.localizedDescription)")
@@ -357,7 +370,7 @@ final class CommandCodeProvider: ProviderProtocol {
         return nil
     }
 
-    private func loadCookieHeaderFromOpenCommandSecrets() -> CommandCodeCookieHeader? {
+    private func loadCookieHeaderFromOpenCommandSecrets() -> CommandCodeCookieCredential? {
         let secretsURL = openCommandDirectory().appendingPathComponent("opencommand-secrets.json")
         guard fileManager.fileExists(atPath: secretsURL.path), fileManager.isReadableFile(atPath: secretsURL.path) else {
             return nil
@@ -371,7 +384,7 @@ final class CommandCodeProvider: ProviderProtocol {
             for key in ["opencommand.cc_session_cookie", "opencommand.cc_session_token"] {
                 if let header = CommandCodeCookieHeader.override(from: object[key] as? String) {
                     debugLog("Command Code cookie loaded from OpenCommand secrets")
-                    return header
+                    return CommandCodeCookieCredential(header: header, authSource: "OpenCommand secrets (\(key))")
                 }
             }
         } catch {
@@ -390,8 +403,6 @@ final class CommandCodeProvider: ProviderProtocol {
     private struct CreditsPayload {
         let monthlyCredits: Double
         let purchasedCredits: Double
-        let premiumMonthlyCredits: Double
-        let opensourceMonthlyCredits: Double
     }
 
     private struct SubscriptionPayload {
@@ -408,9 +419,7 @@ final class CommandCodeProvider: ProviderProtocol {
 
         return CreditsPayload(
             monthlyCredits: APIValueParser.parseDouble(from: credits, keys: ["monthlyCredits"]),
-            purchasedCredits: APIValueParser.parseDouble(from: credits, keys: ["purchasedCredits"]),
-            premiumMonthlyCredits: APIValueParser.parseDouble(from: credits, keys: ["premiumMonthlyCredits"]),
-            opensourceMonthlyCredits: APIValueParser.parseDouble(from: credits, keys: ["opensourceMonthlyCredits"])
+            purchasedCredits: APIValueParser.parseDouble(from: credits, keys: ["purchasedCredits"])
         )
     }
 

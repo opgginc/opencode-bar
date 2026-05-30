@@ -109,12 +109,11 @@ struct ProviderSubscriptionPresets {
         SubscriptionPreset(name: "Pro", cost: 200)
     ]
 
-    static let commandCode: [SubscriptionPreset] = [
-        SubscriptionPreset(name: "Go", cost: 10),
-        SubscriptionPreset(name: "Pro", cost: 30),
-        SubscriptionPreset(name: "Max", cost: 150),
-        SubscriptionPreset(name: "Ultra", cost: 300)
-    ]
+    static var commandCode: [SubscriptionPreset] {
+        CommandCodePlanCatalog.orderedPlans.map {
+            SubscriptionPreset(name: $0.displayName, cost: $0.monthlyCreditsUSD)
+        }
+    }
 
     static let cursor: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Pro", cost: 20),
