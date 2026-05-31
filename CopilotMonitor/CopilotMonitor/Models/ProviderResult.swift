@@ -1155,6 +1155,192 @@ struct CandidateDedupe {
     }
 }
 
+struct CopilotCandidateDedupeInput {
+    let accountId: String?
+    let email: String?
+    let planType: String?
+    let totalEntitlement: Int?
+    let remainingQuota: Int?
+    let usedRequests: Int?
+    let limitRequests: Int?
+    let isPlaceholder: Bool
+}
+
+struct CopilotCandidateDedupeSelectors<C> {
+    let accountId: (C) -> String?
+    let input: (C) -> CopilotCandidateDedupeInput
+    let usage: (C) -> ProviderUsage
+    let details: (C) -> DetailedUsage
+    let priority: (C) -> Int
+    let isPlaceholder: (C) -> Bool
+}
+
+enum CopilotCandidateDedupe {
+    static func normalizedIdentity(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    static func shouldDropPlaceholder(_ candidate: CopilotCandidateDedupeInput) -> Bool {
+        candidate.isPlaceholder && (candidate.totalEntitlement ?? 0) == 0
+    }
+
+    static func filterRemovingPlaceholders<C>(
+        _ candidates: [C],
+        input: (C) -> CopilotCandidateDedupeInput
+    ) -> [C] {
+        let hasRealUsage = candidates.contains { (input($0).totalEntitlement ?? 0) > 0 }
+        guard hasRealUsage else { return candidates }
+        return candidates.filter { !shouldDropPlaceholder(input($0)) }
+    }
+
+    static func mergeAccountCandidates<C>(
+        _ candidates: [C],
+        accountId: (C) -> String?,
+        input: (C) -> CopilotCandidateDedupeInput,
+        priority: (C) -> Int
+    ) -> [C] {
+        let filtered = filterRemovingPlaceholders(candidates, input: input)
+        return CandidateDedupe.merge(
+            filtered,
+            accountId: { normalizedIdentity(accountId($0)) },
+            isSameUsage: { isSameAccountUsage(input($0), input($1)) },
+            priority: priority
+        )
+    }
+
+    static func finalizeProviderResult<C>(
+        candidates: [C],
+        cookieCandidate: C?,
+        selectors: CopilotCandidateDedupeSelectors<C>
+    ) -> (result: ProviderResult, accountCount: Int) {
+        let sorted = mergeAccountCandidates(
+            candidates,
+            accountId: selectors.accountId,
+            input: selectors.input,
+            priority: selectors.priority
+        ).sorted { selectors.priority($0) > selectors.priority($1) }
+
+        let accountResults: [ProviderAccountResult] = sorted.enumerated().map { index, candidate in
+            ProviderAccountResult(
+                accountIndex: index,
+                accountId: selectors.accountId(candidate),
+                usage: selectors.usage(candidate),
+                details: selectors.details(candidate)
+            )
+        }
+
+        let usageCandidates = accountResults.compactMap { result -> (remaining: Int, entitlement: Int)? in
+            guard let remaining = result.usage.remainingQuota,
+                  let entitlement = result.usage.totalEntitlement,
+                  entitlement > 0 else {
+                return nil
+            }
+            return (remaining: remaining, entitlement: entitlement)
+        }
+
+        let aggregateUsage: ProviderUsage
+        if let minCandidate = usageCandidates.min(by: { $0.remaining < $1.remaining }) {
+            aggregateUsage = ProviderUsage.quotaBased(
+                remaining: max(0, minCandidate.remaining),
+                entitlement: max(0, minCandidate.entitlement),
+                overagePermitted: true
+            )
+        } else {
+            aggregateUsage = ProviderUsage.quotaBased(
+                remaining: 0,
+                entitlement: 0,
+                overagePermitted: true
+            )
+        }
+
+        let primaryDetails = primaryDetails(
+            accountResults: accountResults,
+            cookieCandidate: cookieCandidate,
+            details: selectors.details,
+            isPlaceholder: selectors.isPlaceholder
+        )
+
+        return (
+            ProviderResult(
+                usage: aggregateUsage,
+                details: primaryDetails,
+                accounts: accountResults
+            ),
+            accountResults.count
+        )
+    }
+
+    static func isSameAccountUsage(
+        _ lhs: CopilotCandidateDedupeInput,
+        _ rhs: CopilotCandidateDedupeInput
+    ) -> Bool {
+        guard lhs.totalEntitlement == rhs.totalEntitlement,
+              lhs.remainingQuota == rhs.remainingQuota,
+              (lhs.totalEntitlement ?? 0) > 0 else {
+            return false
+        }
+
+        // Missing request counts are compatible so partial auth sources can still dedupe by identity.
+        if let lhsUsed = lhs.usedRequests,
+           let rhsUsed = rhs.usedRequests,
+           lhsUsed != rhsUsed {
+            return false
+        }
+
+        if let lhsLimit = lhs.limitRequests,
+           let rhsLimit = rhs.limitRequests,
+           lhsLimit != rhsLimit {
+            return false
+        }
+
+        let lhsPlan = normalizedIdentity(lhs.planType)
+        let rhsPlan = normalizedIdentity(rhs.planType)
+        if let lhsPlan, let rhsPlan, lhsPlan != rhsPlan {
+            return false
+        }
+
+        let lhsIdentity = identityCandidates(lhs)
+        let rhsIdentity = identityCandidates(rhs)
+        guard !lhsIdentity.isEmpty, !rhsIdentity.isEmpty else {
+            return false
+        }
+
+        return !lhsIdentity.isDisjoint(with: rhsIdentity)
+    }
+
+    private static func primaryDetails<C>(
+        accountResults: [ProviderAccountResult],
+        cookieCandidate: C?,
+        details: (C) -> DetailedUsage,
+        isPlaceholder: (C) -> Bool
+    ) -> DetailedUsage? {
+        if let cookieCandidate,
+           !isPlaceholder(cookieCandidate) {
+            let cookieDetails = details(cookieCandidate)
+            if cookieDetails.copilotOverageCost != nil || cookieDetails.copilotOverageRequests != nil {
+                return cookieDetails
+            }
+        }
+
+        return accountResults.first?.details ?? cookieCandidate.map(details)
+    }
+
+    private static func identityCandidates(_ candidate: CopilotCandidateDedupeInput) -> Set<String> {
+        var identities = Set<String>()
+        if let accountId = normalizedIdentity(candidate.accountId) {
+            identities.insert(accountId)
+        }
+        if let email = normalizedIdentity(candidate.email) {
+            identities.insert(email)
+        }
+        return identities
+    }
+}
+
 /// Shared numeric parser for API response dictionaries.
 /// APIs may return Double, Int, NSNumber, or String for numeric fields.
 enum APIValueParser {
@@ -1176,6 +1362,36 @@ enum APIValueParser {
             if let str = dict[key] as? String, let parsed = Int(str) { return parsed }
         }
         return 0
+    }
+
+    static func parseDate(from rawValue: String?) -> Date? {
+        guard let rawValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !rawValue.isEmpty else {
+            return nil
+        }
+
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractionalFormatter.date(from: rawValue) { return date }
+
+        let plainFormatter = ISO8601DateFormatter()
+        plainFormatter.formatOptions = [.withInternetDateTime]
+        if let date = plainFormatter.date(from: rawValue) { return date }
+
+        let dateOnlyFormatter = DateFormatter()
+        dateOnlyFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateOnlyFormatter.dateFormat = "yyyy-MM-dd"
+        if let utc = TimeZone(identifier: "UTC") {
+            dateOnlyFormatter.timeZone = utc
+        }
+        return dateOnlyFormatter.date(from: rawValue)
+    }
+
+    static func formatResetDate(_ date: Date?) -> String? {
+        guard let date = date else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter.string(from: date)
     }
 }
 

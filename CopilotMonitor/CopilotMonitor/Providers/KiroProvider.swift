@@ -444,6 +444,10 @@ final class KiroProvider: ProviderProtocol {
     }
 
     private static func parseDate(_ value: String) -> Date? {
+        if let date = APIValueParser.parseDate(from: value) {
+            return date
+        }
+
         if value.contains("/") {
             let parts = value.split(separator: "/")
             guard parts.count == 2,
@@ -472,13 +476,7 @@ final class KiroProvider: ProviderProtocol {
             return calendar.date(from: components)
         }
 
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        if let utc = TimeZone(identifier: "UTC") {
-            formatter.timeZone = utc
-        }
-        return formatter.date(from: value)
+        return nil
     }
 
     private func debugLog(_ message: String) {

@@ -142,6 +142,208 @@ final class CopilotProviderTests: XCTestCase {
         XCTAssertEqual(CopilotAuthSource.vscodeApps.priority, 0)
     }
 
+    // MARK: - CopilotCandidateDedupe
+
+    func testCopilotDedupeRejectsMatchingUsageWithDifferentIdentities() {
+        let personal = makeDedupeInput(accountId: "personal", email: "personal@example.com")
+        let work = makeDedupeInput(accountId: "work", email: "work@example.com")
+
+        XCTAssertFalse(CopilotCandidateDedupe.isSameAccountUsage(personal, work))
+    }
+
+    func testCopilotDedupeAcceptsMatchingUsageWithCaseInsensitiveIdentity() {
+        let first = makeDedupeInput(accountId: "Foo", email: "Foo@Example.com")
+        let second = makeDedupeInput(accountId: "foo", email: "foo@example.com")
+
+        XCTAssertTrue(CopilotCandidateDedupe.isSameAccountUsage(first, second))
+    }
+
+    func testCopilotDedupeRejectsIdentitylessMatchingUsage() {
+        let identified = makeDedupeInput(accountId: "foo", email: "foo@example.com")
+        let identityless = makeDedupeInput(accountId: nil, email: nil)
+
+        XCTAssertFalse(CopilotCandidateDedupe.isSameAccountUsage(identified, identityless))
+    }
+
+    func testCopilotDedupeDropsOnlyPlaceholderWithoutRealUsage() {
+        let placeholder = makeDedupeInput(
+            accountId: nil,
+            email: nil,
+            entitlement: 0,
+            remaining: 0,
+            isPlaceholder: true
+        )
+        let emptyRealCandidate = makeDedupeInput(
+            accountId: "real-user",
+            email: "real@example.com",
+            entitlement: 300,
+            remaining: 284,
+            isPlaceholder: false
+        )
+
+        XCTAssertTrue(CopilotCandidateDedupe.shouldDropPlaceholder(placeholder))
+        XCTAssertFalse(CopilotCandidateDedupe.shouldDropPlaceholder(emptyRealCandidate))
+
+        let candidates = [placeholder, emptyRealCandidate]
+        let filtered = CopilotCandidateDedupe.filterRemovingPlaceholders(candidates, input: { $0 })
+        XCTAssertEqual(filtered.count, 1)
+        XCTAssertFalse(filtered[0].isPlaceholder)
+    }
+
+    func testCopilotDedupeRejectsPlanMismatch() {
+        let individual = makeDedupeInput(accountId: "user", email: "user@example.com", planType: "Individual")
+        let business = makeDedupeInput(accountId: "user", email: "user@example.com", planType: "Business")
+
+        XCTAssertFalse(CopilotCandidateDedupe.isSameAccountUsage(individual, business))
+    }
+
+    func testCopilotDedupeRejectsUsedRequestMismatch() {
+        let first = makeDedupeInput(accountId: "user", email: "user@example.com", usedRequests: 16)
+        let second = makeDedupeInput(accountId: "user", email: "user@example.com", usedRequests: 17)
+
+        XCTAssertFalse(CopilotCandidateDedupe.isSameAccountUsage(first, second))
+    }
+
+    func testCopilotDedupeRejectsLimitRequestMismatch() {
+        let first = makeDedupeInput(accountId: "user", email: "user@example.com", limitRequests: 300)
+        let second = makeDedupeInput(accountId: "user", email: "user@example.com", limitRequests: 500)
+
+        XCTAssertFalse(CopilotCandidateDedupe.isSameAccountUsage(first, second))
+    }
+
+    func testCopilotDedupePreservesCookieOverageDetailsAsPrimary() {
+        let token = makeResultCandidate(accountId: "user", email: "user@example.com", priority: 3)
+        let cookie = makeResultCandidate(
+            accountId: "user",
+            email: "user@example.com",
+            priority: 1,
+            copilotOverageCost: 2.4,
+            copilotOverageRequests: 12
+        )
+
+        let finalized = finalizeTestCandidates([token, cookie], cookieCandidate: cookie)
+
+        XCTAssertEqual(finalized.accountCount, 1)
+        XCTAssertEqual(finalized.result.details?.copilotOverageCost, 2.4)
+        XCTAssertEqual(finalized.result.details?.copilotOverageRequests, 12)
+    }
+
+    func testCopilotDedupeDoesNotUsePlaceholderCookieAsPrimary() {
+        let token = makeResultCandidate(accountId: "user", email: "user@example.com", priority: 3)
+        let placeholder = makeResultCandidate(
+            accountId: nil,
+            email: nil,
+            priority: 0,
+            entitlement: 0,
+            remaining: 0,
+            copilotOverageCost: 2.4,
+            copilotOverageRequests: 12,
+            isPlaceholder: true
+        )
+
+        let finalized = finalizeTestCandidates([token, placeholder], cookieCandidate: placeholder)
+
+        XCTAssertEqual(finalized.accountCount, 1)
+        XCTAssertNil(finalized.result.details?.copilotOverageCost)
+        XCTAssertNil(finalized.result.details?.copilotOverageRequests)
+        XCTAssertEqual(finalized.result.details?.email, "user@example.com")
+    }
+
+    private func makeDedupeInput(
+        accountId: String?,
+        email: String?,
+        entitlement: Int = 300,
+        remaining: Int = 284,
+        usedRequests: Int? = 16,
+        limitRequests: Int? = 300,
+        planType: String? = "Individual",
+        isPlaceholder: Bool = false
+    ) -> CopilotCandidateDedupeInput {
+        CopilotCandidateDedupeInput(
+            accountId: accountId,
+            email: email,
+            planType: planType,
+            totalEntitlement: entitlement,
+            remainingQuota: remaining,
+            usedRequests: usedRequests,
+            limitRequests: limitRequests,
+            isPlaceholder: isPlaceholder
+        )
+    }
+
+    private func makeResultCandidate(
+        accountId: String?,
+        email: String?,
+        priority: Int,
+        entitlement: Int = 300,
+        remaining: Int = 284,
+        copilotOverageCost: Double? = nil,
+        copilotOverageRequests: Double? = nil,
+        isPlaceholder: Bool = false
+    ) -> TestCopilotCandidate {
+        let usage = ProviderUsage.quotaBased(
+            remaining: remaining,
+            entitlement: entitlement,
+            overagePermitted: true
+        )
+        let details = DetailedUsage(
+            planType: "Individual",
+            email: email,
+            authSource: isPlaceholder ? "Cached Browser Cookies" : "Test Source",
+            copilotOverageCost: copilotOverageCost,
+            copilotOverageRequests: copilotOverageRequests,
+            copilotUsedRequests: 16,
+            copilotLimitRequests: 300
+        )
+
+        return TestCopilotCandidate(
+            accountId: accountId,
+            usage: usage,
+            details: details,
+            priority: priority,
+            isPlaceholder: isPlaceholder
+        )
+    }
+
+    private func finalizeTestCandidates(
+        _ candidates: [TestCopilotCandidate],
+        cookieCandidate: TestCopilotCandidate?
+    ) -> (result: ProviderResult, accountCount: Int) {
+        CopilotCandidateDedupe.finalizeProviderResult(
+            candidates: candidates,
+            cookieCandidate: cookieCandidate,
+            selectors: CopilotCandidateDedupeSelectors(
+                accountId: { $0.accountId },
+                input: { $0.dedupeInput },
+                usage: { $0.usage },
+                details: { $0.details },
+                priority: { $0.priority },
+                isPlaceholder: { $0.isPlaceholder }
+            )
+        )
+    }
+
+    private struct TestCopilotCandidate {
+        let accountId: String?
+        let usage: ProviderUsage
+        let details: DetailedUsage
+        let priority: Int
+        let isPlaceholder: Bool
+
+        var dedupeInput: CopilotCandidateDedupeInput {
+            CopilotCandidateDedupeInput(
+                accountId: accountId,
+                email: details.email,
+                planType: details.planType,
+                totalEntitlement: usage.totalEntitlement,
+                remainingQuota: usage.remainingQuota,
+                usedRequests: details.copilotUsedRequests,
+                limitRequests: details.copilotLimitRequests,
+                isPlaceholder: isPlaceholder
+            )
+        }
+    }
+
     private func loadFixture(named: String) -> Data {
         let bundle = Bundle(for: type(of: self))
         guard let url = bundle.url(forResource: named, withExtension: nil) else {

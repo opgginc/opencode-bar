@@ -109,6 +109,12 @@ struct ProviderSubscriptionPresets {
         SubscriptionPreset(name: "Pro", cost: 200)
     ]
 
+    static var commandCode: [SubscriptionPreset] {
+        CommandCodePlanCatalog.orderedPlans.map {
+            SubscriptionPreset(name: $0.displayName, cost: $0.monthlyCreditsUSD)
+        }
+    }
+
     static let cursor: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Pro", cost: 20),
         SubscriptionPreset(name: "Teams", cost: 40)
@@ -196,6 +202,8 @@ struct ProviderSubscriptionPresets {
             return claude
         case .codex:
             return codex
+        case .commandCode:
+            return commandCode
         case .cursor:
             return cursor
         case .geminiCLI:
