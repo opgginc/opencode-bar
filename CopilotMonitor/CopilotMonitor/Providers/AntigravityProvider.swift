@@ -165,13 +165,13 @@ final class AntigravityProvider: ProviderProtocol {
         do {
             return try await fetchFromCache()
         } catch {
-            logger.warning("Antigravity cache fetch failed, attempting keychain fallback: \(error.localizedDescription)")
+            logger.warning("Antigravity cache fetch failed, attempting accounts fallback: \(error.localizedDescription)")
             do {
-                return try await fetchFromKeychainFallback(cacheError: error)
+                return try await fetchFromAccountsFallback(cacheError: error)
             } catch {
-                logger.warning("Antigravity keychain fallback failed, attempting accounts fallback: \(error.localizedDescription)")
+                logger.warning("Antigravity accounts fallback failed, attempting keychain fallback: \(error.localizedDescription)")
             }
-            return try await fetchFromAccountsFallback(cacheError: error)
+            return try await fetchFromKeychainFallback(cacheError: error)
         }
     }
 
