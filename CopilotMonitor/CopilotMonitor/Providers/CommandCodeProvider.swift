@@ -10,28 +10,22 @@ struct CommandCodePlan: Equatable {
 }
 
 enum CommandCodePlanCatalog {
-    private static let displayOrder = [
-        "individual-go",
-        "individual-pro",
-        "individual-max",
-        "individual-ultra"
+    static let orderedPlans: [CommandCodePlan] = [
+        CommandCodePlan(id: "individual-go", displayName: "Go", monthlyCreditsUSD: 10),
+        CommandCodePlan(id: "individual-pro", displayName: "Pro", monthlyCreditsUSD: 30),
+        CommandCodePlan(id: "individual-max", displayName: "Max", monthlyCreditsUSD: 150),
+        CommandCodePlan(id: "individual-ultra", displayName: "Ultra", monthlyCreditsUSD: 300)
     ]
 
-    static let plans: [String: CommandCodePlan] = [
-        "individual-go": CommandCodePlan(id: "individual-go", displayName: "Go", monthlyCreditsUSD: 10),
-        "individual-pro": CommandCodePlan(id: "individual-pro", displayName: "Pro", monthlyCreditsUSD: 30),
-        "individual-max": CommandCodePlan(id: "individual-max", displayName: "Max", monthlyCreditsUSD: 150),
-        "individual-ultra": CommandCodePlan(id: "individual-ultra", displayName: "Ultra", monthlyCreditsUSD: 300)
-    ]
+    static let plans: [String: CommandCodePlan] = Dictionary(
+        uniqueKeysWithValues: orderedPlans.map { ($0.id, $0) }
+    )
 
     static func plan(for id: String?) -> CommandCodePlan? {
         guard let id else { return nil }
         return plans[id.lowercased()]
     }
 
-    static var orderedPlans: [CommandCodePlan] {
-        displayOrder.compactMap { plans[$0] }
-    }
 }
 
 struct CommandCodeCookieHeader: Equatable {
@@ -183,10 +177,15 @@ final class CommandCodeProvider: ProviderProtocol {
     // MARK: - Mapping
 
     static func makeResult(from snapshot: CommandCodeUsageSnapshot) -> ProviderResult {
-        let totalUSD = snapshot.monthlyCreditsTotal ?? max(snapshot.monthlyCreditsRemaining, 0)
-        let remainingUSD = snapshot.monthlyCreditsRemaining
-        let entitlementCents = max(Int((totalUSD * 100.0).rounded()), 1)
-        let remainingCents = Int((remainingUSD * 100.0).rounded())
+        let entitlementCents: Int
+        let remainingCents: Int
+        if let totalUSD = snapshot.monthlyCreditsTotal, totalUSD > 0 {
+            entitlementCents = Int((totalUSD * 100.0).rounded())
+            remainingCents = Int((snapshot.monthlyCreditsRemaining * 100.0).rounded())
+        } else {
+            entitlementCents = 0
+            remainingCents = 0
+        }
 
         let details = DetailedUsage(
             primaryReset: snapshot.billingPeriodEnd,
@@ -348,11 +347,10 @@ final class CommandCodeProvider: ProviderProtocol {
     }
 
     private func loadCookieHeader() -> CommandCodeCookieCredential? {
-        for key in ["CC_SESSION_COOKIE", "COMMANDCODE_SESSION_COOKIE", "COMMAND_CODE_SESSION_COOKIE"] {
-            if let header = CommandCodeCookieHeader.override(from: environment[key]) {
-                debugLog("Command Code cookie loaded from environment key \(key)")
-                return CommandCodeCookieCredential(header: header, authSource: "Command Code environment variable (\(key))")
-            }
+        let environmentKey = "COMMANDCODE_SESSION_COOKIE"
+        if let header = CommandCodeCookieHeader.override(from: environment[environmentKey]) {
+            debugLog("Command Code cookie loaded from environment key \(environmentKey)")
+            return CommandCodeCookieCredential(header: header, authSource: "Command Code environment variable (\(environmentKey))")
         }
 
         if let credential = loadCookieHeaderFromOpenCommandSecrets() {
@@ -439,7 +437,7 @@ final class CommandCodeProvider: ProviderProtocol {
         }
 
         let planID = dataObject["planId"] as? String ?? dataObject["planID"] as? String
-        let status = dataObject["status"] as? String ?? "unknown"
+        let status = dataObject["status"] as? String
         let currentPeriodEnd = APIValueParser.parseDate(from: dataObject["currentPeriodEnd"] as? String)
 
         return SubscriptionPayload(planID: planID, status: status, currentPeriodEnd: currentPeriodEnd)

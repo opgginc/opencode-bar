@@ -144,7 +144,7 @@ struct SwiftUIProviderAlertView: View {
         case .copilot: return "airplane"
         case .openRouter: return "dollarsign.circle"
         case .openCode, .openCodeZen, .openCodeGo: return "chevron.left.forwardslash.chevron.right"
-        case .kiro: return "KiroIcon"
+        case .kiro: return nil
         case .grok: return nil
         case .antigravity: return "arrow.up.circle"
         case .kimi: return "k.circle"

@@ -965,6 +965,7 @@ final class StatusBarController: NSObject {
         details: DetailedUsage?
     ) -> [UsagePercentCandidate] {
         var candidates: [UsagePercentCandidate] = []
+        let shouldEmitUsagePercent = identifier != .commandCode || (usage.totalEntitlement ?? 0) > 0
         func add(_ percent: Double?, priority: UsageDisplayWindowPriority) {
             guard let normalized = normalizedUsagePercent(percent) else { return }
             candidates.append(UsagePercentCandidate(percent: normalized, priority: priority))
@@ -1009,7 +1010,9 @@ final class StatusBarController: NSObject {
                 priority: priorityForWindowHours(details?.sparkPrimaryWindowHours, fallback: .hourly)
             )
         case .commandCode:
-            add(usage.usagePercentage, priority: .monthly)
+            if shouldEmitUsagePercent {
+                add(usage.usagePercentage, priority: .monthly)
+            }
         case .cursor:
             add(details?.cursorAutoUsage, priority: .monthly)
             add(details?.cursorApiUsage, priority: .monthly)
@@ -1036,7 +1039,9 @@ final class StatusBarController: NSObject {
             break
         }
 
-        add(usage.usagePercentage, priority: .fallback)
+        if shouldEmitUsagePercent {
+            add(usage.usagePercentage, priority: .fallback)
+        }
         return candidates
     }
 

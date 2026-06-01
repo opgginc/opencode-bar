@@ -66,11 +66,21 @@ class BrowserCookieService {
             names: Set(CommandCodeCookieHeader.supportedCookieNames)
         )
 
-        for cookieName in CommandCodeCookieHeader.supportedCookieNames {
-            if let cookie = cookies.first(where: { $0.name == cookieName }), !cookie.value.isEmpty {
-                debugLog("Successfully extracted Command Code cookie named \(cookieName) from \(cookie.browserName)")
-                return "\(cookieName)=\(cookie.value)"
+        let nonExpiredCookies = cookies.filter { !$0.isExpired }
+        let selectableCookies = nonExpiredCookies.isEmpty ? cookies : nonExpiredCookies
+        let supportedNames = CommandCodeCookieHeader.supportedCookieNames
+        let sortedCookies = selectableCookies.sorted { lhs, rhs in
+            if lhs.expiresUTCMicroseconds != rhs.expiresUTCMicroseconds {
+                return lhs.expiresUTCMicroseconds > rhs.expiresUTCMicroseconds
             }
+            let lhsPriority = supportedNames.firstIndex(of: lhs.name) ?? Int.max
+            let rhsPriority = supportedNames.firstIndex(of: rhs.name) ?? Int.max
+            return lhsPriority < rhsPriority
+        }
+
+        if let cookie = sortedCookies.first(where: { !$0.value.isEmpty }) {
+            debugLog("Successfully extracted Command Code cookie named \(cookie.name) from \(cookie.browserName)")
+            return "\(cookie.name)=\(cookie.value)"
         }
 
         debugLog("No browser found with valid Command Code cookies")
@@ -349,7 +359,7 @@ class BrowserCookieService {
             ? ""
             : " AND name IN (\(cookieNames.map { _ in "?" }.joined(separator: ", ")))"
         let query = """
-            SELECT name, encrypted_value, value, host_key
+            SELECT name, encrypted_value, value, host_key, expires_utc
             FROM cookies
             WHERE (host_key = ? OR host_key LIKE ? ESCAPE '\\')\(nameFilter)
             ORDER BY expires_utc DESC
@@ -403,7 +413,8 @@ class BrowserCookieService {
                 domain: String(cString: domainPtr),
                 browserName: browser?.displayName ?? "Browser",
                 profileName: profileName,
-                databasePath: dbPath
+                databasePath: dbPath,
+                expiresUTCMicroseconds: sqlite3_column_int64(statement, 4)
             ))
         }
 
@@ -610,6 +621,7 @@ enum SupportedBrowser: CaseIterable {
     case brave
     case arc
     case edge
+    case comet
 
     var displayName: String {
         switch self {
@@ -617,6 +629,7 @@ enum SupportedBrowser: CaseIterable {
         case .brave: return "Brave"
         case .arc: return "Arc"
         case .edge: return "Edge"
+        case .comet: return "Comet"
         }
     }
 
@@ -643,6 +656,10 @@ enum SupportedBrowser: CaseIterable {
             paths.append(contentsOf: findProfilePaths(in: baseDir))
         case .edge:
             let baseDir = "\(home)/Library/Application Support/Microsoft Edge"
+            paths.append("\(baseDir)/Default/Cookies")
+            paths.append(contentsOf: findProfilePaths(in: baseDir))
+        case .comet:
+            let baseDir = "\(home)/Library/Application Support/Comet"
             paths.append("\(baseDir)/Default/Cookies")
             paths.append(contentsOf: findProfilePaths(in: baseDir))
         }
@@ -672,6 +689,7 @@ enum SupportedBrowser: CaseIterable {
         case .brave: return "Brave Safe Storage"
         case .arc: return "Arc Safe Storage"
         case .edge: return "Microsoft Edge Safe Storage"
+        case .comet: return "Comet Safe Storage"
         }
     }
 
@@ -681,6 +699,7 @@ enum SupportedBrowser: CaseIterable {
         case .brave: return "Brave"
         case .arc: return "Arc"
         case .edge: return "Microsoft Edge"
+        case .comet: return "Comet"
         }
     }
 }
@@ -720,6 +739,18 @@ struct BrowserCookie {
     let browserName: String
     let profileName: String
     let databasePath: String
+    let expiresUTCMicroseconds: Int64
+
+    var isExpired: Bool {
+        guard expiresUTCMicroseconds > 0 else { return false }
+        return expiresUTCMicroseconds <= BrowserCookie.currentChromeTimeMicroseconds
+    }
+
+    private static var currentChromeTimeMicroseconds: Int64 {
+        let secondsBetween1601And1970: TimeInterval = 11_644_473_600
+        let chromeTime = (Date().timeIntervalSince1970 + secondsBetween1601And1970) * 1_000_000
+        return Int64(chromeTime)
+    }
 
     var profileKey: String {
         "\(browserName)::\(profileName)::\(URL(fileURLWithPath: databasePath).deletingLastPathComponent().path)"

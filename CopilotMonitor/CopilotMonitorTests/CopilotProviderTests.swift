@@ -249,6 +249,21 @@ final class CopilotProviderTests: XCTestCase {
         XCTAssertEqual(finalized.result.details?.email, "user@example.com")
     }
 
+    func testCopilotDedupeUsesNonPlaceholderCookieAsPrimaryWithoutOverage() {
+        let token = makeResultCandidate(accountId: "user", email: "user@example.com", priority: 3)
+        let cookie = makeResultCandidate(
+            accountId: "user",
+            email: "user@example.com",
+            priority: 1,
+            authSource: "Cookie Source"
+        )
+
+        let finalized = finalizeTestCandidates([token, cookie], cookieCandidate: cookie)
+
+        XCTAssertEqual(finalized.accountCount, 1)
+        XCTAssertEqual(finalized.result.details?.authSource, "Cookie Source")
+    }
+
     private func makeDedupeInput(
         accountId: String?,
         email: String?,
@@ -279,6 +294,7 @@ final class CopilotProviderTests: XCTestCase {
         remaining: Int = 284,
         copilotOverageCost: Double? = nil,
         copilotOverageRequests: Double? = nil,
+        authSource: String? = nil,
         isPlaceholder: Bool = false
     ) -> TestCopilotCandidate {
         let usage = ProviderUsage.quotaBased(
@@ -289,7 +305,7 @@ final class CopilotProviderTests: XCTestCase {
         let details = DetailedUsage(
             planType: "Individual",
             email: email,
-            authSource: isPlaceholder ? "Cached Browser Cookies" : "Test Source",
+            authSource: authSource ?? (isPlaceholder ? "Cached Browser Cookies" : "Test Source"),
             copilotOverageCost: copilotOverageCost,
             copilotOverageRequests: copilotOverageRequests,
             copilotUsedRequests: 16,

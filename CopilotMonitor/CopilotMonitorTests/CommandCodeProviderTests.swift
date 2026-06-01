@@ -52,9 +52,7 @@ final class CommandCodeProviderTests: XCTestCase {
                 "belowThreshold": false,
                 "creditThreshold": 0,
                 "monthlyCredits": 8.7784,
-                "purchasedCredits": 0,
-                "premiumMonthlyCredits": 0,
-                "opensourceMonthlyCredits": 8.7784
+                "purchasedCredits": 0
             }
         }
         """.data(using: .utf8)!
@@ -88,9 +86,7 @@ final class CommandCodeProviderTests: XCTestCase {
         {
             "credits": {
                 "monthlyCredits": 8.7784,
-                "purchasedCredits": 0,
-                "premiumMonthlyCredits": 0,
-                "opensourceMonthlyCredits": 8.7784
+                "purchasedCredits": 0
             }
         }
         """.data(using: .utf8)!
@@ -115,6 +111,66 @@ final class CommandCodeProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.subscriptionStatus, "active")
         XCTAssertNil(snapshot.monthlyCreditsTotal)
         XCTAssertEqual(snapshot.monthlyCreditsRemaining, 8.7784)
+    }
+
+    func testDirectAPISnapshotDoesNotResolveInactiveSubscriptionPlan() throws {
+        let creditsJSON = """
+        {
+            "credits": {
+                "monthlyCredits": 8.7784,
+                "purchasedCredits": 0
+            }
+        }
+        """.data(using: .utf8)!
+        let subscriptionJSON = """
+        {
+            "success": true,
+            "data": {
+                "planId": "individual-pro",
+                "status": "canceled",
+                "currentPeriodEnd": "2026-06-06T07:28:50.000Z"
+            }
+        }
+        """.data(using: .utf8)!
+
+        let snapshot = try CommandCodeProvider.snapshotFromDirectAPI(
+            creditsData: creditsJSON,
+            subscriptionData: subscriptionJSON,
+            authSource: "test"
+        )
+
+        XCTAssertNil(snapshot.plan)
+        XCTAssertEqual(snapshot.subscriptionStatus, "canceled")
+        XCTAssertNil(snapshot.monthlyCreditsTotal)
+    }
+
+    func testDirectAPISnapshotKeepsMissingSubscriptionStatusNil() throws {
+        let creditsJSON = """
+        {
+            "credits": {
+                "monthlyCredits": 8.7784,
+                "purchasedCredits": 0
+            }
+        }
+        """.data(using: .utf8)!
+        let subscriptionJSON = """
+        {
+            "success": true,
+            "data": {
+                "planId": "individual-pro",
+                "currentPeriodEnd": "2026-06-06T07:28:50.000Z"
+            }
+        }
+        """.data(using: .utf8)!
+
+        let snapshot = try CommandCodeProvider.snapshotFromDirectAPI(
+            creditsData: creditsJSON,
+            subscriptionData: subscriptionJSON,
+            authSource: "test"
+        )
+
+        XCTAssertNil(snapshot.plan)
+        XCTAssertNil(snapshot.subscriptionStatus)
     }
 
     func testOpenCommandUsageSnapshotParsesProxyPayload() throws {
@@ -155,6 +211,26 @@ final class CommandCodeProviderTests: XCTestCase {
         XCTAssertEqual(result.usage.usagePercentage, 12.2, accuracy: 0.0001)
         XCTAssertEqual(result.details?.creditsRemaining, 8.7784)
         XCTAssertEqual(result.details?.creditsTotal, 10)
+    }
+
+    func testProviderResultDoesNotFabricateQuotaForNoPlanSnapshot() {
+        let snapshot = CommandCodeUsageSnapshot(
+            monthlyCreditsRemaining: 8.7784,
+            purchasedCredits: 0,
+            plan: nil,
+            billingPeriodEnd: nil,
+            subscriptionStatus: nil,
+            authSource: "test"
+        )
+
+        let result = CommandCodeProvider.makeResult(from: snapshot)
+
+        XCTAssertEqual(result.usage.totalEntitlement, 0)
+        XCTAssertEqual(result.usage.remainingQuota, 0)
+        XCTAssertEqual(result.usage.usagePercentage, 0)
+        XCTAssertEqual(result.details?.creditsRemaining, 8.7784)
+        XCTAssertNil(result.details?.creditsTotal)
+        XCTAssertNil(result.details?.planType)
     }
 
     func testCommandCodeSubscriptionPresetsUsePlanCatalog() {

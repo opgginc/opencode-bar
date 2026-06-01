@@ -1320,10 +1320,7 @@ enum CopilotCandidateDedupe {
     ) -> DetailedUsage? {
         if let cookieCandidate,
            !isPlaceholder(cookieCandidate) {
-            let cookieDetails = details(cookieCandidate)
-            if cookieDetails.copilotOverageCost != nil || cookieDetails.copilotOverageRequests != nil {
-                return cookieDetails
-            }
+            return details(cookieCandidate)
         }
 
         return accountResults.first?.details ?? cookieCandidate.map(details)

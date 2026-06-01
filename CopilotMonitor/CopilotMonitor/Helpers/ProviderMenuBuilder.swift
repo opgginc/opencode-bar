@@ -433,6 +433,16 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
+            if let authSource = details.authSource {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(
+                    text: "Token From: \(authSource)",
+                    icon: NSImage(systemSymbolName: "key", accessibilityDescription: "Token Source"),
+                    multiline: true
+                )
+                submenu.addItem(item)
+            }
+
             addSubscriptionItems(to: submenu, provider: .commandCode, accountId: subscriptionAccountId)
 
         case .cursor:
