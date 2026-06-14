@@ -1,4 +1,5 @@
 import Foundation
+import Foundation
 import os.log
 
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "ZaiCodingPlanProvider")
@@ -155,6 +156,7 @@ private struct ZaiToolUsageTotals: Decodable {
 final class ZaiCodingPlanProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .zaiCodingPlan
     let type: ProviderType = .quotaBased
+    let fetchTimeout: TimeInterval = 30.0
 
     private let tokenManager: TokenManager
     private let session: URLSession
@@ -288,6 +290,28 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
     }
 
     private func fetchData(url: URL, apiKey: String) async throws -> Data {
+        let maxAttempts = 3
+        var lastError: Error?
+
+        for attempt in 1...maxAttempts {
+            do {
+                return try await fetchDataOnce(url: url, apiKey: apiKey)
+            } catch {
+                lastError = error
+
+                guard attempt < maxAttempts, isTransientNetworkError(error) else {
+                    throw error
+                }
+
+                logger.warning("Z.AI Coding Plan request failed with transient error on attempt \(attempt)/\(maxAttempts): \(error.localizedDescription)")
+                try await Task.sleep(nanoseconds: UInt64(attempt) * 500_000_000)
+            }
+        }
+
+        throw lastError ?? ProviderError.networkError("Z.AI Coding Plan request failed")
+    }
+
+    private func fetchDataOnce(url: URL, apiKey: String) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue(apiKey, forHTTPHeaderField: "Authorization")
@@ -308,6 +332,36 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
         }
 
         return data
+    }
+
+    private func isTransientNetworkError(_ error: Error) -> Bool {
+        if let providerError = error as? ProviderError {
+            switch providerError {
+            case .networkError(let message):
+                return message.contains("HTTP 5") || message.localizedCaseInsensitiveContains("tls")
+            default:
+                return false
+            }
+        }
+
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return false }
+
+        switch nsError.code {
+        case NSURLErrorNetworkConnectionLost,
+             NSURLErrorTimedOut,
+             NSURLErrorCannotConnectToHost,
+             NSURLErrorCannotFindHost,
+             NSURLErrorDNSLookupFailed,
+             NSURLErrorSecureConnectionFailed,
+             NSURLErrorServerCertificateHasBadDate,
+             NSURLErrorServerCertificateUntrusted,
+             NSURLErrorServerCertificateHasUnknownRoot,
+             NSURLErrorServerCertificateNotYetValid:
+            return true
+        default:
+            return false
+        }
     }
 
     private func decodeResponse<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {

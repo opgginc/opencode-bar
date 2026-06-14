@@ -276,10 +276,14 @@ final class AntigravityProvider: ProviderProtocol {
 
         let primaryProjectId = account.projectId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let fallbackProjectId = account.managedProjectId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let projectId = primaryProjectId.isEmpty ? fallbackProjectId : primaryProjectId
-        guard !projectId.isEmpty else {
-            logger.warning("Antigravity fallback unavailable: selected account is missing project ID")
-            return nil
+        let projectId: String
+        if !primaryProjectId.isEmpty {
+            projectId = primaryProjectId
+        } else if !fallbackProjectId.isEmpty {
+            projectId = fallbackProjectId
+        } else {
+            projectId = "default"
+            logger.warning("Antigravity fallback account is missing project ID; using default project fallback")
         }
 
         return AntigravityFallbackAccount(

@@ -289,6 +289,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
         listing.standardError = FileHandle.nullDevice
 
         do {
+            debugLog("Stale cleanup: listing 'opencode stats' processes")
             try listing.run()
         } catch {
             debugLog("Stale cleanup: failed to list processes: \(error.localizedDescription)")
@@ -303,6 +304,11 @@ final class OpenCodeZenProvider: ProviderProtocol {
         // always make progress and actually reach EOF.
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         listing.waitUntilExit()
+
+        guard listing.terminationStatus == 0 else {
+            debugLog("Stale cleanup: process listing exited with code \(listing.terminationStatus)")
+            return
+        }
 
         guard let output = String(data: data, encoding: .utf8) else { return }
 

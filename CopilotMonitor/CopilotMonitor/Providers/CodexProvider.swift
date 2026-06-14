@@ -199,6 +199,7 @@ final class CodexProvider: ProviderProtocol {
             case cachedInputTokens = "cached_input_tokens"
             case totalCostUSD = "total_cost_usd"
             case limits
+            case upstreamLimits = "upstream_limits"
         }
 
         init(from decoder: Decoder) throws {
@@ -207,7 +208,9 @@ final class CodexProvider: ProviderProtocol {
             totalTokens = try container.decodeIfPresent(Int.self, forKey: .totalTokens)
             cachedInputTokens = try container.decodeIfPresent(Int.self, forKey: .cachedInputTokens)
             totalCostUSD = try container.decodeIfPresent(Double.self, forKey: .totalCostUSD)
-            limits = (try? container.decodeIfPresent([SelfServiceLimit].self, forKey: .limits)) ?? []
+            let localLimits = (try? container.decodeIfPresent([SelfServiceLimit].self, forKey: .limits)) ?? []
+            let upstreamLimits = (try? container.decodeIfPresent([SelfServiceLimit].self, forKey: .upstreamLimits)) ?? []
+            limits = localLimits + upstreamLimits
         }
     }
 

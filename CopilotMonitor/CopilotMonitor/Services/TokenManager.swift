@@ -1214,6 +1214,18 @@ final class TokenManager: @unchecked Sendable {
         )
     }
 
+    func getOpenAIProviderAPIKeyWithSource() -> (key: String, source: String)? {
+        let config = readOpenCodeConfigJSON()
+        guard let config,
+              let apiKey = resolveConfigValue(
+                nestedString(in: config, path: ["provider", "openai", "options", "apiKey"])
+              ) else {
+            return nil
+        }
+
+        return (apiKey, lastFoundOpenCodeConfigPath?.path ?? "provider.openai.options.apiKey")
+    }
+
     private struct SearchAPIKeyLookupSource {
         let dictionary: [String: Any]?
         let sourcePath: String?
@@ -3647,6 +3659,21 @@ final class TokenManager: @unchecked Sendable {
     /// Gets all OpenAI accounts (OpenCode auth + codex-lb + Codex native auth)
     func getOpenAIAccounts() -> [OpenAIAuthAccount] {
         var accounts: [OpenAIAuthAccount] = []
+
+        if let configuredAPIKey = getOpenAIProviderAPIKeyWithSource() {
+            accounts.append(
+                OpenAIAuthAccount(
+                    accessToken: configuredAPIKey.key,
+                    accountId: nil,
+                    externalUsageAccountId: nil,
+                    email: nil,
+                    authSource: configuredAPIKey.source,
+                    sourceLabels: ["OpenCode Config (API Key)"],
+                    source: .opencodeAuth,
+                    credentialType: .apiKey
+                )
+            )
+        }
 
         if let auth = readOpenCodeAuth(),
            let access = auth.openai?.access,

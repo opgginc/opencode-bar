@@ -249,17 +249,25 @@ final class GeminiCLIProvider: ProviderProtocol {
 
     private func fetchQuotaForAccount(account: GeminiAuthAccount) async throws -> GeminiAccountQuota {
         let accountIndex = account.index
-        let projectId = account.projectId.trimmingCharacters(in: .whitespacesAndNewlines)
-        if projectId.isEmpty {
-            throw ProviderError.authenticationFailed("Missing project ID for account #\(accountIndex + 1)")
-        }
+        let configuredProjectId = account.projectId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let projectId = configuredProjectId.isEmpty ? "default" : configuredProjectId
 
-        guard let accessToken = await tokenManager.refreshGeminiAccessToken(
+        var refreshedAccessToken = await tokenManager.refreshGeminiAccessToken(
             refreshToken: account.refreshToken,
             clientId: account.clientId,
             clientSecret: account.clientSecret
-        ) else {
+        )
+        if refreshedAccessToken == nil {
+            logger.info("Gemini CLI: Primary OAuth client failed for account #\(accountIndex + 1); trying Gemini CLI OAuth client fallback")
+            refreshedAccessToken = await tokenManager.refreshGeminiAccessToken(refreshToken: account.refreshToken)
+        }
+
+        guard let accessToken = refreshedAccessToken else {
             throw ProviderError.authenticationFailed("Unable to refresh token for account #\(accountIndex + 1)")
+        }
+
+        if configuredProjectId.isEmpty {
+            logger.info("Gemini CLI: Missing project ID for account #\(accountIndex + 1); using default project fallback")
         }
 
         let resolvedEmail = await resolveGeminiAccountEmail(primaryEmail: account.email, accessToken: accessToken)
@@ -275,7 +283,7 @@ final class GeminiCLIProvider: ProviderProtocol {
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // project parameter is required to get all models including gemini-3 variants
+        // project parameter improves model coverage; use a default fallback when auth storage omits it.
         request.httpBody = "{\"project\":\"\(projectId)\"}".data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
