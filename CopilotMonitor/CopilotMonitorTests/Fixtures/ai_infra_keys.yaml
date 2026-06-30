@@ -1,0 +1,17 @@
+secrets:
+  tavily:
+    apple:
+      env_var: TAVILY_API_KEY
+      value: tvly-dev-APPLE0000000000000000000000000000
+    github:
+      env_var: TAVILY_API_KEY
+      value: tvly-dev-GITHUB000000000000000000000000000
+    google:
+      env_var: TAVILY_API_KEY
+      value: tvly-dev-GOOGLE000000000000000000000000000
+    qq:
+      env_var: TAVILY_API_KEY
+      value: tvly-dev-QQ0000000000000000000000000000000
+  brave:
+    default:
+      value: BSA000000000000000000000000000
