@@ -2876,12 +2876,46 @@ final class StatusBarController: NSObject {
         let submenu = NSMenu()
         for identifier in visibleSearchProviders {
             let rowTitle = identifier.displayName
-            let rowItem = createSearchEngineRow(identifier: identifier, title: rowTitle)
-            submenu.addItem(rowItem)
+            for rowItem in createSearchEngineRows(identifier: identifier, title: rowTitle) {
+                submenu.addItem(rowItem)
+            }
         }
 
         searchEnginesItem.submenu = submenu
         return searchEnginesItem
+    }
+
+    /// Builds one or more menu rows for a search provider. Providers that expose
+    /// multiple accounts (e.g. Tavily with several API keys) render one row per
+    /// account; single-account providers (e.g. Brave) render a single row.
+    private func createSearchEngineRows(identifier: ProviderIdentifier, title: String) -> [NSMenuItem] {
+        let result = providerResults[identifier]
+        let errorMessage = lastProviderErrors[identifier]
+        let isErrorState = errorMessage != nil && shouldDisplayErrorStateEvenWithResult(errorMessage!)
+
+        if !isErrorState,
+           let result,
+           let accounts = result.accounts,
+           accounts.count > 1 {
+            return accounts.map { account in
+                let accountTitle = "\(title) (\(account.accountId ?? "#\(account.accountIndex + 1)"))"
+                let rowItem = createNativeQuotaMenuItem(
+                    name: accountTitle,
+                    usedPercent: account.usage.usagePercentage,
+                    icon: iconForProvider(identifier)
+                )
+                let accountResult = ProviderResult(usage: account.usage, details: account.details)
+                rowItem.submenu = createSearchEngineDetailSubmenu(
+                    identifier: identifier,
+                    result: accountResult,
+                    errorMessage: nil,
+                    isLoading: false
+                )
+                return rowItem
+            }
+        }
+
+        return [createSearchEngineRow(identifier: identifier, title: title)]
     }
 
     private func createSearchEngineRow(identifier: ProviderIdentifier, title: String) -> NSMenuItem {

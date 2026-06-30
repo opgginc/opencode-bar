@@ -41,10 +41,14 @@ final class TavilySearchProvider: ProviderProtocol {
 
     private let tokenManager: TokenManager
     private let session: URLSession
+    private let keySource: KeySource
 
-    init(tokenManager: TokenManager = .shared, session: URLSession = .shared) {
+    init(tokenManager: TokenManager = .shared,
+         session: URLSession = .shared,
+         keySource: KeySource = AIInfraYamlKeySource()) {
         self.tokenManager = tokenManager
         self.session = session
+        self.keySource = keySource
     }
 
     struct TavilyParsedUsage {
@@ -81,18 +85,62 @@ final class TavilySearchProvider: ProviderProtocol {
     }
 
     func fetch() async throws -> ProviderResult {
-        guard let apiKeyInfo = tokenManager.getTavilyAPIKeyWithSource() else {
-            tavilyLogger.error("Tavily API key not found")
-            throw ProviderError.authenticationFailed("Tavily API key not available")
-        }
-        let apiKey = apiKeyInfo.key
+        let namedKeys = (try? keySource.keys(forProvider: "tavily")) ?? []
 
+        var keysToQuery: [NamedKey] = namedKeys
+        if keysToQuery.isEmpty, let single = tokenManager.getTavilyAPIKeyWithSource() {
+            keysToQuery = [NamedKey(name: "default", value: single.key)]
+        }
+        guard !keysToQuery.isEmpty else {
+            throw ProviderError.authenticationFailed("No Tavily API key available")
+        }
+
+        var accountResults: [ProviderAccountResult] = []
+        var firstUsage: ProviderUsage?
+        var firstDetails: DetailedUsage?
+
+        for (index, namedKey) in keysToQuery.enumerated() {
+            do {
+                let parsed = try await fetchOne(key: namedKey)
+                let resetText = formatEstimatedMonthlyResetText()
+                let details = DetailedUsage(
+                    monthlyUsage: Double(parsed.used),
+                    limit: Double(parsed.limit),
+                    limitRemaining: Double(parsed.remaining),
+                    resetPeriod: resetText,
+                    authSource: "ai-infra:tavily.\(namedKey.name)",
+                    authUsageSummary: parsed.planName ?? "Auto refresh",
+                    mcpUsagePercent: normalizedTavilyQuotaUsagePercent(used: parsed.used, limit: parsed.limit)
+                )
+                accountResults.append(ProviderAccountResult(
+                    accountIndex: index,
+                    accountId: namedKey.name,
+                    usage: parsed.usage,
+                    details: details
+                ))
+                if firstUsage == nil {
+                    firstUsage = parsed.usage
+                    firstDetails = details
+                }
+                tavilyLogger.info("Tavily[\(namedKey.name)]: used=\(parsed.used)/\(parsed.limit)")
+            } catch {
+                tavilyLogger.error("Tavily[\(namedKey.name)] fetch failed: \(error.localizedDescription)")
+            }
+        }
+
+        guard let topUsage = firstUsage else {
+            throw ProviderError.networkError("All Tavily keys failed")
+        }
+        return ProviderResult(usage: topUsage, details: firstDetails, accounts: accountResults)
+    }
+
+    private func fetchOne(key namedKey: NamedKey) async throws -> TavilyParsedUsage {
         guard let url = URL(string: "https://api.tavily.com/usage") else {
             throw ProviderError.networkError("Invalid Tavily usage endpoint")
         }
-
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        let apiKey = namedKey.value
         let authValue = apiKey.lowercased().hasPrefix("bearer ") ? apiKey : "Bearer \(apiKey)"
         request.setValue(authValue, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -101,47 +149,13 @@ final class TavilySearchProvider: ProviderProtocol {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ProviderError.networkError("Invalid Tavily response type")
         }
-
         if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
             throw ProviderError.authenticationFailed("Invalid Tavily API key")
         }
-
         guard (200...299).contains(httpResponse.statusCode) else {
             throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
         }
-
-        let decoded: TavilyUsageResponse
-        do {
-            decoded = try JSONDecoder().decode(TavilyUsageResponse.self, from: data)
-        } catch {
-            throw ProviderError.decodingError("Invalid Tavily usage response")
-        }
-
-        let used = decoded.account?.planUsage ?? decoded.account?.paygoUsage ?? decoded.key?.usage
-        let limit = decoded.account?.planLimit ?? decoded.account?.paygoLimit ?? decoded.key?.limit
-
-        guard let resolvedUsed = used, let resolvedLimit = limit, resolvedLimit > 0 else {
-            throw ProviderError.decodingError("Missing Tavily usage or limit")
-        }
-
-        let remaining = max(0, resolvedLimit - resolvedUsed)
-        let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: resolvedLimit, overagePermitted: false)
-        let mcpUsagePercent = normalizedTavilyQuotaUsagePercent(used: resolvedUsed, limit: resolvedLimit)
-
-        let resetText = formatEstimatedMonthlyResetText()
-        let details = DetailedUsage(
-            monthlyUsage: Double(resolvedUsed),
-            limit: Double(resolvedLimit),
-            limitRemaining: Double(remaining),
-            resetPeriod: resetText,
-            authSource: apiKeyInfo.source,
-            authUsageSummary: decoded.account?.currentPlan ?? "Auto refresh",
-            mcpUsagePercent: mcpUsagePercent
-        )
-
-        let percentLogValue = mcpUsagePercent.map { String(format: "%.2f", $0) } ?? "nil"
-        tavilyLogger.info("Tavily usage fetched: used=\(resolvedUsed), limit=\(resolvedLimit), usedPercent=\(percentLogValue)")
-        return ProviderResult(usage: usage, details: details)
+        return try Self.parseUsage(from: data, keyName: namedKey.name)
     }
 
     private func formatEstimatedMonthlyResetText(referenceDate: Date = Date()) -> String {
