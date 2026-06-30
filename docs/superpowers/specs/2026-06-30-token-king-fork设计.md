@@ -83,3 +83,7 @@ Fork 开源项目 `opgginc/opencode-bar`（macOS 菜单栏 AI 用量监控，MIT
 - 上游：github.com/opgginc/opencode-bar（MIT）
 - widget 沙盒墙正解范本：github.com/AThevon/TokenEater
 - 沙盒墙调研结论：`~/.claude/projects/-Users-simengyu/memory/参考/widget沙盒墙真相.md`
+
+## 8. 残留项 / 已查证结论
+
+- **anysearch 无用量 API（2026-07-01 查证，搁置）**：anysearch 是 MCP 服务（`https://api.anysearch.com/mcp`），只暴露 4 个搜索工具（`batch_search` / `extract` / `get_sub_domains` / `search`），无任何用量/余额/配额接口。REST 端点（`/usage` `/account` `/balance` `/quota` 等）全部 404，MCP `resources/list` 返回 "resources not supported"。结论：与 mimo 同类，无可读用量数据源，**不纳入 widget**。待 anysearch 未来提供用量 API 再实现 `AnySearchProvider`。
