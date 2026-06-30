@@ -1,3 +1,10 @@
+> **Token King** — a personal, learning-purpose fork of
+> [opgginc/opencode-bar](https://github.com/opgginc/opencode-bar) (MIT License).
+> All credit for the original work goes to OP.GG. This fork adds multi-key,
+> multi-engine, RMB currency, Chinese UI, and a desktop widget for personal use.
+
+---
+
 <p align="center">
   <img src="docs/screenshot-subscription.png" alt="OpenCode Bar Screenshot" width="40%">
   <img src="docs/screenshot3.png" alt="OpenCode Bar Screenshot" width="40%">
