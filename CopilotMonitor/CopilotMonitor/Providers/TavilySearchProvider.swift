@@ -47,6 +47,39 @@ final class TavilySearchProvider: ProviderProtocol {
         self.session = session
     }
 
+    struct TavilyParsedUsage {
+        let keyName: String
+        let used: Int
+        let limit: Int
+        let remaining: Int
+        let planName: String?
+        let usage: ProviderUsage
+    }
+
+    static func parseUsage(from data: Data, keyName: String) throws -> TavilyParsedUsage {
+        let decoded: TavilyUsageResponse
+        do {
+            decoded = try JSONDecoder().decode(TavilyUsageResponse.self, from: data)
+        } catch {
+            throw ProviderError.decodingError("Invalid Tavily usage response")
+        }
+        let used = decoded.account?.planUsage ?? decoded.account?.paygoUsage ?? decoded.key?.usage
+        let limit = decoded.account?.planLimit ?? decoded.account?.paygoLimit ?? decoded.key?.limit
+        guard let resolvedUsed = used, let resolvedLimit = limit, resolvedLimit > 0 else {
+            throw ProviderError.decodingError("Missing Tavily usage or limit")
+        }
+        let remaining = max(0, resolvedLimit - resolvedUsed)
+        let usage = ProviderUsage.quotaBased(remaining: remaining, entitlement: resolvedLimit, overagePermitted: false)
+        return TavilyParsedUsage(
+            keyName: keyName,
+            used: resolvedUsed,
+            limit: resolvedLimit,
+            remaining: remaining,
+            planName: decoded.account?.currentPlan,
+            usage: usage
+        )
+    }
+
     func fetch() async throws -> ProviderResult {
         guard let apiKeyInfo = tokenManager.getTavilyAPIKeyWithSource() else {
             tavilyLogger.error("Tavily API key not found")

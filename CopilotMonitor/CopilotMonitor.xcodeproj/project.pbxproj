@@ -27,6 +27,7 @@
 		68CE796F262067298FE88469 /* BrowserCookieService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2707EF99248FCDEFDEE3DA9C /* BrowserCookieService.swift */; };
 		6C4146861DE2C13836DE1D35 /* CopilotHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B1085A77EF4A58E5B5EC71B /* CopilotHistoryService.swift */; };
 		6E20731420660405A73659A3 /* ModernApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6279E48B0F50E99C3B23C4F3 /* ModernApp.swift */; };
+		7023538D2C1FD2C142C4D0C6 /* tavily_usage_response.json in Resources */ = {isa = PBXBuildFile; fileRef = 08AE97C415017492D0809041 /* tavily_usage_response.json */; };
 		7C7800B96DEE77EBE9DAD5E8 /* KeySource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F2E141A81879AD0D9434ED6 /* KeySource.swift */; };
 		87297CDD8B65F7EF0BC5D650 /* ProviderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18F40F1AC76A49A9B9DF74B0 /* ProviderManager.swift */; };
 		8EA90F9E26F29FC7938D2924 /* ProviderViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BDA856BBC854D3FF310EA51 /* ProviderViewModel.swift */; };
@@ -39,6 +40,7 @@
 		AD95EBD6AE3134DF4C797577 /* ClaudeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DDC1B4DE6B5118CE4AE8F82 /* ClaudeProvider.swift */; };
 		AM1111111111111111111111 /* AppMigrationHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = AM2222222222222222222222 /* AppMigrationHelper.swift */; };
 		B248782F500D3B09E0CE5AC8 /* ProviderUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4158558E58B121A9D13C48C3 /* ProviderUsage.swift */; };
+		B452E4DDD82E777D8394D295 /* TavilySearchProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36C2B344956C6CBB5D2AA5E3 /* TavilySearchProviderTests.swift */; };
 		B58BAD3BFD97973070A2A892 /* MenuResultBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54353FD130DDE0500F6B367F /* MenuResultBuilderTests.swift */; };
 		BCDE4599B74AF7A799CE1D /* StatusBarIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0CA52627AF05BD67B56E /* StatusBarIconView.swift */; };
 		BRAVEAPP1111111111111111 /* BraveSearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = BRAVEFILE22222222222222 /* BraveSearchProvider.swift */; };
@@ -150,6 +152,7 @@
 
 /* Begin PBXFileReference section */
 		06EC3B683EB6892E4F9C8316 /* GeminiCLIProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GeminiCLIProvider.swift; sourceTree = "<group>"; };
+		08AE97C415017492D0809041 /* tavily_usage_response.json */ = {isa = PBXFileReference; includeInIndex = 1; path = tavily_usage_response.json; sourceTree = "<group>"; };
 		0F6CE62C58ECA852F25FEF30 /* MenuResultBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuResultBuilder.swift; sourceTree = "<group>"; };
 		18F40F1AC76A49A9B9DF74B0 /* ProviderManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderManager.swift; sourceTree = "<group>"; };
 		24BD2AE5B12FABC3E915AE27 /* MultiProviderStatusBarIconView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MultiProviderStatusBarIconView.swift; sourceTree = "<group>"; };
@@ -157,6 +160,7 @@
 		283349002F313176004DADE1 /* ChutesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChutesProvider.swift; sourceTree = "<group>"; };
 		2D2B4000E33060BA5E00351B /* DependencyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DependencyTests.swift; sourceTree = "<group>"; };
 		2DD8824FD8DE388CEE314F92 /* ModernStatusBarIconView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModernStatusBarIconView.swift; sourceTree = "<group>"; };
+		36C2B344956C6CBB5D2AA5E3 /* TavilySearchProviderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TavilySearchProviderTests.swift; sourceTree = "<group>"; };
 		4158558E58B121A9D13C48C3 /* ProviderUsage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderUsage.swift; sourceTree = "<group>"; };
 		4DDC1B4DE6B5118CE4AE8F82 /* ClaudeProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeProvider.swift; sourceTree = "<group>"; };
 		54353FD130DDE0500F6B367F /* MenuResultBuilderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuResultBuilderTests.swift; sourceTree = "<group>"; };
@@ -458,6 +462,7 @@
 				OCAUTHTESTFR11111111111 /* OpenCodeAuthDecodingTests.swift */,
 				OCZENTESTFR111111111111 /* OpenCodeZenProviderTests.swift */,
 				94055A7CFB59D90DA90B27A0 /* KeySourceTests.swift */,
+				36C2B344956C6CBB5D2AA5E3 /* TavilySearchProviderTests.swift */,
 			);
 			path = CopilotMonitorTests;
 			sourceTree = "<group>";
@@ -473,6 +478,7 @@
 				OR5555555555555555555555 /* openrouter_credits_response.json */,
 				OR7777777777777777777777 /* openrouter_key_response.json */,
 				CF23F2A5CF0366FB78011DCA /* ai_infra_keys.yaml */,
+				08AE97C415017492D0809041 /* tavily_usage_response.json */,
 			);
 			path = Fixtures;
 			sourceTree = "<group>";
@@ -601,6 +607,7 @@
 				OR6666666666666666666666 /* openrouter_credits_response.json in Resources */,
 				OR8888888888888888888888 /* openrouter_key_response.json in Resources */,
 				C770099D14F30416045F8AFA /* ai_infra_keys.yaml in Resources */,
+				7023538D2C1FD2C142C4D0C6 /* tavily_usage_response.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -720,6 +727,7 @@
 				OCAUTHTESTBF11111111111 /* OpenCodeAuthDecodingTests.swift in Sources */,
 				OCZENTESTBF111111111111 /* OpenCodeZenProviderTests.swift in Sources */,
 				3598A5E3900D37EA08DEA6F4 /* KeySourceTests.swift in Sources */,
+				B452E4DDD82E777D8394D295 /* TavilySearchProviderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

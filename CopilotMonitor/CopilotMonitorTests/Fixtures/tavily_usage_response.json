@@ -1,0 +1,8 @@
+{
+  "account": {
+    "current_plan": "Researcher",
+    "plan_usage": 67,
+    "plan_limit": 1000
+  },
+  "key": { "usage": 67, "limit": null }
+}
