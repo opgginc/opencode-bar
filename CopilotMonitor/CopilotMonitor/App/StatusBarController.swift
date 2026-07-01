@@ -921,7 +921,7 @@ final class StatusBarController: NSObject {
     }
 
     private func formatCostForStatusBar(_ cost: Double) -> String {
-        String(format: "$%.2f", cost)
+        CurrencyFormatter.shared.format(usd: cost)
     }
 
     private func formatCostOrStatusBarBrand(_ cost: Double) -> String {
@@ -1688,7 +1688,7 @@ final class StatusBarController: NSObject {
           let subscriptionTotal = SubscriptionSettingsManager.shared.getTotalMonthlySubscriptionCost()
           
           let payAsYouGoHeader = NSMenuItem()
-          payAsYouGoHeader.view = createHeaderView(title: String(format: "Pay-as-you-go: $%.2f", payAsYouGoTotal))
+          payAsYouGoHeader.view = createHeaderView(title: "Pay-as-you-go: \(CurrencyFormatter.shared.format(usd: payAsYouGoTotal))")
           payAsYouGoHeader.tag = 999
           menu.insertItem(payAsYouGoHeader, at: insertIndex)
           insertIndex += 1
@@ -1715,7 +1715,7 @@ final class StatusBarController: NSObject {
                         hasPayAsYouGo = true
                         let costValue = cost ?? 0.0
                         let item = NSMenuItem(
-                            title: String(format: "%@ ($%.2f)", identifier.displayName, costValue),
+                            title: "\(identifier.displayName) (\(CurrencyFormatter.shared.format(usd: costValue)))",
                             action: nil, keyEquivalent: ""
                         )
                         item.image = iconForProvider(identifier)
@@ -1758,7 +1758,7 @@ final class StatusBarController: NSObject {
                    let overageCost = details.copilotOverageCost {
                     hasPayAsYouGo = true
                     let addOnItem = NSMenuItem(
-                        title: String(format: "Copilot Add-on ($%.2f)", overageCost),
+                        title: "Copilot Add-on (\(CurrencyFormatter.shared.format(usd: overageCost)))",
                         action: nil, keyEquivalent: ""
                     )
                     addOnItem.image = iconForProvider(.copilot)
@@ -1834,7 +1834,7 @@ final class StatusBarController: NSObject {
 
          let quotaHeader = NSMenuItem()
          let quotaTitle = subscriptionTotal > 0
-             ? String(format: "Quota Status: $%.0f/m", subscriptionTotal)
+             ? "Quota Status: \(CurrencyFormatter.shared.format(usd: subscriptionTotal, decimals: 0))/m"
              : "Quota Status"
          quotaHeader.view = createHeaderView(title: quotaTitle)
          quotaHeader.tag = 999
@@ -2428,7 +2428,7 @@ final class StatusBarController: NSObject {
         orphanedSubscriptionKeys = orphaned.keys
         orphanedSubscriptionTotal = orphaned.total
         if orphaned.total > 0 {
-            let title = String(format: "Orphaned ($%.2f)", orphaned.total)
+            let title = "Orphaned (\(CurrencyFormatter.shared.format(usd: orphaned.total)))"
             let orphanedItem = NSMenuItem(
                 title: title,
                 action: #selector(confirmResetOrphanedSubscriptions(_:)),
@@ -3580,9 +3580,9 @@ final class StatusBarController: NSObject {
 
         var lines = [
             "My OpenCode Bar usage snapshot",
-            String(format: "- Total tracked this month: $%.2f", totalTracked),
-            String(format: "- Pay-as-you-go spend: $%.2f", payAsYouGoTotal),
-            String(format: "- Quota subscriptions: $%.2f/m", subscriptionTotal)
+            "- Total tracked this month: \(CurrencyFormatter.shared.format(usd: totalTracked))",
+            "- Pay-as-you-go spend: \(CurrencyFormatter.shared.format(usd: payAsYouGoTotal))",
+            "- Quota subscriptions: \(CurrencyFormatter.shared.format(usd: subscriptionTotal))/m"
         ]
 
         if let topPayAsYouGo = topPayAsYouGoShareLine() {
@@ -3621,7 +3621,7 @@ final class StatusBarController: NSObject {
             return nil
         }
 
-        return String(format: "Top spend: %@ at $%.2f", top.name, top.cost)
+        return "Top spend: \(top.name) at \(CurrencyFormatter.shared.format(usd: top.cost))"
     }
 
     private func topQuotaShareLine() -> String? {
@@ -3978,7 +3978,7 @@ final class StatusBarController: NSObject {
 
         // Create Predicted EOM menu item
         let eomItem = NSMenuItem(
-            title: String(format: "Predicted EOM: $%.0f", predictedEOM),
+            title: "Predicted EOM: \(CurrencyFormatter.shared.format(usd: predictedEOM, decimals: 0))",
             action: nil,
             keyEquivalent: ""
         )
@@ -4007,7 +4007,7 @@ final class StatusBarController: NSObject {
             if dayData.total < 0.01 {
                 costStr = "Zero"
             } else {
-                costStr = String(format: "$%.2f", dayData.total)
+                costStr = CurrencyFormatter.shared.format(usd: dayData.total)
             }
 
             let label = isToday ? "\(dateStr): \(costStr) (Today)" : "\(dateStr): \(costStr)"
@@ -4028,7 +4028,7 @@ final class StatusBarController: NSObject {
                         if cost < 0.01 {
                             providerLabel = "\(provider.displayName): Zero"
                         } else {
-                            providerLabel = String(format: "%@: $%.2f", provider.displayName, cost)
+                            providerLabel = "\(provider.displayName): \(CurrencyFormatter.shared.format(usd: cost))"
                         }
                         let providerItem = NSMenuItem()
                         providerItem.view = createDisabledLabelView(
@@ -4119,7 +4119,7 @@ final class StatusBarController: NSObject {
             debugLog("updateHistorySubmenu: monthlyItem added")
 
             if prediction.predictedBilledAmount > 0 {
-                let costText = String(format: "Predicted Add-on: $%.2f", prediction.predictedBilledAmount)
+                let costText = "Predicted Add-on: \(CurrencyFormatter.shared.format(usd: prediction.predictedBilledAmount))"
                 let costItem = NSMenuItem()
                 costItem.view = createDisabledLabelView(
                     text: costText,
