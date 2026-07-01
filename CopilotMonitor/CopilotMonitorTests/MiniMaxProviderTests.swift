@@ -358,4 +358,24 @@ final class MiniMaxProviderTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+
+    func testFetchLiveReturnsUsageWithRealKey() async throws {
+        guard TokenManager.shared.getMiniMaxCodingPlanAPIKey() != nil else {
+            throw XCTSkip("MiniMax Coding Plan API key not available; skipping live fetch test.")
+        }
+
+        let provider = MiniMaxProvider(tokenManager: .shared, session: .shared)
+        let result = try await provider.fetch()
+
+        switch result.usage {
+        case .quotaBased(let remaining, let entitlement, let overagePermitted):
+            XCTAssertGreaterThanOrEqual(remaining, 0)
+            XCTAssertEqual(entitlement, 100)
+            XCTAssertFalse(overagePermitted)
+        default:
+            XCTFail("Expected quota-based usage")
+        }
+
+        XCTAssertNotNil(result.details)
+    }
 }
