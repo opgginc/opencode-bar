@@ -2738,7 +2738,9 @@ final class StatusBarController: NSObject {
             "access token",
             "API key",
             "No Gemini accounts",
-            "credentials"
+            "credentials",
+            "no enabled",
+            "cache unavailable"
         ]
         let lowercased = errorMessage.lowercased()
         return authPatterns.contains { lowercased.contains($0.lowercased()) }
@@ -2827,7 +2829,9 @@ final class StatusBarController: NSObject {
                 "not available",
                 "access token",
                 "api key",
-                "credentials"
+                "credentials",
+                "no enabled",
+                "cache unavailable"
             ].contains { lowercased.contains($0) }
             let isNoSubscription = lowercased.contains("subscription")
             return !isNoCredentials && !isNoSubscription

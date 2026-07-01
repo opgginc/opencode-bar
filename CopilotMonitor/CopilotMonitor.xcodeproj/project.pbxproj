@@ -82,6 +82,7 @@
 		CURSORAPP1111111111111 /* CursorProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CURSORFILE222222222222 /* CursorProvider.swift */; };
 		CURSORTSTBF11111111111 /* CursorProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CURSORTSTFR11111111111 /* CursorProviderTests.swift */; };
 		D11111111111111111111111 /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D22222222222222222222222 /* StatusBarController.swift */; };
+		ERRCLASSBF1111111111 /* ErrorClassificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ERRCLASSFR1111111111 /* ErrorClassificationTests.swift */; };
 		ERRFILTBF11111111111 /* ErrorFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ERRFILTFR11111111111 /* ErrorFilterTests.swift */; };
 		E11111111111111111111111 /* CopilotUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22222222222222222222222 /* CopilotUsage.swift */; };
 		E33333333333333333333334 /* UsageHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E44444444444444444444444 /* UsageHistory.swift */; };
@@ -217,6 +218,7 @@
 		E22222222222222222222222 /* CopilotUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotUsage.swift; sourceTree = "<group>"; };
 		E44444444444444444444444 /* UsageHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistory.swift; sourceTree = "<group>"; };
 		ED35D8BD06A436306085737D /* CopilotProviderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CopilotProviderTests.swift; sourceTree = "<group>"; };
+		ERRCLASSFR1111111111 /* ErrorClassificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorClassificationTests.swift; sourceTree = "<group>"; };
 		ERRFILTFR11111111111 /* ErrorFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorFilterTests.swift; sourceTree = "<group>"; };
 		F1DA8E47F4CFEFC3571708AD /* AntigravityProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AntigravityProvider.swift; sourceTree = "<group>"; };
 		F22222222222222222222222 /* UsagePredictor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePredictor.swift; sourceTree = "<group>"; };
@@ -469,6 +471,7 @@
 				B63B85E0F2A8C591D7E26AE2 /* GeminiCLIProviderTests.swift */,
 				ED35D8BD06A436306085737D /* CopilotProviderTests.swift */,
 				ERRFILTFR11111111111 /* ErrorFilterTests.swift */,
+				ERRCLASSFR1111111111 /* ErrorClassificationTests.swift */,
 				OR3333333333333333333333 /* OpenRouterProviderTests.swift */,
 				2D2B4000E33060BA5E00351B /* DependencyTests.swift */,
 				C8493409A9188CFF5B73D5B3 /* MenuDesignTokenTests.swift */,
@@ -747,6 +750,7 @@
 				23AA5FD37F2062EACCA79F50 /* GeminiCLIProviderTests.swift in Sources */,
 				632E52F6050FAD5CAF928E36 /* CopilotProviderTests.swift in Sources */,
 				ERRFILTBF11111111111 /* ErrorFilterTests.swift in Sources */,
+				ERRCLASSBF1111111111 /* ErrorClassificationTests.swift in Sources */,
 				OR4444444444444444444444 /* OpenRouterProviderTests.swift in Sources */,
 				668B6906C95903D51823808A /* DependencyTests.swift in Sources */,
 				A1BED4A5CA1FEC2DADC461C2 /* MenuDesignTokenTests.swift in Sources */,
