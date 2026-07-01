@@ -1167,15 +1167,25 @@ extension StatusBarController {
         headerItem.view = createHeaderView(title: "订阅")
         submenu.addItem(headerItem)
 
-        let noneItem = NSMenuItem(title: "无 ($0)", action: #selector(subscriptionPlanSelected(_:)), keyEquivalent: "")
+        let noneItem = NSMenuItem(
+            title: "无 (\(CurrencyFormatter.shared.format(usd: 0, decimals: 0)))",
+            action: #selector(subscriptionPlanSelected(_:)),
+            keyEquivalent: ""
+        )
         noneItem.target = self
         noneItem.representedObject = SubscriptionMenuAction(subscriptionKey: subscriptionKey, plan: .none)
         noneItem.state = (currentPlan == .none) ? .on : .off
         submenu.addItem(noneItem)
 
         for preset in presets {
+            let priceText: String
+            if CurrencyFormatter.shared.currency == .rmb, let cny = preset.cnyCost {
+                priceText = "¥\(Int(cny))"
+            } else {
+                priceText = CurrencyFormatter.shared.format(usd: preset.cost, decimals: 0)
+            }
             let item = NSMenuItem(
-                title: "\(preset.name) ($\(Int(preset.cost))/m)",
+                title: "\(preset.name) (\(priceText)/月)",
                 action: #selector(subscriptionPlanSelected(_:)),
                 keyEquivalent: ""
             )
@@ -1192,7 +1202,7 @@ extension StatusBarController {
         customItem.representedObject = subscriptionKey
         if case .custom(let amount) = currentPlan {
             customItem.state = .on
-            customItem.title = "自定义 ($\(Int(amount))/m)"
+            customItem.title = "自定义 (\(CurrencyFormatter.shared.format(usd: amount, decimals: 0))/月)"
         }
         submenu.addItem(customItem)
     }

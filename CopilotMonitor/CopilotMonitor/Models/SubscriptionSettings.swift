@@ -92,7 +92,8 @@ enum SubscriptionPlan: Codable, Equatable {
 
 struct SubscriptionPreset {
     let name: String
-    let cost: Double
+    let cost: Double          // USD，ROI 计算唯一真值
+    var cnyCost: Double? = nil // 国内套餐人民币原生价，仅展示用
 }
 
 struct ProviderSubscriptionPresets {
@@ -136,18 +137,18 @@ struct ProviderSubscriptionPresets {
     ]
 
     static let kimi: [SubscriptionPreset] = [
-        SubscriptionPreset(name: "Moderato", cost: 19),
-        SubscriptionPreset(name: "Allegretto", cost: 39),
+        SubscriptionPreset(name: "Moderato", cost: 19, cnyCost: 99),
+        SubscriptionPreset(name: "Allegretto", cost: 39, cnyCost: 199),
         SubscriptionPreset(name: "Vivace", cost: 199)
     ]
 
     static let minimaxCodingPlan: [SubscriptionPreset] = [
-        SubscriptionPreset(name: "Starter", cost: 10),
-        SubscriptionPreset(name: "Plus", cost: 20),
-        SubscriptionPreset(name: "Max", cost: 50),
-        SubscriptionPreset(name: "Plus HS", cost: 40),
-        SubscriptionPreset(name: "Max HS", cost: 80),
-        SubscriptionPreset(name: "Ultra HS", cost: 150)
+        SubscriptionPreset(name: "Starter", cost: 10, cnyCost: 29),
+        SubscriptionPreset(name: "Plus", cost: 20, cnyCost: 49),
+        SubscriptionPreset(name: "Max", cost: 50, cnyCost: 119),
+        SubscriptionPreset(name: "Plus HS", cost: 40, cnyCost: 98),
+        SubscriptionPreset(name: "Max HS", cost: 80, cnyCost: 199),
+        SubscriptionPreset(name: "Ultra HS", cost: 150, cnyCost: 899)
     ]
 
     static let antigravity: [SubscriptionPreset] = [

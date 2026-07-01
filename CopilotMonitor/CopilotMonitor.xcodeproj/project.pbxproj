@@ -122,6 +122,7 @@
 		SS1111111111111111111111 /* SubscriptionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS2222222222222222222222 /* SubscriptionSettings.swift */; };
 		SYNTHETIC1111111111111111 /* SyntheticProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNTHETIC2222222222222222 /* SyntheticProvider.swift */; };
 		SYNTHTEST2222222222222222 /* SyntheticProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SYNTHTEST1111111111111111 /* SyntheticProviderTests.swift */; };
+		SUBSPTESTBF1111111111 /* SubscriptionPresetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SUBSPTESTFR1111111111 /* SubscriptionPresetTests.swift */; };
 		T11111111111111111111111 /* ProviderUsageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T22222222222222222222222 /* ProviderUsageTests.swift */; };
 		T33333333333333333333333 /* claude_response.json in Resources */ = {isa = PBXBuildFile; fileRef = T44444444444444444444444 /* claude_response.json */; };
 		T55555555555555555555555 /* codex_response.json in Resources */ = {isa = PBXBuildFile; fileRef = T66666666666666666666666 /* codex_response.json */; };
@@ -250,6 +251,7 @@
 		SS2222222222222222222222 /* SubscriptionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionSettings.swift; sourceTree = "<group>"; };
 		SYNTHETIC2222222222222222 /* SyntheticProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntheticProvider.swift; sourceTree = "<group>"; };
 		SYNTHTEST1111111111111111 /* SyntheticProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntheticProviderTests.swift; sourceTree = "<group>"; };
+		SUBSPTESTFR1111111111 /* SubscriptionPresetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionPresetTests.swift; sourceTree = "<group>"; };
 		T22222222222222222222222 /* ProviderUsageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderUsageTests.swift; sourceTree = "<group>"; };
 		T44444444444444444444444 /* claude_response.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = claude_response.json; sourceTree = "<group>"; };
 		T66666666666666666666666 /* codex_response.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = codex_response.json; sourceTree = "<group>"; };
@@ -477,6 +479,7 @@
 				C8493409A9188CFF5B73D5B3 /* MenuDesignTokenTests.swift */,
 				54353FD130DDE0500F6B367F /* MenuResultBuilderTests.swift */,
 				SYNTHTEST1111111111111111 /* SyntheticProviderTests.swift */,
+				SUBSPTESTFR1111111111 /* SubscriptionPresetTests.swift */,
 				NANOGPTTESTFR1111111111 /* NanoGptProviderTests.swift */,
 				MINIMAXTESTFR11111111111 /* MiniMaxProviderTests.swift */,
 				OCGOTESTFR11111111111 /* OpenCodeGoProviderTests.swift */,
@@ -756,6 +759,7 @@
 				A1BED4A5CA1FEC2DADC461C2 /* MenuDesignTokenTests.swift in Sources */,
 				B58BAD3BFD97973070A2A892 /* MenuResultBuilderTests.swift in Sources */,
 				SYNTHTEST2222222222222222 /* SyntheticProviderTests.swift in Sources */,
+				SUBSPTESTBF1111111111 /* SubscriptionPresetTests.swift in Sources */,
 				NANOGPTTESTBF1111111111 /* NanoGptProviderTests.swift in Sources */,
 				MINIMAXTESTBF11111111111 /* MiniMaxProviderTests.swift in Sources */,
 				OCGOTESTBF11111111111 /* OpenCodeGoProviderTests.swift in Sources */,
