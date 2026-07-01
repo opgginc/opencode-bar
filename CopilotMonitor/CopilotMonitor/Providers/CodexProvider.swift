@@ -6,6 +6,7 @@ private let logger = Logger(subsystem: "com.opencodeproviders", category: "Codex
 final class CodexProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .codex
     let type: ProviderType = .quotaBased
+    var fetchTimeout: TimeInterval { 30.0 }
 
     struct DecodedUsagePayload {
         let usage: ProviderUsage

@@ -635,6 +635,10 @@ final class CodexProviderTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(payload.details.monthlyCost), 5.0, accuracy: 0.001)
     }
 
+    func testFetchTimeoutIsExtended() {
+        XCTAssertGreaterThanOrEqual(provider.fetchTimeout, 30.0)
+    }
+
     private func loadFixture(named: String) throws -> Any {
         let testBundle = Bundle(for: type(of: self))
         
