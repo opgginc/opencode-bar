@@ -70,14 +70,14 @@ extension StatusBarController {
         case .openRouter:
             if let remaining = details.creditsRemaining {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Credits: $%.0f", remaining))
+                item.view = createDisabledLabelView(text: "Credits: \(CurrencyFormatter.shared.format(usd: remaining, decimals: 0))")
                 submenu.addItem(item)
             }
 
         case .openCodeZen:
             if let avg = details.avgCostPerDay {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Avg/Day: $%.2f", avg))
+                item.view = createDisabledLabelView(text: "Avg/Day: \(CurrencyFormatter.shared.format(usd: avg))")
                 submenu.addItem(item)
             }
             if let sessions = details.sessions {
@@ -103,7 +103,7 @@ extension StatusBarController {
                 for (model, cost) in sortedModels {
                     let shortName = model.components(separatedBy: "/").last ?? model
                     let item = NSMenuItem()
-                    item.view = createDisabledLabelView(text: String(format: "  %@: $%.2f", shortName, cost))
+                    item.view = createDisabledLabelView(text: "  \(shortName): \(CurrencyFormatter.shared.format(usd: cost))")
                     submenu.addItem(item)
                 }
             }
@@ -264,13 +264,13 @@ extension StatusBarController {
 
                     let limitItem = NSMenuItem()
                     limitItem.view = createDisabledLabelView(
-                        text: String(format: "Limit: $%.2f/m", limitUSD)
+                        text: "Limit: \(CurrencyFormatter.shared.format(usd: limitUSD))/m"
                     )
                     submenu.addItem(limitItem)
 
                     let usedItem = NSMenuItem()
                     usedItem.view = createDisabledLabelView(
-                        text: String(format: "Used: $%.2f", usedUSD)
+                        text: "Used: \(CurrencyFormatter.shared.format(usd: usedUSD))"
                     )
                     submenu.addItem(usedItem)
                 }
@@ -367,7 +367,7 @@ extension StatusBarController {
             }
             if let credits = details.creditsBalance {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Credits: $%.2f", credits))
+                item.view = createDisabledLabelView(text: "Credits: \(CurrencyFormatter.shared.format(usd: credits))")
                 submenu.addItem(item)
             }
             if let serviceDisplayName = codexServiceDisplayName() {
@@ -417,19 +417,19 @@ extension StatusBarController {
 
             if let used = details.monthlyCost, let total = details.creditsTotal {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Monthly Used: $%.2f / $%.2f", used, total))
+                item.view = createDisabledLabelView(text: "Monthly Used: \(CurrencyFormatter.shared.format(usd: used)) / \(CurrencyFormatter.shared.format(usd: total))")
                 submenu.addItem(item)
             }
 
             if let remaining = details.creditsRemaining {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Credits Left: $%.2f", remaining))
+                item.view = createDisabledLabelView(text: "Credits Left: \(CurrencyFormatter.shared.format(usd: remaining))")
                 submenu.addItem(item)
             }
 
             if let purchasedCredits = details.creditsBalance, purchasedCredits > 0 {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Purchased Credits: $%.2f", purchasedCredits))
+                item.view = createDisabledLabelView(text: "Purchased Credits: \(CurrencyFormatter.shared.format(usd: purchasedCredits))")
                 submenu.addItem(item)
             }
 
@@ -790,7 +790,7 @@ extension StatusBarController {
 
             if let usdBalance = details.creditsBalance {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "USD Balance: $%.2f", usdBalance))
+                item.view = createDisabledLabelView(text: "USD Balance: \(CurrencyFormatter.shared.format(usd: usdBalance))")
                 submenu.addItem(item)
             }
 
@@ -827,20 +827,20 @@ extension StatusBarController {
                let usedPercent = chutesMonthlyValue.usedPercent {
                 let item = NSMenuItem()
                 item.view = createDisabledLabelView(
-                    text: String(format: "Monthly Value Used: $%.2f / $%.2f (%.0f%% used)", usedUSD, capUSD, usedPercent)
+                    text: "Monthly Value Used: \(CurrencyFormatter.shared.format(usd: usedUSD)) / \(CurrencyFormatter.shared.format(usd: capUSD)) (\(String(format: "%.0f", usedPercent))% used)"
                 )
                 submenu.addItem(item)
             } else if let capUSD = chutesMonthlyValue.capUSD {
                 let item = NSMenuItem()
                 item.view = createDisabledLabelView(
-                    text: String(format: "Monthly Cap: $%.2f (5× subscription)", capUSD)
+                    text: "Monthly Cap: \(CurrencyFormatter.shared.format(usd: capUSD)) (5× subscription)"
                 )
                 submenu.addItem(item)
             }
 
             if let credits = details.creditsBalance {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "Credits Balance: $%.2f", credits))
+                item.view = createDisabledLabelView(text: "Credits Balance: \(CurrencyFormatter.shared.format(usd: credits))")
                 submenu.addItem(item)
             }
 
@@ -926,7 +926,7 @@ extension StatusBarController {
         if let daily = details.dailyUsage {
             let item = NSMenuItem()
             item.view = createDisabledLabelView(
-                text: String(format: "Daily: $%.2f", daily),
+                text: "Daily: \(CurrencyFormatter.shared.format(usd: daily))",
                 icon: NSImage(systemSymbolName: "calendar", accessibilityDescription: "Daily")
             )
             submenu.addItem(item)
@@ -935,7 +935,7 @@ extension StatusBarController {
         if let weekly = details.weeklyUsage {
             let item = NSMenuItem()
             item.view = createDisabledLabelView(
-                text: String(format: "Weekly: $%.2f", weekly),
+                text: "Weekly: \(CurrencyFormatter.shared.format(usd: weekly))",
                 icon: NSImage(systemSymbolName: "calendar", accessibilityDescription: "Weekly")
             )
             submenu.addItem(item)
@@ -944,7 +944,7 @@ extension StatusBarController {
         if let monthly = details.monthlyUsage, identifier != .grok {
             let item = NSMenuItem()
             item.view = createDisabledLabelView(
-                text: String(format: "Monthly: $%.2f", monthly),
+                text: "Monthly: \(CurrencyFormatter.shared.format(usd: monthly))",
                 icon: NSImage(systemSymbolName: "calendar", accessibilityDescription: "Monthly")
             )
             submenu.addItem(item)
@@ -953,7 +953,7 @@ extension StatusBarController {
         if let remaining = details.remainingCredits {
             let item = NSMenuItem()
             item.view = createDisabledLabelView(
-                text: String(format: "Credits: $%.2f left", remaining),
+                text: "Credits: \(CurrencyFormatter.shared.format(usd: remaining)) left",
                 icon: NSImage(systemSymbolName: "creditcard", accessibilityDescription: "Credits")
             )
             submenu.addItem(item)
@@ -962,7 +962,7 @@ extension StatusBarController {
         if let limit = details.limit, let remaining = details.limitRemaining {
             let item = NSMenuItem()
             item.view = createDisabledLabelView(
-                text: String(format: "Limit: $%.2f / $%.2f", remaining, limit),
+                text: "Limit: \(CurrencyFormatter.shared.format(usd: remaining)) / \(CurrencyFormatter.shared.format(usd: limit))",
                 icon: NSImage(systemSymbolName: "chart.bar", accessibilityDescription: "Limit")
             )
             submenu.addItem(item)
@@ -1249,9 +1249,9 @@ extension StatusBarController {
                 let overageReq = Int(day.billedRequests)
                 let label: String
                 if isToday {
-                    label = String(format: "%@ (Today): %d overage ($%.2f)", dateStr, overageReq, billedAmount)
+                    label = "\(dateStr) (Today): \(overageReq) overage (\(CurrencyFormatter.shared.format(usd: billedAmount)))"
                 } else {
-                    label = String(format: "%@: %d overage ($%.2f)", dateStr, overageReq, billedAmount)
+                    label = "\(dateStr): \(overageReq) overage (\(CurrencyFormatter.shared.format(usd: billedAmount)))"
                 }
 
                 let item = NSMenuItem()
