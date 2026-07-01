@@ -1705,7 +1705,7 @@ final class StatusBarController: NSObject {
                 if let errorMessage, shouldDisplayErrorStateEvenWithResult(errorMessage) {
                     hasPayAsYouGo = true
                     let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                    if item.isEnabled {
+                    if item.isEnabled, item.action == nil {
                         item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
                     }
                     menu.insertItem(item, at: insertIndex)
@@ -1735,7 +1735,7 @@ final class StatusBarController: NSObject {
                     }
                     hasPayAsYouGo = true
                     let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                    if item.isEnabled {
+                    if item.isEnabled, item.action == nil {
                         item.submenu = createErrorSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage)
                     }
                     menu.insertItem(item, at: insertIndex)
@@ -2011,7 +2011,7 @@ final class StatusBarController: NSObject {
                shouldDisplayErrorStateEvenWithResult(errorMessage, identifier: identifier, result: result) {
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                if item.isEnabled {
+                if item.isEnabled, item.action == nil {
                     item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
                 }
                 menu.insertItem(item, at: insertIndex)
@@ -2284,7 +2284,7 @@ final class StatusBarController: NSObject {
                 }
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                if item.isEnabled {
+                if item.isEnabled, item.action == nil {
                     item.submenu = createErrorSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage)
                 }
                 let status = errorMenuStatus(for: errorMessage)
@@ -2315,7 +2315,7 @@ final class StatusBarController: NSObject {
                shouldDisplayErrorStateEvenWithResult(geminiError, identifier: .geminiCLI, result: geminiResult) {
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: geminiError)
-                if item.isEnabled {
+                if item.isEnabled, item.action == nil {
                     item.submenu = createErrorSubmenu(identifier: .geminiCLI, result: geminiResult, errorMessage: geminiError)
                 }
                 menu.insertItem(item, at: insertIndex)
@@ -2367,7 +2367,7 @@ final class StatusBarController: NSObject {
                 if shouldDisplayErrorMenuItem(errorMessage) {
                     hasQuota = true
                     let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: errorMessage)
-                    if item.isEnabled {
+                    if item.isEnabled, item.action == nil {
                         item.submenu = createErrorSubmenu(identifier: .geminiCLI, result: nil, errorMessage: errorMessage)
                     }
                     let status = errorMenuStatus(for: errorMessage)
@@ -2783,7 +2783,8 @@ final class StatusBarController: NSObject {
         var shouldDisplayInList: Bool {
             switch self {
             case .noCredentials:
-                return false
+                // 未配置 provider 显示为「点击配置」入口，而不是隐藏
+                return true
             case .rateLimited, .noSubscription, .error:
                 return true
             }
@@ -2811,6 +2812,26 @@ final class StatusBarController: NSObject {
             return .noCredentials
         }
         return .error
+    }
+
+    /// Filters provider errors to only those worth showing in the error-report alert.
+    /// Unconfigured-provider messages (auth missing, no subscription) are not "real" errors.
+    nonisolated static func reportableErrors(
+        from errors: [ProviderIdentifier: String]
+    ) -> [ProviderIdentifier: String] {
+        errors.filter { _, message in
+            let lowercased = message.lowercased()
+            let isNoCredentials = [
+                "authentication failed",
+                "not found",
+                "not available",
+                "access token",
+                "api key",
+                "credentials"
+            ].contains { lowercased.contains($0) }
+            let isNoSubscription = lowercased.contains("subscription")
+            return !isNoCredentials && !isNoSubscription
+        }
     }
 
     private func shouldDisplayErrorStateEvenWithResult(_ errorMessage: String) -> Bool {
@@ -2851,6 +2872,22 @@ final class StatusBarController: NSObject {
 
     private func createErrorMenuItem(identifier: ProviderIdentifier, errorMessage: String) -> NSMenuItem {
         let status = errorMenuStatus(for: errorMessage)
+
+        if status == .noCredentials {
+            let item = NSMenuItem(
+                title: "\(identifier.displayName) · 点击配置",
+                action: #selector(showProviderConfigGuide(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = identifier
+            item.image = tintedImage(iconForProvider(identifier), color: .systemGray)
+            item.isEnabled = true
+            item.tag = 999
+            item.toolTip = "点击配置 \(identifier.displayName)"
+            return item
+        }
+
         let statusText = status.title
         let title = "\(identifier.displayName) (\(statusText))"
 
@@ -2862,6 +2899,53 @@ final class StatusBarController: NSObject {
         item.toolTip = errorMessage
 
         return item
+    }
+
+    @objc private func showProviderConfigGuide(_ sender: NSMenuItem) {
+        guard let identifier = sender.representedObject as? ProviderIdentifier else { return }
+
+        let (fieldName, path) = configInfo(for: identifier)
+
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "配置 \(identifier.displayName)"
+        alert.informativeText = "请在 \(path) 中添加以下字段：\n\n\(fieldName)\n\n示例：\n{\"\(fieldName)\": {\"type\": \"api\", \"key\": \"你的 key\"}}"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "好的")
+        alert.runModal()
+    }
+
+    private func configInfo(for identifier: ProviderIdentifier) -> (fieldName: String, path: String) {
+        switch identifier {
+        case .copilot:
+            return ("github-copilot", "~/.local/share/opencode/auth.json")
+        case .claude:
+            return ("anthropic", "~/.local/share/opencode/auth.json")
+        case .openRouter:
+            return ("openrouter", "~/.local/share/opencode/auth.json")
+        case .openCode:
+            return ("opencode", "~/.local/share/opencode/auth.json")
+        case .openCodeGo:
+            return ("opencode-go", "~/.local/share/opencode/auth.json")
+        case .kimi:
+            return ("kimi-for-coding", "~/.local/share/opencode/auth.json")
+        case .minimaxCodingPlan:
+            return ("minimax-coding-plan", "~/.local/share/opencode/auth.json")
+        case .zaiCodingPlan:
+            return ("zai-coding-plan", "~/.local/share/opencode/auth.json")
+        case .nanoGpt:
+            return ("nano-gpt", "~/.local/share/opencode/auth.json")
+        case .synthetic:
+            return ("synthetic", "~/.local/share/opencode/auth.json")
+        case .chutes:
+            return ("chutes", "~/.local/share/opencode/auth.json")
+        case .codex:
+            return ("OPENAI_API_KEY 或 tokens", "~/.codex/auth.json")
+        case .antigravity:
+            return ("antigravity-accounts.json", "~/.local/share/opencode/")
+        default:
+            return ("对应 provider 的 key 字段", "~/.local/share/opencode/auth.json")
+        }
     }
 
     private func createErrorSubmenu(
@@ -3490,17 +3574,18 @@ final class StatusBarController: NSObject {
     }
     
     private func showErrorDetailsAlert() {
-        guard !lastProviderErrors.isEmpty else {
-            debugLog("showErrorDetailsAlert: no errors to show")
+        let reportable = Self.reportableErrors(from: lastProviderErrors)
+        guard !reportable.isEmpty else {
+            debugLog("showErrorDetailsAlert: no reportable errors to show")
             return
         }
-        
+
         NSApp.activate(ignoringOtherApps: true)
-        
+
         var errorLogText = "Provider Errors:\n"
         errorLogText += String(repeating: "─", count: 40) + "\n\n"
-        
-        for (identifier, errorMessage) in lastProviderErrors.sorted(by: { $0.key.displayName < $1.key.displayName }) {
+
+        for (identifier, errorMessage) in reportable.sorted(by: { $0.key.displayName < $1.key.displayName }) {
             errorLogText += "[\(identifier.displayName)]\n"
             errorLogText += "  \(errorMessage)\n\n"
         }
