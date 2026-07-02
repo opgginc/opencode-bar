@@ -1859,11 +1859,15 @@ final class StatusBarController: NSObject {
         insertIndex += 1
 
          let quotaHeader = NSMenuItem()
+         let totalMonthlyCost = SubscriptionSettingsManager.shared.totalMonthlyCost(
+             inCurrency: CurrencyFormatter.shared.currency,
+             formatter: CurrencyFormatter.shared
+         )
          let subscriptionDisplay = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
              currency: CurrencyFormatter.shared.currency,
              formatter: CurrencyFormatter.shared
          )
-         let quotaTitle = subscriptionDisplay != (CurrencyFormatter.shared.currency == .rmb ? "¥0" : "$0")
+         let quotaTitle = totalMonthlyCost > 0
              ? "额度状态：\(subscriptionDisplay)/月"
              : "额度状态"
          quotaHeader.view = createHeaderView(title: quotaTitle)
@@ -2011,6 +2015,23 @@ final class StatusBarController: NSObject {
 
                 menu.insertItem(quotaItem, at: insertIndex)
                 insertIndex += 1
+            } else if let copilotError = lastProviderErrors[.copilot] {
+                if shouldDisplayErrorMenuItem(copilotError) {
+                    let item = createErrorMenuItem(identifier: .copilot, errorMessage: copilotError)
+                    if item.isEnabled, item.action == nil {
+                        item.submenu = createErrorSubmenu(identifier: .copilot, result: nil, errorMessage: copilotError)
+                    }
+                    let status = errorMenuStatus(for: copilotError)
+                    if status == .noCredentials {
+                        unconfiguredItems.append(item)
+                    } else {
+                        hasQuota = true
+                        menu.insertItem(item, at: insertIndex)
+                        insertIndex += 1
+                    }
+                } else {
+                    debugLog("updateMultiProviderMenu: hiding Copilot quota row because credentials are unavailable")
+                }
             }
 
         let quotaOrder = Self.providerQuotaOrder
@@ -3088,8 +3109,23 @@ final class StatusBarController: NSObject {
         }
 
         if let errorMessage {
-            let rowItem = NSMenuItem(title: "\(title)（错误）", action: nil, keyEquivalent: "")
             let status = errorMenuStatus(for: errorMessage)
+
+            if status == .noCredentials {
+                let rowItem = NSMenuItem(
+                    title: "\(title) · 点击配置",
+                    action: #selector(showProviderConfigGuide(_:)),
+                    keyEquivalent: ""
+                )
+                rowItem.target = self
+                rowItem.representedObject = identifier
+                rowItem.image = tintedImage(iconForProvider(identifier), color: .systemGray)
+                rowItem.isEnabled = true
+                rowItem.toolTip = "点击配置 \(title)"
+                return rowItem
+            }
+
+            let rowItem = NSMenuItem(title: "\(title)（错误）", action: nil, keyEquivalent: "")
             let iconColor: NSColor = status.shouldDisableListItem ? .disabledControlTextColor : .systemOrange
             rowItem.image = tintedImage(iconForProvider(identifier), color: iconColor)
             rowItem.isEnabled = !status.shouldDisableListItem
@@ -4539,6 +4575,20 @@ extension StatusBarController {
 extension StatusBarController {
     var topMenuForTesting: NSMenu? { menu }
     var providerQuotaOrderForTesting: [ProviderIdentifier] { Self.providerQuotaOrder }
+
+    /// Injects provider state and rebuilds the menu for testing.
+    func injectProviderStateForTesting(
+        results: [ProviderIdentifier: ProviderResult] = [:],
+        errors: [ProviderIdentifier: String] = [:],
+        loading: Set<ProviderIdentifier> = [],
+        currentUsage: CopilotUsage? = nil
+    ) {
+        self.providerResults = results
+        self.lastProviderErrors = errors
+        self.loadingProviders = loading
+        self.currentUsage = currentUsage
+        updateMultiProviderMenu()
+    }
 }
 #endif
 

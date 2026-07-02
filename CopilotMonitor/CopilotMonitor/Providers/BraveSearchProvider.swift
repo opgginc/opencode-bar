@@ -1,6 +1,12 @@
 import Foundation
 import os.log
 
+protocol BraveSearchTokenManaging {
+    func getBraveSearchAPIKeyWithSource() -> (key: String, source: String)?
+}
+
+extension TokenManager: BraveSearchTokenManaging {}
+
 private let braveSearchLogger = Logger(subsystem: "com.opencodeproviders", category: "BraveSearchProvider")
 
 private struct BraveLocalState {
@@ -87,7 +93,7 @@ final class BraveSearchProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .braveSearch
     let type: ProviderType = .quotaBased
 
-    private let tokenManager: TokenManager
+    private let tokenManager: BraveSearchTokenManaging
     private let session: URLSession
     private let fileManager = FileManager.default
     private let stateQueue = DispatchQueue(label: "com.opencodeproviders.BraveSearchProvider")
@@ -95,17 +101,12 @@ final class BraveSearchProvider: ProviderProtocol {
     private let defaultMonthlyLimit = 2000
     private let maxEventFilesPerScan = 1500
 
-    init(tokenManager: TokenManager = .shared, session: URLSession = .shared) {
+    init(tokenManager: BraveSearchTokenManaging = TokenManager.shared, session: URLSession = .shared) {
         self.tokenManager = tokenManager
         self.session = session
     }
 
     func fetch() async throws -> ProviderResult {
-        guard let apiKeyInfo = tokenManager.getBraveSearchAPIKeyWithSource() else {
-            throw ProviderError.authenticationFailed("Brave Search API key not available")
-        }
-        let apiKey = apiKeyInfo.key
-
         let mode = currentRefreshMode()
         var state = stateQueue.sync { loadState() }
         state = normalizeMonth(for: state)
@@ -114,9 +115,19 @@ final class BraveSearchProvider: ProviderProtocol {
             state = scanEventDelta(from: state)
         }
 
-        if mode.allowsAPISync && shouldRunAPISync(lastSyncAt: state.lastAPISyncAt) {
+        let apiKeyInfo: (key: String, source: String)?
+        if mode.allowsAPISync {
+            guard let info = tokenManager.getBraveSearchAPIKeyWithSource() else {
+                throw ProviderError.authenticationFailed("Brave Search API key not available")
+            }
+            apiKeyInfo = info
+        } else {
+            apiKeyInfo = nil
+        }
+
+        if let apiKeyInfo, mode.allowsAPISync && shouldRunAPISync(lastSyncAt: state.lastAPISyncAt) {
             do {
-                let snapshot = try await fetchRateLimitSnapshot(apiKey: apiKey)
+                let snapshot = try await fetchRateLimitSnapshot(apiKey: apiKeyInfo.key)
                 state = applyAPISnapshot(snapshot, to: state)
                 braveSearchLogger.info("Brave Search API sync succeeded")
             } catch {
@@ -150,7 +161,7 @@ final class BraveSearchProvider: ProviderProtocol {
             limit: Double(limit),
             limitRemaining: Double(remaining),
             resetPeriod: resetText,
-            authSource: apiKeyInfo.source,
+            authSource: apiKeyInfo?.source,
             authUsageSummary: sourceSummary,
             mcpUsagePercent: mcpUsagePercent
         )
