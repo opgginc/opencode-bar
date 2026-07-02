@@ -130,6 +130,7 @@
 		T99999999999999999999999 /* gemini_response.json in Resources */ = {isa = PBXBuildFile; fileRef = TAAAAAAAAAAAAAAAAAAAAAAA /* gemini_response.json */; };
 		TAVILYAPP111111111111111 /* TavilySearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = TAVILYFILE22222222222222 /* TavilySearchProvider.swift */; };
 		TOKENTESTBF1111111111111 /* TokenManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TOKENTESTFR1111111111111 /* TokenManagerTests.swift */; };
+		SBCCTRLTESTBF111111111 /* StatusBarControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBCCTRLTESTFR111111111 /* StatusBarControllerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -185,6 +186,7 @@
 		94055A7CFB59D90DA90B27A0 /* KeySourceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeySourceTests.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B5F /* ExchangeRateStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExchangeRateStoreTests.swift; sourceTree = "<group>"; };
 		CF11AA22BB33CC44DD55EE04 /* CurrencyFormatterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CurrencyFormatterTests.swift; sourceTree = "<group>"; };
+		SBCCTRLTESTFR111111111 /* StatusBarControllerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StatusBarControllerTests.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B61 /* exchange_rate_success.json */ = {isa = PBXFileReference; includeInIndex = 1; path = exchange_rate_success.json; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B63 /* exchange_rate_error.json */ = {isa = PBXFileReference; includeInIndex = 1; path = exchange_rate_error.json; sourceTree = "<group>"; };
 		9B1085A77EF4A58E5B5EC71B /* CopilotHistoryService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CopilotHistoryService.swift; sourceTree = "<group>"; };
@@ -495,6 +497,7 @@
 				94055A7CFB59D90DA90B27A0 /* KeySourceTests.swift */,
 				A1B2C3D4E5F60718293A4B5F /* ExchangeRateStoreTests.swift */,
 				CF11AA22BB33CC44DD55EE04 /* CurrencyFormatterTests.swift */,
+				SBCCTRLTESTFR111111111 /* StatusBarControllerTests.swift */,
 				36C2B344956C6CBB5D2AA5E3 /* TavilySearchProviderTests.swift */,
 				8F0ECB3B429456A48F1A4E69 /* SearchEngineTitleTests.swift */,
 				7A255270920EBB45B5176EFA /* TavilyLiveIntegrationTests.swift */,
@@ -778,6 +781,7 @@
 				11DD5CEEB9FA083728D151DD /* TavilyLiveIntegrationTests.swift in Sources */,
 				A1B2C3D4E5F60718293A4B5E /* ExchangeRateStoreTests.swift in Sources */,
 				CF11AA22BB33CC44DD55EE03 /* CurrencyFormatterTests.swift in Sources */,
+				SBCCTRLTESTBF111111111 /* StatusBarControllerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

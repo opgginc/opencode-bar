@@ -89,6 +89,8 @@ final class StatusBarController: NSObject {
     private var onlyShowProviderMenu: NSMenu!
     private var criticalBadgeMenuItem: NSMenuItem!
     private var showProviderNameMenuItem: NSMenuItem!
+    private var settingsMenuItem: NSMenuItem!
+    private var settingsSubmenu: NSMenu!
     private var refreshTimer: Timer?
     private var initialRefreshTask: Task<Void, Never>?
     private var isMainMenuTracking = false
@@ -404,10 +406,10 @@ final class StatusBarController: NSObject {
         refreshItem.target = self
         menu.addItem(refreshItem)
 
-        let checkForUpdatesItem = NSMenuItem(title: "检查更新…", action: #selector(AppDelegate.checkForUpdates), keyEquivalent: "u")
-        checkForUpdatesItem.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: "Check for Updates")
-        checkForUpdatesItem.target = NSApp.delegate
-        menu.addItem(checkForUpdatesItem)
+        // 设置 ▶
+        settingsMenuItem = NSMenuItem(title: "设置", action: nil, keyEquivalent: "")
+        settingsMenuItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
+        settingsSubmenu = NSMenu()
 
         let refreshIntervalItem = NSMenuItem(title: "自动刷新", action: nil, keyEquivalent: "")
         refreshIntervalItem.image = NSImage(systemSymbolName: "timer", accessibilityDescription: "Auto Refresh")
@@ -419,7 +421,7 @@ final class StatusBarController: NSObject {
             refreshIntervalMenu.addItem(item)
         }
         refreshIntervalItem.submenu = refreshIntervalMenu
-        menu.addItem(refreshIntervalItem)
+        settingsSubmenu.addItem(refreshIntervalItem)
         updateRefreshIntervalMenu()
 
         let statusBarOptionsItem = NSMenuItem(title: "状态栏选项", action: nil, keyEquivalent: "")
@@ -484,8 +486,51 @@ final class StatusBarController: NSObject {
         statusBarOptionsMenu.addItem(buildCurrencyMenu())
 
         statusBarOptionsItem.submenu = statusBarOptionsMenu
-        menu.addItem(statusBarOptionsItem)
+        settingsSubmenu.addItem(statusBarOptionsItem)
         updateStatusBarDisplayMenuState()
+
+        launchAtLoginItem = NSMenuItem(title: "开机启动", action: #selector(launchAtLoginClicked), keyEquivalent: "")
+        launchAtLoginItem.image = NSImage(systemSymbolName: "power", accessibilityDescription: "Launch at Login")
+        launchAtLoginItem.target = self
+        updateLaunchAtLoginState()
+        settingsSubmenu.addItem(launchAtLoginItem)
+
+        installCLIItem = NSMenuItem(title: "安装命令行工具 (opencodebar)", action: #selector(installCLIClicked), keyEquivalent: "")
+        installCLIItem.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "Install CLI")
+        installCLIItem.target = self
+        settingsSubmenu.addItem(installCLIItem)
+        updateCLIInstallState()
+
+        let shareSnapshotItem = NSMenuItem(title: "分享用量快照…", action: #selector(shareUsageSnapshotClicked), keyEquivalent: "")
+        shareSnapshotItem.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Share Usage Snapshot")
+        shareSnapshotItem.target = self
+        settingsSubmenu.addItem(shareSnapshotItem)
+        debugLog("setupMenu: Share Usage Snapshot menu item added")
+
+        let checkForUpdatesItem = NSMenuItem(title: "检查更新…", action: #selector(AppDelegate.checkForUpdates), keyEquivalent: "u")
+        checkForUpdatesItem.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: "Check for Updates")
+        checkForUpdatesItem.target = NSApp.delegate
+        settingsSubmenu.addItem(checkForUpdatesItem)
+
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        let versionItem = NSMenuItem(title: "Token King v\(version)", action: #selector(openGitHub), keyEquivalent: "")
+        versionItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Version")
+        versionItem.target = self
+        settingsSubmenu.addItem(versionItem)
+
+        let quitItem = NSMenuItem(title: "退出", action: #selector(quitClicked), keyEquivalent: "q")
+        quitItem.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Quit")
+        quitItem.target = self
+        settingsSubmenu.addItem(quitItem)
+
+        viewErrorDetailsItem = NSMenuItem(title: "查看错误详情…", action: #selector(viewErrorDetailsClicked), keyEquivalent: "e")
+        viewErrorDetailsItem.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "View Error Details")
+        viewErrorDetailsItem.target = self
+        viewErrorDetailsItem.isHidden = true
+        settingsSubmenu.addItem(viewErrorDetailsItem)
+
+        settingsMenuItem.submenu = settingsSubmenu
+        menu.addItem(settingsMenuItem)
 
         predictionPeriodMenu = NSMenu()
         for period in PredictionPeriod.allCases {
@@ -496,50 +541,12 @@ final class StatusBarController: NSObject {
         }
         updatePredictionPeriodMenu()
 
+        // 这条分隔线是 updateMultiProviderMenu() 定位动态区起点的锚，必须保留。
         menu.addItem(NSMenuItem.separator())
 
-        launchAtLoginItem = NSMenuItem(title: "开机启动", action: #selector(launchAtLoginClicked), keyEquivalent: "")
-        launchAtLoginItem.image = NSImage(systemSymbolName: "power", accessibilityDescription: "Launch at Login")
-        launchAtLoginItem.target = self
-        updateLaunchAtLoginState()
-        menu.addItem(launchAtLoginItem)
-
-        installCLIItem = NSMenuItem(title: "安装命令行工具 (opencodebar)", action: #selector(installCLIClicked), keyEquivalent: "")
-        installCLIItem.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "Install CLI")
-        installCLIItem.target = self
-        menu.addItem(installCLIItem)
-        updateCLIInstallState()
-
-        let shareSnapshotItem = NSMenuItem(title: "分享用量快照…", action: #selector(shareUsageSnapshotClicked), keyEquivalent: "")
-        shareSnapshotItem.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Share Usage Snapshot")
-        shareSnapshotItem.target = self
-        menu.addItem(shareSnapshotItem)
-        debugLog("setupMenu: Share Usage Snapshot menu item added")
-
-        menu.addItem(NSMenuItem.separator())
-
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
-        let versionItem = NSMenuItem(title: "Token King v\(version)", action: #selector(openGitHub), keyEquivalent: "")
-        versionItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Version")
-        versionItem.target = self
-        menu.addItem(versionItem)
-
-         let quitItem = NSMenuItem(title: "退出", action: #selector(quitClicked), keyEquivalent: "q")
-         quitItem.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Quit")
-         quitItem.target = self
-         menu.addItem(quitItem)
-         
-         menu.addItem(NSMenuItem.separator())
-         
-         viewErrorDetailsItem = NSMenuItem(title: "查看错误详情…", action: #selector(viewErrorDetailsClicked), keyEquivalent: "e")
-         viewErrorDetailsItem.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "View Error Details")
-         viewErrorDetailsItem.target = self
-         viewErrorDetailsItem.isHidden = true
-         menu.addItem(viewErrorDetailsItem)
-         
-         statusItem?.menu = menu
-         logMenuStructure()
-     }
+        statusItem?.menu = menu
+        logMenuStructure()
+    }
 
     /// Attach the existing menu to an external NSStatusItem (for MenuBarExtraAccess bridge)
     func attachTo(_ statusItem: NSStatusItem) {
@@ -4480,3 +4487,9 @@ extension StatusBarController {
         debugLog("[🎬 DemoMode] Menu rebuilt with demo data")
     }
 }
+
+#if DEBUG
+extension StatusBarController {
+    var topMenuForTesting: NSMenu? { menu }
+}
+#endif
