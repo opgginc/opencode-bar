@@ -264,7 +264,7 @@ extension StatusBarController {
 
                     let limitItem = NSMenuItem()
                     limitItem.view = createDisabledLabelView(
-                        text: "上限：\(CurrencyFormatter.shared.format(usd: limitUSD))/m"
+                        text: "上限：\(CurrencyFormatter.shared.format(usd: limitUSD))/月"
                     )
                     submenu.addItem(limitItem)
 
@@ -1187,14 +1187,8 @@ extension StatusBarController {
         submenu.addItem(noneItem)
 
         for preset in presets {
-            let priceText: String
-            if CurrencyFormatter.shared.currency == .rmb, let cny = preset.cnyCost {
-                priceText = "¥\(Int(cny))"
-            } else {
-                priceText = CurrencyFormatter.shared.format(usd: preset.cost, decimals: 0)
-            }
             let item = NSMenuItem(
-                title: "\(preset.name) (\(priceText)/月)",
+                title: "\(preset.name) (\(preset.formattedPrice(decimals: 0))/月)",
                 action: #selector(subscriptionPlanSelected(_:)),
                 keyEquivalent: ""
             )

@@ -94,6 +94,13 @@ struct SubscriptionPreset {
     let name: String
     let cost: Double          // USD，ROI 计算唯一真值
     var cnyCost: Double? = nil // 国内套餐人民币原生价，仅展示用
+
+    func formattedPrice(decimals: Int = 0) -> String {
+        if CurrencyFormatter.shared.currency == .rmb, let cny = cnyCost {
+            return "¥\(Int(cny))"
+        }
+        return CurrencyFormatter.shared.format(usd: cost, decimals: decimals)
+    }
 }
 
 struct ProviderSubscriptionPresets {
@@ -325,6 +332,28 @@ final class SubscriptionSettingsManager {
         return total
     }
 
+    /// Monthly subscription total expressed in the requested currency.
+    /// RMB uses native cnyCost when available; otherwise falls back to USD × rate.
+    func totalMonthlyCost(inCurrency currency: Currency, formatter: CurrencyFormatter) -> Double {
+        getAllSubscriptionKeys().reduce(0) { $0 + monthlyCost(forKey: $1, inCurrency: currency, formatter: formatter) }
+    }
+
+    /// Formatted monthly subscription total, ready for UI display.
+    func totalMonthlyCostDisplayText(currency: Currency, formatter: CurrencyFormatter) -> String {
+        let total = totalMonthlyCost(inCurrency: currency, formatter: formatter)
+        return formatter.format(amount: total, as: currency, decimals: 0)
+    }
+
+    func monthlyCost(forKey key: String, inCurrency currency: Currency, formatter: CurrencyFormatter) -> Double {
+        let plan = getPlan(forKey: key)
+        switch currency {
+        case .usd:
+            return plan.cost
+        case .rmb:
+            return cnyCost(for: plan, key: key) ?? (plan.cost * formatter.currentRate)
+        }
+    }
+
     func hasAnySubscription() -> Bool {
         for key in getAllSubscriptionKeys() {
             if getPlan(forKey: key).isSet {
@@ -340,6 +369,22 @@ final class SubscriptionSettingsManager {
             return Self.defaultAccountId
         }
         return accountId.lowercased()
+    }
+
+    private func providerIdentifier(for subscriptionKey: String) -> ProviderIdentifier? {
+        let prefix = subscriptionKey.split(separator: ".", maxSplits: 1).first
+        guard let prefix else { return nil }
+        return ProviderIdentifier(rawValue: String(prefix))
+    }
+
+    private func cnyCost(for plan: SubscriptionPlan, key: String) -> Double? {
+        switch plan {
+        case .preset(let name, _):
+            guard let provider = providerIdentifier(for: key) else { return nil }
+            return ProviderSubscriptionPresets.presets(for: provider).first { $0.name == name }?.cnyCost
+        case .custom, .none:
+            return nil
+        }
     }
 
     private func isCurrentSubscriptionKey(_ key: String) -> Bool {

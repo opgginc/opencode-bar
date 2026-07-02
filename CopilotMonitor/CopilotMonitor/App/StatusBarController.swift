@@ -741,6 +741,7 @@ final class StatusBarController: NSObject {
         updateStatusBarText()
         refreshClicked()
         updateCurrencyMenuState()
+        updateMultiProviderMenu()
     }
 
     private func restartRefreshTimer() {
@@ -917,9 +918,11 @@ final class StatusBarController: NSObject {
     }
 
     private func calculateTotalWithSubscriptions(providerResults: [ProviderIdentifier: ProviderResult], copilotUsage: CopilotUsage?) -> Double {
-        let payAsYouGo = calculatePayAsYouGoTotal(providerResults: providerResults, copilotUsage: copilotUsage)
-        let subscriptions = SubscriptionSettingsManager.shared.getTotalMonthlySubscriptionCost()
-        return payAsYouGo + subscriptions
+        let payAsYouGoUSD = calculatePayAsYouGoTotal(providerResults: providerResults, copilotUsage: copilotUsage)
+        let currency = CurrencyFormatter.shared.currency
+        let payAsYouGoInCurrency = payAsYouGoUSD * (currency == .rmb ? CurrencyFormatter.shared.currentRate : 1.0)
+        let subscriptionsInCurrency = SubscriptionSettingsManager.shared.totalMonthlyCost(inCurrency: currency, formatter: CurrencyFormatter.shared)
+        return payAsYouGoInCurrency + subscriptionsInCurrency
     }
 
     private struct AlertProviderCandidate {
@@ -931,11 +934,15 @@ final class StatusBarController: NSObject {
         CurrencyFormatter.shared.format(usd: cost)
     }
 
+    private func formatCurrencyAmountForStatusBar(_ amount: Double) -> String {
+        CurrencyFormatter.shared.format(amount: amount, as: CurrencyFormatter.shared.currency)
+    }
+
     private func formatCostOrStatusBarBrand(_ cost: Double) -> String {
         if cost <= 0 {
             return "TK"
         }
-        return formatCostForStatusBar(cost)
+        return formatCurrencyAmountForStatusBar(cost)
     }
 
     private func selectedPinnedProvider() -> ProviderIdentifier? {
@@ -1429,7 +1436,7 @@ final class StatusBarController: NSObject {
             statusBarIconView?.updateIconOnly()
         case .totalCost:
             let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
-            debugLog("updateStatusBarText: mode=Total Cost, value=\(String(format: "$%.2f", totalCost))")
+            debugLog("updateStatusBarText: mode=Total Cost, value=\(formatCurrencyAmountForStatusBar(totalCost))")
             updateStatusBarDisplay(text: formatCostOrStatusBarBrand(totalCost))
         case .onlyShow:
             switch onlyShowMode {
@@ -1447,7 +1454,7 @@ final class StatusBarController: NSObject {
                     updateStatusBarDisplay(text: alertText, provider: alertFirstCandidate.identifier)
                 } else {
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
-                    debugLog("updateStatusBarText: mode=Only Show(Alert First), no critical provider, fallback total=\(String(format: "$%.2f", totalCost))")
+                    debugLog("updateStatusBarText: mode=Only Show(Alert First), no critical provider, fallback total=\(formatCurrencyAmountForStatusBar(totalCost))")
                     updateStatusBarDisplay(text: formatCostOrStatusBarBrand(totalCost))
                 }
             case .pinnedProvider:
@@ -1465,7 +1472,7 @@ final class StatusBarController: NSObject {
                 } else {
                     let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
                     let fallback = formatCostOrStatusBarBrand(totalCost)
-                    debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), missing result for \(provider.displayName), fallback total=\(String(format: "$%.2f", totalCost))")
+                    debugLog("updateStatusBarText: mode=Only Show(Pinned Provider), missing result for \(provider.displayName), fallback total=\(formatCurrencyAmountForStatusBar(totalCost))")
                     updateStatusBarDisplay(text: fallback)
                 }
             case .recentChange:
@@ -1581,6 +1588,7 @@ final class StatusBarController: NSObject {
     private func calculateOrphanedSubscriptions(providerResults: [ProviderIdentifier: ProviderResult]) -> (keys: [String], total: Double) {
         let visibleKeys = collectVisibleSubscriptionKeys(providerResults: providerResults)
         let allKeys = SubscriptionSettingsManager.shared.getAllSubscriptionKeys()
+        let currency = CurrencyFormatter.shared.currency
 
         var orphaned: [String] = []
         var total = 0.0
@@ -1616,7 +1624,7 @@ final class StatusBarController: NSObject {
                 }
 
                 orphaned.append(key)
-                total += plan.cost
+                total += SubscriptionSettingsManager.shared.monthlyCost(forKey: key, inCurrency: currency, formatter: CurrencyFormatter.shared)
                 continue
             }
 
@@ -1626,15 +1634,15 @@ final class StatusBarController: NSObject {
             }
 
             orphaned.append(key)
-            total += plan.cost
+            total += SubscriptionSettingsManager.shared.monthlyCost(forKey: key, inCurrency: currency, formatter: CurrencyFormatter.shared)
         }
 
         if orphaned.isEmpty {
             debugLog("Orphaned subscriptions: none")
         } else {
-            let formattedTotal = String(format: "%.2f", total)
+            let displayTotal = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(currency: currency, formatter: CurrencyFormatter.shared)
             let sanitizedKeys = orphaned.map { sanitizedSubscriptionKey($0) }.joined(separator: ", ")
-            debugLog("Orphaned subscriptions detected: \(orphaned.count) key(s), total=$\(formattedTotal), keys=[\(sanitizedKeys)]")
+            debugLog("Orphaned subscriptions detected: \(orphaned.count) key(s), total=\(displayTotal), keys=[\(sanitizedKeys)]")
         }
 
         return (orphaned, total)
@@ -1693,8 +1701,7 @@ final class StatusBarController: NSObject {
          insertIndex += 1
 
           let payAsYouGoTotal = calculatePayAsYouGoTotal(providerResults: providerResults, copilotUsage: currentUsage)
-          let subscriptionTotal = SubscriptionSettingsManager.shared.getTotalMonthlySubscriptionCost()
-          
+
           let payAsYouGoHeader = NSMenuItem()
           payAsYouGoHeader.view = createHeaderView(title: "按量付费：\(CurrencyFormatter.shared.format(usd: payAsYouGoTotal))")
           payAsYouGoHeader.tag = 999
@@ -1846,8 +1853,12 @@ final class StatusBarController: NSObject {
         insertIndex += 1
 
          let quotaHeader = NSMenuItem()
-         let quotaTitle = subscriptionTotal > 0
-             ? "额度状态：\(CurrencyFormatter.shared.format(usd: subscriptionTotal, decimals: 0))/m"
+         let subscriptionDisplay = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
+             currency: CurrencyFormatter.shared.currency,
+             formatter: CurrencyFormatter.shared
+         )
+         let quotaTitle = subscriptionDisplay != (CurrencyFormatter.shared.currency == .rmb ? "¥0" : "$0")
+             ? "额度状态：\(subscriptionDisplay)/月"
              : "额度状态"
          quotaHeader.view = createHeaderView(title: quotaTitle)
          quotaHeader.tag = 999
@@ -2434,7 +2445,11 @@ final class StatusBarController: NSObject {
         orphanedSubscriptionKeys = orphaned.keys
         orphanedSubscriptionTotal = orphaned.total
         if orphaned.total > 0 {
-            let title = "Orphaned (\(CurrencyFormatter.shared.format(usd: orphaned.total)))"
+            let displayTotal = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
+                currency: CurrencyFormatter.shared.currency,
+                formatter: CurrencyFormatter.shared
+            )
+            let title = "Orphaned (\(displayTotal))"
             let orphanedItem = NSMenuItem(
                 title: title,
                 action: #selector(confirmResetOrphanedSubscriptions(_:)),
@@ -2456,7 +2471,7 @@ final class StatusBarController: NSObject {
         refreshRecentChangeCandidate()
         updateStatusBarDisplayMenuState()
         updateStatusBarText()
-        debugLog("updateMultiProviderMenu: completed successfully, totalCost=$\(totalCost)")
+        debugLog("updateMultiProviderMenu: completed successfully, totalCost=\(formatCurrencyAmountForStatusBar(totalCost))")
         logMenuStructure()
     }
 
@@ -3533,12 +3548,15 @@ final class StatusBarController: NSObject {
         }
 
         let orphanedCount = keysToReset.count
-        let formattedTotal = String(format: "%.2f", totalToReset)
+        let displayTotal = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
+            currency: CurrencyFormatter.shared.currency,
+            formatter: CurrencyFormatter.shared
+        )
         let sanitizedKeys = keysToReset.map { sanitizedSubscriptionKey($0) }.joined(separator: ", ")
-        debugLog("confirmResetOrphanedSubscriptions: \(orphanedCount) key(s) pending, total=$\(formattedTotal), keys=[\(sanitizedKeys)]")
+        debugLog("confirmResetOrphanedSubscriptions: \(orphanedCount) key(s) pending, total=\(displayTotal), keys=[\(sanitizedKeys)]")
 
         let entryLabel = orphanedCount == 1 ? "entry" : "entries"
-        let detailText = "This will delete \(orphanedCount) stored subscription \(entryLabel) that no longer match any detected account or provider. This can happen after refactors, account removal, or auth changes. Total to clear: $\(formattedTotal)."
+        let detailText = "This will delete \(orphanedCount) stored subscription \(entryLabel) that no longer match any detected account or provider. This can happen after refactors, account removal, or auth changes. Total to clear: \(displayTotal)."
 
         NSApp.activate(ignoringOtherApps: true)
 
@@ -3564,10 +3582,13 @@ final class StatusBarController: NSObject {
         }
 
         let orphanedCount = keys.count
-        let formattedTotal = String(format: "%.2f", expectedTotal)
+        let displayTotal = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
+            currency: CurrencyFormatter.shared.currency,
+            formatter: CurrencyFormatter.shared
+        )
         let sanitizedKeys = keys.map { sanitizedSubscriptionKey($0) }.joined(separator: ", ")
-        debugLog("resetOrphanedSubscriptions: resetting \(orphanedCount) key(s), total=$\(formattedTotal), keys=[\(sanitizedKeys)]")
-        logger.info("Resetting orphaned subscription entries: count=\(orphanedCount), total=$\(formattedTotal)")
+        debugLog("resetOrphanedSubscriptions: resetting \(orphanedCount) key(s), total=\(displayTotal), keys=[\(sanitizedKeys)]")
+        logger.info("Resetting orphaned subscription entries: count=\(orphanedCount), total=\(displayTotal, privacy: .public)")
 
         SubscriptionSettingsManager.shared.removePlans(forKeys: keys)
 
@@ -3664,21 +3685,28 @@ final class StatusBarController: NSObject {
             return nil
         }
 
-        let totalTracked = calculateTotalWithSubscriptions(
+        let currency = CurrencyFormatter.shared.currency
+        let rate = CurrencyFormatter.shared.currentRate
+        let payAsYouGoUSD = calculatePayAsYouGoTotal(
             providerResults: providerResults,
             copilotUsage: currentUsage
         )
-        let payAsYouGoTotal = calculatePayAsYouGoTotal(
-            providerResults: providerResults,
-            copilotUsage: currentUsage
+        let payAsYouGoInCurrency = payAsYouGoUSD * (currency == .rmb ? rate : 1.0)
+        let subscriptionInCurrency = SubscriptionSettingsManager.shared.totalMonthlyCost(
+            inCurrency: currency,
+            formatter: CurrencyFormatter.shared
         )
-        let subscriptionTotal = SubscriptionSettingsManager.shared.getTotalMonthlySubscriptionCost()
+        let totalTracked = payAsYouGoInCurrency + subscriptionInCurrency
+        let subscriptionDisplay = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
+            currency: currency,
+            formatter: CurrencyFormatter.shared
+        )
 
         var lines = [
             "我的 Token King 用量快照",
-            "- 本月累计追踪：\(CurrencyFormatter.shared.format(usd: totalTracked))",
-            "- 按量付费支出：\(CurrencyFormatter.shared.format(usd: payAsYouGoTotal))",
-            "- 额度订阅：\(CurrencyFormatter.shared.format(usd: subscriptionTotal))/m"
+            "- 本月累计追踪：\(CurrencyFormatter.shared.format(amount: totalTracked, as: currency))",
+            "- 按量付费支出：\(CurrencyFormatter.shared.format(amount: payAsYouGoInCurrency, as: currency))",
+            "- 额度订阅：\(subscriptionDisplay)/月"
         ]
 
         if let topPayAsYouGo = topPayAsYouGoShareLine() {
