@@ -248,6 +248,86 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertEqual(auth.openai?.multiAccount, true)
     }
 
+    func testMiniMaxLegacyCodingPlanKeyFeedsCNProvider() throws {
+        // Existing users only have `minimax-coding-plan`, which is a CN-valid key.
+        // The CN provider should read it via fallback; the global provider should not.
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let authDirectory = tempDirectory.appendingPathComponent("opencode", isDirectory: true)
+        let authPath = authDirectory.appendingPathComponent("auth.json")
+
+        try fileManager.createDirectory(at: authDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let originalXDGDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
+        defer {
+            if let originalXDGDataHome {
+                setenv("XDG_DATA_HOME", originalXDGDataHome, 1)
+            } else {
+                unsetenv("XDG_DATA_HOME")
+            }
+            TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+        }
+
+        let json = """
+        {
+          "minimax-coding-plan": {
+            "type": "api",
+            "key": "legacy-cn-key"
+          }
+        }
+        """
+        try XCTUnwrap(json.data(using: .utf8)).write(to: authPath)
+
+        setenv("XDG_DATA_HOME", tempDirectory.path, 1)
+        TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+
+        XCTAssertEqual(TokenManager.shared.getMiniMaxCodingPlanCNAPIKey(), "legacy-cn-key")
+        XCTAssertNil(TokenManager.shared.getMiniMaxCodingPlanAPIKey())
+    }
+
+    func testMiniMaxGlobalKeyIsIsolatedFromCNKey() throws {
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let authDirectory = tempDirectory.appendingPathComponent("opencode", isDirectory: true)
+        let authPath = authDirectory.appendingPathComponent("auth.json")
+
+        try fileManager.createDirectory(at: authDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let originalXDGDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
+        defer {
+            if let originalXDGDataHome {
+                setenv("XDG_DATA_HOME", originalXDGDataHome, 1)
+            } else {
+                unsetenv("XDG_DATA_HOME")
+            }
+            TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+        }
+
+        let json = """
+        {
+          "minimax-coding-plan-global": {
+            "type": "api",
+            "key": "global-key"
+          },
+          "minimax-coding-plan-cn": {
+            "type": "api",
+            "key": "cn-key"
+          }
+        }
+        """
+        try XCTUnwrap(json.data(using: .utf8)).write(to: authPath)
+
+        setenv("XDG_DATA_HOME", tempDirectory.path, 1)
+        TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+
+        XCTAssertEqual(TokenManager.shared.getMiniMaxCodingPlanAPIKey(), "global-key")
+        XCTAssertEqual(TokenManager.shared.getMiniMaxCodingPlanCNAPIKey(), "cn-key")
+    }
+
     func testReadClaudeAnthropicAuthFilesIncludesDisabledAccounts() throws {
         let fileManager = FileManager.default
         let tempDirectory = fileManager.temporaryDirectory

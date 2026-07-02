@@ -223,6 +223,7 @@ struct OpenCodeAuth: Codable {
     let kimiForCodingCN: APIKey?
     let minimaxCodingPlan: APIKey?
     let minimaxCodingPlanCN: APIKey?
+    let minimaxCodingPlanGlobal: APIKey?
     let zaiCodingPlan: APIKey?
     let nanoGpt: APIKey?
     let synthetic: APIKey?
@@ -236,6 +237,7 @@ struct OpenCodeAuth: Codable {
         case kimiForCodingCN = "kimi-for-coding-cn"
         case minimaxCodingPlan = "minimax-coding-plan"
         case minimaxCodingPlanCN = "minimax-coding-plan-cn"
+        case minimaxCodingPlanGlobal = "minimax-coding-plan-global"
         case zaiCodingPlan = "zai-coding-plan"
         case nanoGpt = "nano-gpt"
     }
@@ -252,6 +254,7 @@ struct OpenCodeAuth: Codable {
         kimiForCodingCN: APIKey?,
         minimaxCodingPlan: APIKey?,
         minimaxCodingPlanCN: APIKey? = nil,
+        minimaxCodingPlanGlobal: APIKey? = nil,
         zaiCodingPlan: APIKey?,
         nanoGpt: APIKey?,
         synthetic: APIKey?,
@@ -268,6 +271,7 @@ struct OpenCodeAuth: Codable {
         self.kimiForCodingCN = kimiForCodingCN
         self.minimaxCodingPlan = minimaxCodingPlan
         self.minimaxCodingPlanCN = minimaxCodingPlanCN
+        self.minimaxCodingPlanGlobal = minimaxCodingPlanGlobal
         self.zaiCodingPlan = zaiCodingPlan
         self.nanoGpt = nanoGpt
         self.synthetic = synthetic
@@ -290,6 +294,7 @@ struct OpenCodeAuth: Codable {
         kimiForCodingCN = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .kimiForCodingCN)
         minimaxCodingPlan = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .minimaxCodingPlan)
         minimaxCodingPlanCN = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .minimaxCodingPlanCN)
+        minimaxCodingPlanGlobal = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .minimaxCodingPlanGlobal)
         zaiCodingPlan = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .zaiCodingPlan)
         nanoGpt = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .nanoGpt)
         synthetic = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .synthetic)
@@ -306,6 +311,7 @@ struct OpenCodeAuth: Codable {
            kimiForCodingCN == nil,
            minimaxCodingPlan == nil,
            minimaxCodingPlanCN == nil,
+           minimaxCodingPlanGlobal == nil,
            zaiCodingPlan == nil,
            nanoGpt == nil,
            synthetic == nil,
@@ -4200,12 +4206,12 @@ final class TokenManager: @unchecked Sendable {
 
     func getMiniMaxCodingPlanAPIKey() -> String? {
         guard let auth = readOpenCodeAuth() else { return nil }
-        return auth.minimaxCodingPlan?.key
+        return auth.minimaxCodingPlanGlobal?.key
     }
 
     func getMiniMaxCodingPlanCNAPIKey() -> String? {
         guard let auth = readOpenCodeAuth() else { return nil }
-        return auth.minimaxCodingPlanCN?.key
+        return auth.minimaxCodingPlanCN?.key ?? auth.minimaxCodingPlan?.key
     }
 
     func getZaiCodingPlanAPIKey() -> String? {

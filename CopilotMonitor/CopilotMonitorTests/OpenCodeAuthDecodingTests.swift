@@ -85,6 +85,22 @@ final class OpenCodeAuthDecodingTests: XCTestCase {
         XCTAssertEqual(auth.minimaxCodingPlanCN?.key, "minimax-cn-test-key")
     }
 
+    func testMiniMaxCodingPlanGlobalAPIKeyDecodes() throws {
+        let json = """
+        {
+            "minimax-coding-plan-global": {
+                "type": "api",
+                "key": "minimax-global-test-key"
+            }
+        }
+        """
+
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let auth = try JSONDecoder().decode(OpenCodeAuth.self, from: data)
+
+        XCTAssertEqual(auth.minimaxCodingPlanGlobal?.key, "minimax-global-test-key")
+    }
+
     func testOAuthDecodesWithFlexibleExpiresAndAccountIdTypes() throws {
         let json = """
         {

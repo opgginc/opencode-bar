@@ -2949,7 +2949,7 @@ final class StatusBarController: NSObject {
         case .kimiCN:
             return ("kimi-for-coding-cn", "~/.local/share/opencode/auth.json")
         case .minimaxCodingPlan:
-            return ("minimax-coding-plan", "~/.local/share/opencode/auth.json")
+            return ("minimax-coding-plan-global", "~/.local/share/opencode/auth.json")
         case .minimaxCodingPlanCN:
             return ("minimax-coding-plan-cn", "~/.local/share/opencode/auth.json")
         case .zaiCodingPlan:

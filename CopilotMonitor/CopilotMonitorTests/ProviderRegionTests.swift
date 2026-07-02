@@ -63,6 +63,17 @@ final class ProviderRegionTests: XCTestCase {
         XCTAssertEqual(price, "¥99", "CN preset with cnyCost should show native RMB price")
     }
 
+    func testMiniMaxCNPresetFormattedPriceUsesNativeCNYInRMBMode() {
+        let preset = ProviderSubscriptionPresets.presets(for: .minimaxCodingPlanCN).first { $0.name == "Starter" }
+        XCTAssertNotNil(preset)
+
+        CurrencyFormatter.shared.currency = .rmb
+        defer { CurrencyFormatter.shared.currency = .usd }
+
+        let price = preset!.formattedPrice(decimals: 0)
+        XCTAssertEqual(price, "¥29", "MiniMax CN preset with cnyCost should show native RMB price")
+    }
+
     // MARK: - Migration / Config Preservation
 
     func testOldMiniMaxGlobalSubscriptionKeyIsStillReadable() {
