@@ -2013,24 +2013,7 @@ final class StatusBarController: NSObject {
                 insertIndex += 1
             }
 
-        let quotaOrder: [ProviderIdentifier] = [
-            .claude,
-            .kimi,
-            .kimiCN,
-            .minimaxCodingPlanCN,
-            .minimaxCodingPlan,
-            .openCodeGo,
-            .kiro,
-            .grok,
-            .codex,
-            .commandCode,
-            .cursor,
-            .zaiCodingPlan,
-            .nanoGpt,
-            .antigravity,
-            .chutes,
-            .synthetic
-        ]
+        let quotaOrder = Self.providerQuotaOrder
         for identifier in quotaOrder {
             guard isProviderEnabled(identifier) else { continue }
 
@@ -4555,5 +4538,29 @@ extension StatusBarController {
 #if DEBUG
 extension StatusBarController {
     var topMenuForTesting: NSMenu? { menu }
+    var providerQuotaOrderForTesting: [ProviderIdentifier] { Self.providerQuotaOrder }
 }
 #endif
+
+extension StatusBarController {
+    /// Order in which quota-based providers are inserted into the top-level dynamic menu.
+    /// CN variants must precede their Global counterparts (国内优先).
+    static let providerQuotaOrder: [ProviderIdentifier] = [
+        .claude,
+        .kimiCN,
+        .kimi,
+        .minimaxCodingPlanCN,
+        .minimaxCodingPlan,
+        .openCodeGo,
+        .kiro,
+        .grok,
+        .codex,
+        .commandCode,
+        .cursor,
+        .zaiCodingPlan,
+        .nanoGpt,
+        .antigravity,
+        .chutes,
+        .synthetic
+    ]
+}
