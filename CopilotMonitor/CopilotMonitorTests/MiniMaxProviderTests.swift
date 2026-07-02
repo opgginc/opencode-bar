@@ -53,6 +53,65 @@ final class MiniMaxCNProviderTests: XCTestCase {
         XCTAssertEqual(provider.type, .quotaBased)
     }
 
+    func testCNPlanUsageDerivedFromRemainingPercentWhenCountsAreZero() throws {
+        let responseJSON = """
+        {
+          "model_remains": [
+            {
+              "current_interval_total_count": 0,
+              "current_interval_usage_count": 0,
+              "current_interval_remaining_percent": 87,
+              "current_weekly_remaining_percent": 98,
+              "current_interval_status": 1,
+              "weekly_boost_permille": 1500
+            }
+          ],
+          "base_resp": {
+            "status_code": 0,
+            "status_msg": "success"
+          }
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(MiniMaxCodingPlanResponse.self, from: Data(responseJSON.utf8))
+        let row = try XCTUnwrap(decoded.modelRemains.first)
+        XCTAssertTrue(row.hasQuotaData)
+        XCTAssertEqual(row.fiveHourUsagePercent ?? -1, 13.0, accuracy: 0.001)
+        XCTAssertEqual(row.weeklyUsagePercent ?? -1, 2.0, accuracy: 0.001)
+    }
+
+    func testCNPlanUsageFallsBackToCountBasedCalculation() throws {
+        let responseJSON = """
+        {
+          "model_remains": [
+            {
+              "start_time": 1774587600000,
+              "end_time": 1774605600000,
+              "remains_time": 1715317,
+              "current_interval_total_count": 1500,
+              "current_interval_usage_count": 750,
+              "model_name": "MiniMax-M*",
+              "current_weekly_total_count": 15000,
+              "current_weekly_usage_count": 6000,
+              "weekly_start_time": 1774224000000,
+              "weekly_end_time": 1774828800000,
+              "weekly_remains_time": 224915317
+            }
+          ],
+          "base_resp": {
+            "status_code": 0,
+            "status_msg": "success"
+          }
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(MiniMaxCodingPlanResponse.self, from: Data(responseJSON.utf8))
+        let row = try XCTUnwrap(decoded.modelRemains.first)
+        XCTAssertTrue(row.hasQuotaData)
+        XCTAssertEqual(row.fiveHourUsagePercent ?? -1, 50.0, accuracy: 0.001)
+        XCTAssertEqual(row.weeklyUsagePercent ?? -1, 60.0, accuracy: 0.001)
+    }
+
     func testFetchUsesChinaEndpointOnly() async throws {
         guard TokenManager.shared.getMiniMaxCodingPlanCNAPIKey() != nil else {
             throw XCTSkip("MiniMax Coding Plan CN API key not available; skipping fetch test.")

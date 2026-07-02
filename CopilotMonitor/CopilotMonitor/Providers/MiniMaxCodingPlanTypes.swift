@@ -18,9 +18,11 @@ struct MiniMaxCodingPlanResponse: Decodable {
         let remainsTime: Int64?
         let currentIntervalTotalCount: Int?
         let currentIntervalUsageCount: Int?
+        let currentIntervalRemainingPercent: Int?
         let modelName: String?
         let currentWeeklyTotalCount: Int?
         let currentWeeklyUsageCount: Int?
+        let currentWeeklyRemainingPercent: Int?
         let weeklyStartTime: Int64?
         let weeklyEndTime: Int64?
         let weeklyRemainsTime: Int64?
@@ -31,9 +33,11 @@ struct MiniMaxCodingPlanResponse: Decodable {
             case remainsTime = "remains_time"
             case currentIntervalTotalCount = "current_interval_total_count"
             case currentIntervalUsageCount = "current_interval_usage_count"
+            case currentIntervalRemainingPercent = "current_interval_remaining_percent"
             case modelName = "model_name"
             case currentWeeklyTotalCount = "current_weekly_total_count"
             case currentWeeklyUsageCount = "current_weekly_usage_count"
+            case currentWeeklyRemainingPercent = "current_weekly_remaining_percent"
             case weeklyStartTime = "weekly_start_time"
             case weeklyEndTime = "weekly_end_time"
             case weeklyRemainsTime = "weekly_remains_time"
@@ -46,16 +50,22 @@ struct MiniMaxCodingPlanResponse: Decodable {
             remainsTime = Self.decodeInt64(container, forKey: .remainsTime)
             currentIntervalTotalCount = Self.decodeInt(container, forKey: .currentIntervalTotalCount)
             currentIntervalUsageCount = Self.decodeInt(container, forKey: .currentIntervalUsageCount)
+            currentIntervalRemainingPercent = Self.decodeInt(container, forKey: .currentIntervalRemainingPercent)
             modelName = (try? container.decodeIfPresent(String.self, forKey: .modelName))?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             currentWeeklyTotalCount = Self.decodeInt(container, forKey: .currentWeeklyTotalCount)
             currentWeeklyUsageCount = Self.decodeInt(container, forKey: .currentWeeklyUsageCount)
+            currentWeeklyRemainingPercent = Self.decodeInt(container, forKey: .currentWeeklyRemainingPercent)
             weeklyStartTime = Self.decodeInt64(container, forKey: .weeklyStartTime)
             weeklyEndTime = Self.decodeInt64(container, forKey: .weeklyEndTime)
             weeklyRemainsTime = Self.decodeInt64(container, forKey: .weeklyRemainsTime)
         }
 
         var fiveHourUsagePercent: Double? {
+            if let remainingPercent = currentIntervalRemainingPercent {
+                let used = max(0, min(100, 100 - remainingPercent))
+                return Double(used)
+            }
             guard let total = currentIntervalTotalCount,
                   let remaining = currentIntervalUsageCount,
                   total > 0 else {
@@ -67,6 +77,10 @@ struct MiniMaxCodingPlanResponse: Decodable {
         }
 
         var weeklyUsagePercent: Double? {
+            if let remainingPercent = currentWeeklyRemainingPercent {
+                let used = max(0, min(100, 100 - remainingPercent))
+                return Double(used)
+            }
             guard let total = currentWeeklyTotalCount,
                   let remaining = currentWeeklyUsageCount,
                   total > 0 else {
@@ -78,7 +92,10 @@ struct MiniMaxCodingPlanResponse: Decodable {
         }
 
         var hasQuotaData: Bool {
-            (currentIntervalTotalCount ?? 0) > 0 || (currentWeeklyTotalCount ?? 0) > 0
+            (currentIntervalTotalCount ?? 0) > 0
+                || (currentWeeklyTotalCount ?? 0) > 0
+                || currentIntervalRemainingPercent != nil
+                || currentWeeklyRemainingPercent != nil
         }
 
         var quotaScore: Int {
