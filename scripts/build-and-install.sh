@@ -40,6 +40,22 @@ cp -R "$SRC" "$DST"
 echo "==> Ad-hoc re-signing at final path…"
 codesign --force --deep --sign - "$DST"
 
+echo "==> Cleaning temporary build directory to avoid duplicate Launch Services entries…"
+
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [ -x "$LSREGISTER" ]; then
+  # Unregister the temporary build app before deleting it, then delete.
+  "$LSREGISTER" -u "$SRC" 2>/dev/null || true
+  "$LSREGISTER" -u "${SRC}/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app" 2>/dev/null || true
+fi
+
+rm -rf "$DERIVED"
+
+if [ -x "$LSREGISTER" ]; then
+  # Force-register the final /Applications app.
+  "$LSREGISTER" -f "$DST" 2>/dev/null || true
+fi
+
 echo "==> Verifying…"
 BUNDLE_ID=$(defaults read "$DST/Contents/Info.plist" CFBundleIdentifier)
 echo "    bundle id : $BUNDLE_ID"
