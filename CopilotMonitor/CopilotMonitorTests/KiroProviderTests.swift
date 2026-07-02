@@ -134,14 +134,14 @@ final class KiroProviderTests: XCTestCase {
         Credits (1000.00 of 1000 covered in plan)
         100%
         Overages: Enabled  billed at $0.04 per credit (managed by your organization)
-        Credits used: 1472.94
-        Est. cost: $58.92 USD
+        Credits used: 472.94
+        Est. cost: $18.92 USD
         """#
 
         let usage = try KiroProvider.parseUsageOutput(output)
 
         XCTAssertEqual(usage.totalCredits, 1000, accuracy: 0.001)
-        XCTAssertEqual(usage.usedCredits, 1000, accuracy: 0.001)
+        XCTAssertEqual(usage.usedCredits, 1472.94, accuracy: 0.001)
         XCTAssertEqual(try XCTUnwrap(usage.totalConsumedCredits), 1472.94, accuracy: 0.001)
         XCTAssertEqual(usage.planName, "Pro")
         XCTAssertEqual(usage.overageStatus, "Enabled")

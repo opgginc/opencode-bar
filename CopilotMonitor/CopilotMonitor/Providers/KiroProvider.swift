@@ -284,10 +284,15 @@ final class KiroProvider: ProviderProtocol {
 
         let resolvedTotalCredits = totalCredits ?? planName.flatMap(planCreditTotal)
         // The "Credits (X of Y covered in plan)" line reflects plan-covered consumption.
-        // When overages are enabled, "Credits used:" reports plan + overage combined;
-        // we keep that separate so the UI can show both.
-        let resolvedUsedCredits = coveredUsedCredits ?? explicitUsedCredits ?? percent.flatMap { parsedPercent in
-            resolvedTotalCredits.map { ($0 * parsedPercent) / 100.0 }
+        // The "Credits used:" line reports overage credits beyond the plan.
+        // User-facing total consumption = covered-in-plan + overage.
+        let resolvedUsedCredits: Double?
+        if let covered = coveredUsedCredits, let overage = explicitUsedCredits {
+            resolvedUsedCredits = covered + overage
+        } else {
+            resolvedUsedCredits = coveredUsedCredits ?? explicitUsedCredits ?? percent.flatMap { parsedPercent in
+                resolvedTotalCredits.map { ($0 * parsedPercent) / 100.0 }
+            }
         }
 
         guard let resolvedUsedCredits,
@@ -313,7 +318,7 @@ final class KiroProvider: ProviderProtocol {
             bonusCreditsUsed: bonusCredits.used,
             bonusCreditsTotal: bonusCredits.total,
             bonusExpiryDays: bonusCredits.expiryDays,
-            totalConsumedCredits: explicitUsedCredits
+            totalConsumedCredits: resolvedUsedCredits
         )
     }
 
