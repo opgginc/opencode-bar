@@ -176,8 +176,8 @@ final class KiroProviderTests: XCTestCase {
 
         XCTAssertEqual(snapshot.remainingCredits, 0, accuracy: 0.001)
         XCTAssertEqual(result.usage.totalEntitlement, 100_000)
-        XCTAssertEqual(result.usage.remainingQuota, 0)
-        XCTAssertEqual(result.usage.usagePercentage, 100, accuracy: 0.001)
+        XCTAssertLessThan(try XCTUnwrap(result.usage.remainingQuota), 0)
+        XCTAssertGreaterThan(result.usage.usagePercentage, 100)
         if case .quotaBased(_, _, let overagePermitted) = result.usage {
             XCTAssertTrue(overagePermitted)
         } else {
@@ -185,5 +185,28 @@ final class KiroProviderTests: XCTestCase {
         }
         XCTAssertEqual(try XCTUnwrap(result.details?.creditsRemaining), 0, accuracy: 0.001)
         XCTAssertEqual(try XCTUnwrap(result.details?.monthlyCost), 1_050, accuracy: 0.001)
+    }
+
+    func testMakeResultWithoutOverageStaysWithinLimit() throws {
+        let snapshot = KiroUsageSnapshot(
+            usedCredits: 366,
+            totalCredits: 1_000,
+            planName: "Pro",
+            resetDate: nil,
+            overageStatus: "Disabled",
+            totalConsumedCredits: 366
+        )
+
+        let result = KiroProvider.makeResult(
+            from: snapshot,
+            binaryPath: URL(fileURLWithPath: "/Users/test/.local/bin/kiro-cli")
+        )
+
+        XCTAssertEqual(result.usage.totalEntitlement, 100_000)
+        XCTAssertEqual(result.usage.remainingQuota, 63_400)
+        XCTAssertEqual(result.usage.usagePercentage, 36.6, accuracy: 0.001)
+        XCTAssertTrue(result.usage.isWithinLimit)
+        XCTAssertEqual(try XCTUnwrap(result.details?.creditsRemaining), 634, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(result.details?.monthlyCost), 366, accuracy: 0.001)
     }
 }

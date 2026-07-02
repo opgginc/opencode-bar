@@ -319,14 +319,15 @@ final class KiroProvider: ProviderProtocol {
 
     static func makeResult(from snapshot: KiroUsageSnapshot, binaryPath: URL) -> ProviderResult {
         let scale = 100.0
+        let consumedCredits = snapshot.totalConsumedCredits ?? snapshot.usedCredits
         let entitlement = max(Int((snapshot.totalCredits * scale).rounded()), 1)
-        let remaining = Int((snapshot.remainingCredits * scale).rounded())
+        let remaining = Int(((snapshot.totalCredits - consumedCredits) * scale).rounded())
         let details = DetailedUsage(
             secondaryUsage: bonusUsagePercent(from: snapshot),
             secondaryReset: bonusExpiryDate(from: snapshot),
             primaryReset: snapshot.resetDate,
             planType: snapshot.planName,
-            monthlyCost: snapshot.totalConsumedCredits ?? snapshot.usedCredits,
+            monthlyCost: consumedCredits,
             creditsRemaining: snapshot.remainingCredits,
             creditsTotal: snapshot.totalCredits,
             authSource: "kiro-cli at \(binaryPath.path)"
