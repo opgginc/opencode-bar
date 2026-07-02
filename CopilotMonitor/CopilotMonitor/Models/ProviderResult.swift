@@ -127,6 +127,8 @@ struct DetailedUsage {
     let sonnetReset: Date?
     let opusUsage: Double?
     let opusReset: Date?
+    let fableUsage: Double?
+    let fableReset: Date?
 
     // Generic model breakdown (Gemini, Antigravity)
     let modelBreakdown: [String: Double]?
@@ -241,6 +243,8 @@ struct DetailedUsage {
         sonnetReset: Date? = nil,
         opusUsage: Double? = nil,
         opusReset: Date? = nil,
+        fableUsage: Double? = nil,
+        fableReset: Date? = nil,
         modelBreakdown: [String: Double]? = nil,
         modelResetTimes: [String: Date]? = nil,
         secondaryUsage: Double? = nil,
@@ -322,6 +326,8 @@ struct DetailedUsage {
         self.sonnetReset = sonnetReset
         self.opusUsage = opusUsage
         self.opusReset = opusReset
+        self.fableUsage = fableUsage
+        self.fableReset = fableReset
         self.modelBreakdown = modelBreakdown
         self.modelResetTimes = modelResetTimes
         self.secondaryUsage = secondaryUsage
@@ -394,7 +400,7 @@ extension DetailedUsage: Codable {
         case dailyUsage, weeklyUsage, monthlyUsage, totalCredits, remainingCredits
         case limit, limitRemaining, resetPeriod
         case fiveHourUsage, fiveHourReset, sevenDayUsage, sevenDayReset
-        case sonnetUsage, sonnetReset, opusUsage, opusReset, modelBreakdown, modelResetTimes
+        case sonnetUsage, sonnetReset, opusUsage, opusReset, fableUsage, fableReset, modelBreakdown, modelResetTimes
         case secondaryUsage, secondaryReset, primaryReset
         case codexPrimaryWindowLabel, codexPrimaryWindowHours, codexSecondaryWindowLabel, codexSecondaryWindowHours
         case sparkUsage, sparkReset, sparkSecondaryUsage, sparkSecondaryReset, sparkWindowLabel
@@ -433,6 +439,8 @@ extension DetailedUsage: Codable {
         sonnetReset = try container.decodeIfPresent(Date.self, forKey: .sonnetReset)
         opusUsage = try container.decodeIfPresent(Double.self, forKey: .opusUsage)
         opusReset = try container.decodeIfPresent(Date.self, forKey: .opusReset)
+        fableUsage = try container.decodeIfPresent(Double.self, forKey: .fableUsage)
+        fableReset = try container.decodeIfPresent(Date.self, forKey: .fableReset)
         modelBreakdown = try container.decodeIfPresent([String: Double].self, forKey: .modelBreakdown)
         modelResetTimes = try container.decodeIfPresent([String: Date].self, forKey: .modelResetTimes)
         secondaryUsage = try container.decodeIfPresent(Double.self, forKey: .secondaryUsage)
@@ -517,6 +525,8 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(sonnetReset, forKey: .sonnetReset)
         try container.encodeIfPresent(opusUsage, forKey: .opusUsage)
         try container.encodeIfPresent(opusReset, forKey: .opusReset)
+        try container.encodeIfPresent(fableUsage, forKey: .fableUsage)
+        try container.encodeIfPresent(fableReset, forKey: .fableReset)
         try container.encodeIfPresent(modelBreakdown, forKey: .modelBreakdown)
         try container.encodeIfPresent(modelResetTimes, forKey: .modelResetTimes)
         try container.encodeIfPresent(secondaryUsage, forKey: .secondaryUsage)
@@ -1441,6 +1451,7 @@ extension DetailedUsage {
             || sevenDayUsage != nil || sevenDayReset != nil
             || sonnetUsage != nil || sonnetReset != nil
             || opusUsage != nil || opusReset != nil
+            || fableUsage != nil || fableReset != nil
             || modelBreakdown != nil || modelResetTimes != nil
             || secondaryUsage != nil || secondaryReset != nil || primaryReset != nil
             || sparkUsage != nil || sparkReset != nil || sparkSecondaryUsage != nil || sparkSecondaryReset != nil || sparkWindowLabel != nil

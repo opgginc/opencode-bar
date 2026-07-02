@@ -14,5 +14,40 @@
   "seven_day_opus": null,
   "extra_usage": {
     "is_enabled": false
-  }
+  },
+  "limits": [
+    {
+      "kind": "session",
+      "group": "session",
+      "percent": 23,
+      "severity": "normal",
+      "resets_at": "2026-01-29T20:00:00Z",
+      "scope": null,
+      "is_active": true
+    },
+    {
+      "kind": "weekly_all",
+      "group": "weekly",
+      "percent": 4,
+      "severity": "normal",
+      "resets_at": "2026-02-05T15:00:00Z",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "weekly_scoped",
+      "group": "weekly",
+      "percent": 9,
+      "severity": "normal",
+      "resets_at": "2026-02-05T14:59:59Z",
+      "scope": {
+        "model": {
+          "id": null,
+          "display_name": "Fable"
+        },
+        "surface": null
+      },
+      "is_active": false
+    }
+  ]
 }

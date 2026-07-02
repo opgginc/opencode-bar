@@ -209,7 +209,7 @@ extension StatusBarController {
             }
 
             // === Model Breakdown ===
-            let hasModelBreakdown = details.sonnetUsage != nil || details.opusUsage != nil
+            let hasModelBreakdown = details.sonnetUsage != nil || details.opusUsage != nil || details.fableUsage != nil
             if hasModelBreakdown {
                 submenu.addItem(NSMenuItem.separator())
             }
@@ -242,10 +242,26 @@ extension StatusBarController {
                 )
                 items.forEach { submenu.addItem($0) }
             }
+            if details.sonnetUsage != nil || details.opusUsage != nil, details.fableUsage != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let fable = details.fableUsage {
+                let fableReset = details.fableReset ?? details.sevenDayReset
+                if details.fableReset == nil, fableReset != nil {
+                    debugLog("createDetailSubmenu(claude): Fable reset missing, using Weekly reset fallback")
+                }
+                let items = createUsageWindowRow(
+                    label: "Fable (Weekly)",
+                    usagePercent: fable,
+                    resetDate: fableReset,
+                    windowHours: 168
+                )
+                items.forEach { submenu.addItem($0) }
+            }
 
             // === Extra Usage ===
             if let extraUsageEnabled = details.extraUsageEnabled {
-                if details.sonnetUsage != nil || details.opusUsage != nil {
+                if hasModelBreakdown {
                     submenu.addItem(NSMenuItem.separator())
                 }
                 let statusItem = NSMenuItem()

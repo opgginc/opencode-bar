@@ -72,11 +72,43 @@ struct ClaudeUsageResponse: Codable {
         }
     }
 
+    // Newer model-scoped weekly limits (e.g. Fable) have no dedicated seven_day_* field.
+    // The API only reports them via this `limits` array as kind == "weekly_scoped"
+    // entries, with the model name in scope.model.display_name.
+    struct LimitEntry: Codable {
+        struct Scope: Codable {
+            struct Model: Codable {
+                let id: String?
+                let display_name: String?
+
+                enum CodingKeys: String, CodingKey {
+                    case id
+                    case display_name = "display_name"
+                }
+            }
+
+            let model: Model?
+        }
+
+        let kind: String?
+        let percent: Double?
+        let resets_at: String?
+        let scope: Scope?
+
+        enum CodingKeys: String, CodingKey {
+            case kind
+            case percent
+            case resets_at = "resets_at"
+            case scope
+        }
+    }
+
     let five_hour: UsageWindow?
     let seven_day: UsageWindow?
     let seven_day_sonnet: UsageWindow?
     let seven_day_opus: UsageWindow?
     let extra_usage: ExtraUsage?
+    let limits: [LimitEntry]?
 
     enum CodingKeys: String, CodingKey {
         case five_hour = "five_hour"
@@ -84,6 +116,7 @@ struct ClaudeUsageResponse: Codable {
         case seven_day_sonnet = "seven_day_sonnet"
         case seven_day_opus = "seven_day_opus"
         case extra_usage = "extra_usage"
+        case limits
     }
 }
 
@@ -608,6 +641,15 @@ final class ClaudeProvider: ProviderProtocol {
             let opusUsage = response.seven_day_opus?.utilization
             let opusReset = response.seven_day_opus?.resets_at.flatMap { parseISO8601Date($0) }
 
+            // Fable weekly only exists as a weekly_scoped entry in the limits array,
+            // matched by display name because scope.model.id can be null.
+            let fableLimit = response.limits?.first { limit in
+                limit.kind == "weekly_scoped"
+                    && limit.scope?.model?.display_name?.caseInsensitiveCompare("Fable") == .orderedSame
+            }
+            let fableUsage = fableLimit?.percent
+            let fableReset = fableLimit?.resets_at.flatMap { parseISO8601Date($0) }
+
             let extraUsageEnabled = response.extra_usage?.is_enabled
             let extraUsageMonthlyLimitCredits = response.extra_usage?.monthly_limit
             let extraUsageUsedCredits = response.extra_usage?.used_credits
@@ -617,7 +659,7 @@ final class ClaudeProvider: ProviderProtocol {
             let authUsageSummary = sourceSummary(sourceLabels, fallback: "Unknown")
             let identity = await resolveAccountIdentity(account)
 
-            logger.info("Claude usage fetched (\(authUsageSummary)): 7d=\(utilization)%, 5h=\(fiveHourUsage?.description ?? "N/A")%")
+            logger.info("Claude usage fetched (\(authUsageSummary)): 7d=\(utilization)%, 5h=\(fiveHourUsage?.description ?? "N/A")%, fable7d=\(fableUsage?.description ?? "N/A", privacy: .public)%")
             logger.debug("Claude account identity (\(authUsageSummary)): dedupeKey=\(identity.dedupeKey), accountId=\(identity.accountId ?? "nil"), email=\(identity.email ?? "nil")")
 
             if let extraUsageEnabled {
@@ -643,6 +685,8 @@ final class ClaudeProvider: ProviderProtocol {
                 sonnetReset: sonnetReset,
                 opusUsage: opusUsage,
                 opusReset: opusReset,
+                fableUsage: fableUsage,
+                fableReset: fableReset,
                 extraUsageEnabled: extraUsageEnabled,
                 extraUsageMonthlyLimitUSD: extraUsageMonthlyLimitCredits.map { $0 / 100.0 },
                 extraUsageUsedUSD: extraUsageUsedCredits.map { $0 / 100.0 },

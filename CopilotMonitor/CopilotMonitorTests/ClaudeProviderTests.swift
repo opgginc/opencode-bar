@@ -22,6 +22,36 @@ final class ClaudeProviderTests: XCTestCase {
         XCTAssertEqual(response.seven_day?.utilization, 4.0)
         XCTAssertEqual(response.seven_day?.resets_at, "2026-02-05T15:00:00Z")
     }
+
+    func testClaudeUsageResponseDecodesFableWeeklyScopedLimit() throws {
+        let fixtureData = loadFixture(named: "claude_response.json")
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(ClaudeUsageResponse.self, from: fixtureData)
+
+        let fableLimit = response.limits?.first { limit in
+            limit.kind == "weekly_scoped"
+                && limit.scope?.model?.display_name?.caseInsensitiveCompare("Fable") == .orderedSame
+        }
+
+        XCTAssertNotNil(fableLimit)
+        XCTAssertEqual(fableLimit?.percent, 9.0)
+        XCTAssertEqual(fableLimit?.resets_at, "2026-02-05T14:59:59Z")
+    }
+
+    func testClaudeUsageResponseWithoutLimitsArray() throws {
+        let customResponse = """
+        {
+          "seven_day": {
+            "utilization": 42.0,
+            "resets_at": null
+          }
+        }
+        """
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(ClaudeUsageResponse.self, from: customResponse.data(using: .utf8)!)
+
+        XCTAssertNil(response.limits)
+    }
     
     func testClaudeUsageResponseWithHighUtilization() throws {
         let customResponse = """

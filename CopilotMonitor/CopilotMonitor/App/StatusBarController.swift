@@ -975,6 +975,7 @@ final class StatusBarController: NSObject {
             add(details?.sevenDayUsage, priority: .weekly)
             add(details?.sonnetUsage, priority: .weekly)
             add(details?.opusUsage, priority: .weekly)
+            add(details?.fableUsage, priority: .weekly)
             add(details?.extraUsageUtilizationPercent, priority: .monthly)
             add(details?.fiveHourUsage, priority: .hourly)
         case .kimi:
@@ -1117,6 +1118,7 @@ final class StatusBarController: NSObject {
                     details.sevenDayUsage,
                     details.sonnetUsage,
                     details.opusUsage,
+                    details.fableUsage,
                     details.secondaryUsage,
                     details.sparkUsage,
                     details.sparkSecondaryUsage,
@@ -2093,6 +2095,9 @@ final class StatusBarController: NSObject {
                             if let sonnetUsage = details.sonnetUsage {
                                 percents.append(sonnetUsage)
                             }
+                            if let fableUsage = details.fableUsage {
+                                percents.append(fableUsage)
+                            }
                             usedPercents = percents
                         } else if identifier == .minimaxCodingPlan,
                                   let fiveHour = account.details?.fiveHourUsage,
@@ -2175,6 +2180,9 @@ final class StatusBarController: NSObject {
                         var percents: [Double] = [fiveHour, sevenDay]
                         if let sonnetUsage = details.sonnetUsage {
                             percents.append(sonnetUsage)
+                        }
+                        if let fableUsage = details.fableUsage {
+                            percents.append(fableUsage)
                         }
                         usedPercents = percents
                     } else if identifier == .minimaxCodingPlan,
@@ -4180,6 +4188,8 @@ extension StatusBarController {
                     sonnetReset: sevenDaysFromNow,
                     opusUsage: 95.0,
                     opusReset: sevenDaysFromNow,
+                    fableUsage: 61.0,
+                    fableReset: sevenDaysFromNow,
                     extraUsageEnabled: false,
                     authSource: "OpenCode"
                 )
