@@ -271,18 +271,19 @@ private func dateFromMiniMaxMilliseconds(_ milliseconds: Int64?) -> Date? {
 /// Computes the reset date from MiniMax window fields.
 ///
 /// The API returns both an absolute window end timestamp (`end_time`) and a
-/// relative remaining duration (`remains_time`). Prefer `remains_time` because
-/// it reflects the server-side "time until reset" at response generation time,
-/// which matches what users see in the MiniMax dashboard and avoids small
-/// drift from client/server clock skew. Fall back to the absolute `end_time`
-/// when the relative value is missing or invalid.
+/// relative remaining duration (`remains_time`). Prefer `end_time` because it
+/// is stable and matches the subscription cycle shown in the MiniMax dashboard.
+/// Fall back to `remains_time` when the absolute timestamp is missing or invalid.
 func resetDateFromMiniMaxFields(
     endTime: Int64?,
     remainsTime: Int64?,
     referenceDate: Date = Date()
 ) -> Date? {
+    if let endTime = endTime, endTime > 0 {
+        return dateFromMiniMaxMilliseconds(endTime)
+    }
     if let remainsTime = remainsTime, remainsTime > 0 {
         return referenceDate.addingTimeInterval(TimeInterval(remainsTime) / 1000.0)
     }
-    return dateFromMiniMaxMilliseconds(endTime)
+    return nil
 }

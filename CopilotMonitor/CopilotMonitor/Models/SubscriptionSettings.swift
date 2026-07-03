@@ -124,17 +124,20 @@ struct SubscriptionPreset {
 }
 
 struct ProviderSubscriptionPresets {
+    // MARK: - Per-family catalogs
+
     static let claude: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Pro", cost: 20),
-        SubscriptionPreset(name: "MAX", cost: 100),
-        SubscriptionPreset(name: "MAX", cost: 200)
+        SubscriptionPreset(name: "MAX 5x", cost: 100),
+        SubscriptionPreset(name: "MAX 20x", cost: 200)
     ]
 
     static let codex: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Go", cost: 8),
         SubscriptionPreset(name: "Plus", cost: 20),
-        SubscriptionPreset(name: "Business", cost: 25),
-        SubscriptionPreset(name: "Pro", cost: 200)
+        SubscriptionPreset(name: "Pro", cost: 100),
+        SubscriptionPreset(name: "Pro", cost: 200),
+        SubscriptionPreset(name: "Business", cost: 25)
     ]
 
     static var commandCode: [SubscriptionPreset] {
@@ -163,44 +166,41 @@ struct ProviderSubscriptionPresets {
         SubscriptionPreset(name: "Enterprise", cost: 39)
     ]
 
-    static let kimi: [SubscriptionPreset] = [
-        SubscriptionPreset(name: "Andante",    cost: 0,   cnyCost: 49),   // 纯国内档，无官方海外价
-        SubscriptionPreset(name: "Moderato",   cost: 19,  cnyCost: 99),
-        SubscriptionPreset(name: "Allegretto", cost: 39,  cnyCost: 199),
-        SubscriptionPreset(name: "Allegro",    cost: 99,  cnyCost: 699),
-        SubscriptionPreset(name: "Vivace",     cost: 199)                // 纯海外档，无 cnyCost
+    // Kimi Global: 海外版订阅套餐
+    static let kimiGlobal: [SubscriptionPreset] = [
+        SubscriptionPreset(name: "Moderato",   cost: 19),
+        SubscriptionPreset(name: "Allegretto", cost: 39),
+        SubscriptionPreset(name: "Allegro",    cost: 99),
+        SubscriptionPreset(name: "Vivace",     cost: 199)
     ]
 
-    static let kimiCN: [SubscriptionPreset] = [
+    // Kimi 国内版
+    static let kimiChina: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Andante",    cost: 0,   cnyCost: 49),
         SubscriptionPreset(name: "Moderato",   cost: 19,  cnyCost: 99),
         SubscriptionPreset(name: "Allegretto", cost: 39,  cnyCost: 199),
         SubscriptionPreset(name: "Allegro",    cost: 99,  cnyCost: 699)
     ]
 
-    static let minimaxCodingPlan: [SubscriptionPreset] = [
-        SubscriptionPreset(name: "Starter",  cost: 10),
-        SubscriptionPreset(name: "Plus",     cost: 20),
-        SubscriptionPreset(name: "Max",      cost: 50),
-        SubscriptionPreset(name: "Plus HS",  cost: 40),
-        SubscriptionPreset(name: "Max HS",   cost: 80),
-        SubscriptionPreset(name: "Ultra HS", cost: 150)
+    // MiniMax 海外版
+    static let minimaxGlobal: [SubscriptionPreset] = [
+        SubscriptionPreset(name: "Plus",  cost: 20),
+        SubscriptionPreset(name: "Max",   cost: 50),
+        SubscriptionPreset(name: "Ultra", cost: 120)
     ]
 
-    static let minimaxCodingPlanCN: [SubscriptionPreset] = [
-        SubscriptionPreset(name: "Starter",  cost: 10, cnyCost: 29),
-        SubscriptionPreset(name: "Plus",     cost: 20, cnyCost: 49),
-        SubscriptionPreset(name: "Max",      cost: 50, cnyCost: 119),
-        SubscriptionPreset(name: "Plus HS",  cost: 40, cnyCost: 98),
-        SubscriptionPreset(name: "Max HS",   cost: 80, cnyCost: 199),
-        SubscriptionPreset(name: "Ultra HS", cost: 150, cnyCost: 899)
+    // MiniMax 国内版
+    static let minimaxChina: [SubscriptionPreset] = [
+        SubscriptionPreset(name: "Plus",  cost: 20, cnyCost: 49),
+        SubscriptionPreset(name: "Max",   cost: 50, cnyCost: 119),
+        SubscriptionPreset(name: "Ultra", cost: 120, cnyCost: 469)
     ]
 
     static let antigravity: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Pro", cost: 20)
     ]
 
-    static let zaiCodingPlan: [SubscriptionPreset] = [
+    static let zai: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Lite", cost: 6),
         SubscriptionPreset(name: "Pro", cost: 30),
         SubscriptionPreset(name: "Max", cost: 60)
@@ -239,57 +239,77 @@ struct ProviderSubscriptionPresets {
         SubscriptionPreset(name: "SuperGrok Heavy Discount", cost: 99),
         SubscriptionPreset(name: "SuperGrok Heavy", cost: 300)
     ]
-    static let tavilySearch: [SubscriptionPreset] = []
-    static let braveSearch: [SubscriptionPreset] = []
+    static let tavily: [SubscriptionPreset] = []
+    static let brave: [SubscriptionPreset] = []
+
+    // 新增：MiMo（仅海外 Token Plan）
+    static let mimo: [SubscriptionPreset] = [
+        SubscriptionPreset(name: "Lite",     cost: 6,   cnyCost: 39),
+        SubscriptionPreset(name: "Standard", cost: 16,  cnyCost: 99),
+        SubscriptionPreset(name: "Pro",      cost: 50,  cnyCost: 329),
+        SubscriptionPreset(name: "Max",      cost: 100, cnyCost: 659)
+    ]
+
+    // 新增：火山 Ark（国内 CNY 套餐，USD 为近似折算，用于总费用汇总）
+    private static let volcanoUSDMultiplier = 1.0 / 7.2
+    static let volcanoArk: [SubscriptionPreset] = [
+        SubscriptionPreset(name: "Agent Plan Small",  cost: 40 * volcanoUSDMultiplier, cnyCost: 40),
+        SubscriptionPreset(name: "Agent Plan Medium", cost: 200 * volcanoUSDMultiplier, cnyCost: 200),
+        SubscriptionPreset(name: "Agent Plan Large",  cost: 500 * volcanoUSDMultiplier, cnyCost: 500),
+        SubscriptionPreset(name: "Agent Plan Max",    cost: 1000 * volcanoUSDMultiplier, cnyCost: 1000)
+    ]
+
+    // 新增：腾讯混元 Token Plan（国内 CNY 套餐）
+    private static let hunyuanUSDMultiplier = 1.0 / 7.2
+    static let hunyuan: [SubscriptionPreset] = [
+        SubscriptionPreset(name: "Lite",     cost: 39 * hunyuanUSDMultiplier, cnyCost: 39),
+        SubscriptionPreset(name: "Standard", cost: 99 * hunyuanUSDMultiplier, cnyCost: 99),
+        SubscriptionPreset(name: "Pro",      cost: 299 * hunyuanUSDMultiplier, cnyCost: 299),
+        SubscriptionPreset(name: "Max",      cost: 599 * hunyuanUSDMultiplier, cnyCost: 599)
+    ]
+
+    // 新增：智谱 GLM Coding Plan（国内 CNY 套餐）
+    private static let zhipuUSDMultiplier = 1.0 / 7.2
+    static let zhipuGLM: [SubscriptionPreset] = [
+        SubscriptionPreset(name: "Lite", cost: 49 * zhipuUSDMultiplier, cnyCost: 49),
+        SubscriptionPreset(name: "Pro",  cost: 149 * zhipuUSDMultiplier, cnyCost: 149),
+        SubscriptionPreset(name: "Max",  cost: 469 * zhipuUSDMultiplier, cnyCost: 469)
+    ]
+
+    // MARK: - Lookup
 
     static func presets(for provider: ProviderIdentifier) -> [SubscriptionPreset] {
-        switch provider {
-        case .claude:
-            return claude
-        case .codex:
-            return codex
-        case .commandCode:
-            return commandCode
-        case .cursor:
-            return cursor
-        case .geminiCLI:
-            return geminiCLI
-        case .copilot:
-            return copilot
-        case .kimi:
-            return kimi
-        case .kimiCN:
-            return kimiCN
-        case .minimaxCodingPlan:
-            return minimaxCodingPlan
-        case .minimaxCodingPlanCN:
-            return minimaxCodingPlanCN
-        case .antigravity:
-            return antigravity
-        case .openRouter:
-            return openRouter
-        case .openCode:
-            return openCode
-        case .openCodeZen:
-            return openCodeZen
-        case .openCodeGo:
-            return openCodeGo
-        case .kiro:
-            return kiro
-        case .grok:
-            return grok
-        case .tavilySearch:
-            return tavilySearch
-        case .braveSearch:
-            return braveSearch
-        case .zaiCodingPlan:
-            return zaiCodingPlan
-        case .nanoGpt:
-            return nanoGpt
-        case .synthetic:
-            return synthetic
-        case .chutes:
-            return chutes
+        presets(family: provider.family, region: provider.region)
+    }
+
+    static func presets(family: ProviderFamily, region: ProviderRegion) -> [SubscriptionPreset] {
+        switch (family, region) {
+        case (.claude, _): return claude
+        case (.codex, _): return codex
+        case (.commandCode, _): return commandCode
+        case (.cursor, _): return cursor
+        case (.geminiCLI, _): return geminiCLI
+        case (.copilot, _): return copilot
+        case (.kimi, .china): return kimiChina
+        case (.kimi, .global): return kimiGlobal
+        case (.minimax, .china): return minimaxChina
+        case (.minimax, .global): return minimaxGlobal
+        case (.antigravity, _): return antigravity
+        case (.zai, _): return zai
+        case (.chutes, _): return chutes
+        case (.synthetic, _): return synthetic
+        case (.nanoGpt, _): return nanoGpt
+        case (.openRouter, _): return openRouter
+        case (.openCode, .global) where false: return []
+        case (.openCode, _): return openCode
+        case (.kiro, _): return kiro
+        case (.grok, _): return grok
+        case (.tavily, _): return tavily
+        case (.brave, _): return brave
+        case (.mimo, _): return mimo
+        case (.volcanoArk, _): return volcanoArk
+        case (.hunyuan, _): return hunyuan
+        case (.zhipuGLM, _): return zhipuGLM
         }
     }
 }

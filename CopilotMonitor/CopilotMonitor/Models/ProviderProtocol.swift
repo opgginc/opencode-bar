@@ -8,6 +8,20 @@ enum ProviderType {
     case quotaBased
 }
 
+/// 供应商家族，用于订阅套餐按供应商聚合。
+enum ProviderFamily: String, CaseIterable {
+    case copilot, claude, codex, commandCode, cursor, geminiCLI
+    case openRouter, openCode, antigravity, kiro, grok
+    case kimi, minimax, zai, nanoGpt, synthetic, chutes
+    case tavily, brave
+    case mimo, volcanoArk, hunyuan, zhipuGLM
+}
+
+/// 服务区域，决定显示哪个地区的订阅套餐。
+enum ProviderRegion {
+    case global, china
+}
+
 /// Identifies the specific AI provider
 enum ProviderIdentifier: String, CaseIterable {
     case copilot
@@ -33,6 +47,45 @@ enum ProviderIdentifier: String, CaseIterable {
     case chutes
     case tavilySearch = "tavily_search"
     case braveSearch = "brave_search"
+    case mimo
+    case volcanoArk = "volcano_ark"
+    case hunyuan
+    case zhipuGLM = "zhipu_glm"
+
+    var family: ProviderFamily {
+        switch self {
+        case .copilot: return .copilot
+        case .claude: return .claude
+        case .codex: return .codex
+        case .commandCode: return .commandCode
+        case .cursor: return .cursor
+        case .geminiCLI: return .geminiCLI
+        case .openRouter: return .openRouter
+        case .openCode, .openCodeZen, .openCodeGo: return .openCode
+        case .antigravity: return .antigravity
+        case .kiro: return .kiro
+        case .grok: return .grok
+        case .kimi, .kimiCN: return .kimi
+        case .minimaxCodingPlan, .minimaxCodingPlanCN: return .minimax
+        case .zaiCodingPlan: return .zai
+        case .nanoGpt: return .nanoGpt
+        case .synthetic: return .synthetic
+        case .chutes: return .chutes
+        case .tavilySearch: return .tavily
+        case .braveSearch: return .brave
+        case .mimo: return .mimo
+        case .volcanoArk: return .volcanoArk
+        case .hunyuan: return .hunyuan
+        case .zhipuGLM: return .zhipuGLM
+        }
+    }
+
+    var region: ProviderRegion {
+        switch self {
+        case .kimiCN, .minimaxCodingPlanCN: return .china
+        default: return .global
+        }
+    }
 
     var displayName: String {
         switch self {
@@ -82,6 +135,14 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Tavily"
         case .braveSearch:
             return "Brave Search"
+        case .mimo:
+            return "MiMo"
+        case .volcanoArk:
+            return "火山 Ark"
+        case .hunyuan:
+            return "腾讯混元"
+        case .zhipuGLM:
+            return "智谱 GLM"
         }
     }
 
@@ -133,6 +194,14 @@ enum ProviderIdentifier: String, CaseIterable {
             return "Tavily"
         case .braveSearch:
             return "Brave"
+        case .mimo:
+            return "MiMo"
+        case .volcanoArk:
+            return "Ark"
+        case .hunyuan:
+            return "Hunyuan"
+        case .zhipuGLM:
+            return "GLM"
         }
     }
 
@@ -184,6 +253,14 @@ enum ProviderIdentifier: String, CaseIterable {
             return "TavilyIcon"
         case .braveSearch:
             return "BraveSearchIcon"
+        case .mimo:
+            return "m.circle"
+        case .volcanoArk:
+            return "v.circle"
+        case .hunyuan:
+            return "h.circle"
+        case .zhipuGLM:
+            return "g.circle"
         }
     }
 

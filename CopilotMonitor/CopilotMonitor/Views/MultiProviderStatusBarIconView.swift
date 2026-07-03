@@ -179,6 +179,14 @@ final class MultiProviderStatusBarIconView: NSView {
             iconName = "TavilyIcon"
         case .braveSearch:
             iconName = "BraveSearchIcon"
+        case .mimo:
+            iconName = "m.circle"
+        case .volcanoArk:
+            iconName = "v.circle"
+        case .hunyuan:
+            iconName = "h.circle"
+        case .zhipuGLM:
+            iconName = "g.circle"
         }
 
         let icon: NSImage

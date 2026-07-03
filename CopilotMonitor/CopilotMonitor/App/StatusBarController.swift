@@ -1042,6 +1042,11 @@ final class StatusBarController: NSObject {
         case .minimaxCodingPlanCN:
             add(details?.sevenDayUsage, priority: .weekly)
             add(details?.fiveHourUsage, priority: .hourly)
+        case .volcanoArk:
+            add(details?.sevenDayUsage, priority: .weekly)
+            add(details?.fiveHourUsage, priority: .hourly)
+        case .mimo, .hunyuan, .zhipuGLM:
+            add(usage.usagePercentage, priority: .fallback)
         case .openCodeGo:
             add(details?.openCodeGoMonthlyUsage, priority: .monthly)
             add(details?.sevenDayUsage, priority: .weekly)
@@ -1091,6 +1096,11 @@ final class StatusBarController: NSObject {
             add(details?.fiveHourUsage, priority: .hourly)
         case .tavilySearch, .braveSearch:
             add(details?.mcpUsagePercent, priority: .monthly)
+        case .volcanoArk:
+            add(details?.sevenDayUsage, priority: .weekly)
+            add(details?.fiveHourUsage, priority: .hourly)
+        case .mimo, .hunyuan, .zhipuGLM:
+            add(usage.usagePercentage, priority: .fallback)
         case .antigravity, .geminiCLI, .openRouter, .openCode, .openCodeZen:
             break
         }
@@ -2993,6 +3003,14 @@ final class StatusBarController: NSObject {
             return ("synthetic", "~/.local/share/opencode/auth.json")
         case .chutes:
             return ("chutes", "~/.local/share/opencode/auth.json")
+        case .mimo:
+            return ("mimo-for-coding", "~/.local/share/opencode/auth.json")
+        case .volcanoArk:
+            return ("volcano-ark (格式: AK:SK)", "~/.local/share/opencode/auth.json")
+        case .hunyuan:
+            return ("hunyuan", "~/.local/share/opencode/auth.json")
+        case .zhipuGLM:
+            return ("zhipu-glm", "~/.local/share/opencode/auth.json")
         case .codex:
             return ("OPENAI_API_KEY 或 tokens", "~/.codex/auth.json")
         case .antigravity:
@@ -3314,6 +3332,8 @@ final class StatusBarController: NSObject {
             image = NSImage(named: "TavilyIcon")
         case .braveSearch:
             image = NSImage(named: "BraveSearchIcon")
+        case .mimo, .volcanoArk, .hunyuan, .zhipuGLM:
+            image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
         }
 
          // Keep consistent icon sizing and make Gemini slightly larger.
@@ -4616,6 +4636,10 @@ extension StatusBarController {
         .kimi,
         .minimaxCodingPlanCN,
         .minimaxCodingPlan,
+        .volcanoArk,
+        .hunyuan,
+        .zhipuGLM,
+        .mimo,
         .openCodeGo,
         .kiro,
         .grok,

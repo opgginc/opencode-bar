@@ -228,6 +228,10 @@ struct OpenCodeAuth: Codable {
     let nanoGpt: APIKey?
     let synthetic: APIKey?
     let chutes: APIKey?
+    let mimoForCoding: APIKey?
+    let volcanoArk: APIKey?
+    let hunyuan: APIKey?
+    let zhipuGLM: APIKey?
 
     enum CodingKeys: String, CodingKey {
         case anthropic, openai, openrouter, opencode, synthetic, chutes
@@ -240,6 +244,10 @@ struct OpenCodeAuth: Codable {
         case minimaxCodingPlanGlobal = "minimax-coding-plan-global"
         case zaiCodingPlan = "zai-coding-plan"
         case nanoGpt = "nano-gpt"
+        case mimoForCoding = "mimo-for-coding"
+        case volcanoArk = "volcano-ark"
+        case hunyuan
+        case zhipuGLM = "zhipu-glm"
     }
 
     init(
@@ -258,7 +266,11 @@ struct OpenCodeAuth: Codable {
         zaiCodingPlan: APIKey?,
         nanoGpt: APIKey?,
         synthetic: APIKey?,
-        chutes: APIKey? = nil
+        chutes: APIKey? = nil,
+        mimoForCoding: APIKey?,
+        volcanoArk: APIKey?,
+        hunyuan: APIKey?,
+        zhipuGLM: APIKey?
     ) {
         self.anthropic = anthropic
         self.openai = openai
@@ -276,6 +288,10 @@ struct OpenCodeAuth: Codable {
         self.nanoGpt = nanoGpt
         self.synthetic = synthetic
         self.chutes = chutes
+        self.mimoForCoding = mimoForCoding
+        self.volcanoArk = volcanoArk
+        self.hunyuan = hunyuan
+        self.zhipuGLM = zhipuGLM
     }
 
     init(from decoder: Decoder) throws {
@@ -299,6 +315,10 @@ struct OpenCodeAuth: Codable {
         nanoGpt = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .nanoGpt)
         synthetic = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .synthetic)
         chutes = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .chutes)
+        mimoForCoding = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .mimoForCoding)
+        volcanoArk = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .volcanoArk)
+        hunyuan = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .hunyuan)
+        zhipuGLM = Self.decodeLossyIfPresent(APIKey.self, from: container, forKey: .zhipuGLM)
 
         if anthropic == nil,
            openai == nil,
@@ -315,7 +335,11 @@ struct OpenCodeAuth: Codable {
            zaiCodingPlan == nil,
            nanoGpt == nil,
            synthetic == nil,
-           chutes == nil {
+           chutes == nil,
+           mimoForCoding == nil,
+           volcanoArk == nil,
+           hunyuan == nil,
+           zhipuGLM == nil {
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
                     codingPath: container.codingPath,
@@ -355,6 +379,10 @@ struct OpenCodeAuth: Codable {
         try container.encodeIfPresent(nanoGpt, forKey: .nanoGpt)
         try container.encodeIfPresent(synthetic, forKey: .synthetic)
         try container.encodeIfPresent(chutes, forKey: .chutes)
+        try container.encodeIfPresent(mimoForCoding, forKey: .mimoForCoding)
+        try container.encodeIfPresent(volcanoArk, forKey: .volcanoArk)
+        try container.encodeIfPresent(hunyuan, forKey: .hunyuan)
+        try container.encodeIfPresent(zhipuGLM, forKey: .zhipuGLM)
     }
 }
 
@@ -4268,6 +4296,28 @@ final class TokenManager: @unchecked Sendable {
     func getChutesAPIKey() -> String? {
         guard let auth = readOpenCodeAuth() else { return nil }
         return auth.chutes?.key
+    }
+
+    func getMimoAPIKey() -> String? {
+        guard let auth = readOpenCodeAuth() else { return nil }
+        return auth.mimoForCoding?.key
+    }
+
+    func getVolcanoArkCredentials() -> (accessKey: String, secretKey: String)? {
+        guard let auth = readOpenCodeAuth(), let raw = auth.volcanoArk?.key else { return nil }
+        let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return nil }
+        return (parts[0], parts[1])
+    }
+
+    func getHunyuanAPIKey() -> String? {
+        guard let auth = readOpenCodeAuth() else { return nil }
+        return auth.hunyuan?.key
+    }
+
+    func getZhipuGLMAPIKey() -> String? {
+        guard let auth = readOpenCodeAuth() else { return nil }
+        return auth.zhipuGLM?.key
     }
 
     func getTavilyAPIKey() -> String? {

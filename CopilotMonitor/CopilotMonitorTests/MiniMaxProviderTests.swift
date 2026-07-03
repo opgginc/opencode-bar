@@ -112,7 +112,7 @@ final class MiniMaxCNProviderTests: XCTestCase {
         XCTAssertEqual(row.weeklyUsagePercent ?? -1, 60.0, accuracy: 0.001)
     }
 
-    func testResetDateUsesRemainsTimeWhenAvailable() {
+    func testResetDatePrefersEndTimeWhenAvailable() {
         let referenceDate = Date(timeIntervalSince1970: 1_774_603_884.703)
         let fiveHourReset = resetDateFromMiniMaxFields(
             endTime: 1_774_605_600_000,
@@ -126,10 +126,10 @@ final class MiniMaxCNProviderTests: XCTestCase {
         )
 
         XCTAssertNotNil(fiveHourReset)
-        XCTAssertEqual(fiveHourReset!.timeIntervalSince(referenceDate), 1_715_317 / 1_000.0, accuracy: 0.001)
+        XCTAssertEqual(fiveHourReset!.timeIntervalSince1970, 1_774_605_600.0, accuracy: 0.001)
 
         XCTAssertNotNil(weeklyReset)
-        XCTAssertEqual(weeklyReset!.timeIntervalSince(referenceDate), 224_915_317 / 1_000.0, accuracy: 0.001)
+        XCTAssertEqual(weeklyReset!.timeIntervalSince1970, 1_774_828_800.0, accuracy: 0.001)
     }
 
     func testResetDateFallsBackToEndTimeWhenRemainsTimeMissing() {
@@ -149,13 +149,26 @@ final class MiniMaxCNProviderTests: XCTestCase {
         XCTAssertEqual(weeklyReset!.timeIntervalSince1970, 1_774_828_800.0, accuracy: 0.001)
     }
 
-    func testResetDateFallsBackToEndTimeWhenRemainsTimeInvalid() {
+    func testResetDateFallsBackToRemainsTimeWhenEndTimeInvalid() {
+        let referenceDate = Date(timeIntervalSince1970: 1_774_603_884.703)
         let reset = resetDateFromMiniMaxFields(
-            endTime: 1_774_605_600_000,
-            remainsTime: 0
+            endTime: 0,
+            remainsTime: 1_715_317,
+            referenceDate: referenceDate
         )
         XCTAssertNotNil(reset)
-        XCTAssertEqual(reset!.timeIntervalSince1970, 1_774_605_600.0, accuracy: 0.001)
+        XCTAssertEqual(reset!.timeIntervalSince(referenceDate), 1_715_317 / 1_000.0, accuracy: 0.001)
+    }
+
+    func testResetDateFallsBackToRemainsTimeWhenEndTimeMissing() {
+        let referenceDate = Date(timeIntervalSince1970: 1_774_603_884.703)
+        let reset = resetDateFromMiniMaxFields(
+            endTime: nil,
+            remainsTime: 1_715_317,
+            referenceDate: referenceDate
+        )
+        XCTAssertNotNil(reset)
+        XCTAssertEqual(reset!.timeIntervalSince(referenceDate), 1_715_317 / 1_000.0, accuracy: 0.001)
     }
 
     func testResetDateReturnsNilWhenBothFieldsMissing() {
@@ -222,18 +235,18 @@ final class MiniMaxCNProviderTests: XCTestCase {
         XCTAssertEqual(result.details?.fiveHourUsage ?? -1, 50.0, accuracy: 0.001)
         XCTAssertEqual(result.details?.sevenDayUsage ?? -1, 60.0, accuracy: 0.001)
 
-        // Reset dates are derived from remains_time relative to fetch time.
+        // Reset dates are derived from absolute end_time timestamps.
         XCTAssertNotNil(result.details?.fiveHourReset)
         XCTAssertEqual(
-            result.details?.fiveHourReset?.timeIntervalSinceNow ?? 0,
-            1_715_317 / 1_000.0,
-            accuracy: 1.0
+            result.details?.fiveHourReset?.timeIntervalSince1970 ?? 0,
+            1_774_605_600.0,
+            accuracy: 0.001
         )
         XCTAssertNotNil(result.details?.sevenDayReset)
         XCTAssertEqual(
-            result.details?.sevenDayReset?.timeIntervalSinceNow ?? 0,
-            224_915_317 / 1_000.0,
-            accuracy: 1.0
+            result.details?.sevenDayReset?.timeIntervalSince1970 ?? 0,
+            1_774_828_800.0,
+            accuracy: 0.001
         )
     }
 
