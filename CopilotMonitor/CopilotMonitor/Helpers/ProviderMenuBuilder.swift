@@ -572,6 +572,39 @@ extension StatusBarController {
 
             addSubscriptionItems(to: submenu, provider: identifier, accountId: subscriptionAccountId)
 
+        case .volcanoArk:
+            if let fiveHour = details.fiveHourUsage {
+                let items = createUsageWindowRow(
+                    label: "5h",
+                    usagePercent: fiveHour,
+                    resetDate: details.fiveHourReset,
+                    windowHours: 5
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if details.fiveHourUsage != nil, details.sevenDayUsage != nil {
+                submenu.addItem(NSMenuItem.separator())
+            }
+            if let weekly = details.sevenDayUsage {
+                let items = createUsageWindowRow(
+                    label: "Weekly",
+                    usagePercent: weekly,
+                    resetDate: details.sevenDayReset,
+                    windowHours: 168
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            addSubscriptionItems(to: submenu, provider: .volcanoArk, accountId: subscriptionAccountId)
+
+        case .mimo, .hunyuan, .zhipuGLM:
+            let noteItem = NSMenuItem()
+            noteItem.view = createDisabledLabelView(
+                text: "用量接口未开放，当前仅记录订阅套餐",
+                textColor: .secondaryLabelColor
+            )
+            submenu.addItem(noteItem)
+            addSubscriptionItems(to: submenu, provider: identifier, accountId: subscriptionAccountId)
+
         case .openCodeGo:
             if let fiveHour = details.fiveHourUsage {
                 let items = createUsageWindowRow(
@@ -1182,12 +1215,13 @@ extension StatusBarController {
         submenu.addItem(headerItem)
 
         let currency = CurrencyFormatter.shared.currency
+        let hasCNYPresets = presets.contains { $0.cnyCost != nil }
         let visiblePresets: [SubscriptionPreset]
         switch currency {
         case .usd:
             visiblePresets = presets
         case .rmb:
-            visiblePresets = presets.filter { $0.cnyCost != nil }
+            visiblePresets = hasCNYPresets ? presets.filter { $0.cnyCost != nil } : presets
         }
 
         // Manual selection takes precedence; otherwise let the API-detected plan highlight the matching preset.
@@ -1209,7 +1243,11 @@ extension StatusBarController {
         noneItem.state = (currentPlan == .none) ? .on : .off
         submenu.addItem(noneItem)
 
-        if visiblePresets.isEmpty {
+        if presets.isEmpty {
+            let hintItem = NSMenuItem(title: "按量计费，无预置订阅套餐", action: nil, keyEquivalent: "")
+            hintItem.isEnabled = false
+            submenu.addItem(hintItem)
+        } else if visiblePresets.isEmpty {
             let hintItem = NSMenuItem(title: "该版本仅海外", action: nil, keyEquivalent: "")
             hintItem.isEnabled = false
             submenu.addItem(hintItem)
