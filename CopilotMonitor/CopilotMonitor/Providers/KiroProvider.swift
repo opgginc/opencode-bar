@@ -4,7 +4,9 @@ import os.log
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "KiroProvider")
 
 struct KiroUsageSnapshot: Equatable {
+    /// Credits consumed within the plan allowance.
     let usedCredits: Double
+    /// Total plan-covered credits available this cycle.
     let totalCredits: Double
     let planName: String?
     let resetDate: Date?
@@ -12,8 +14,8 @@ struct KiroUsageSnapshot: Equatable {
     let bonusCreditsUsed: Double?
     let bonusCreditsTotal: Double?
     let bonusExpiryDays: Int?
-    /// Total credits consumed across plan + overages, when the CLI reports it separately
-    /// (e.g. "Credits used: 1676" vs "Credits (1000 of 1000 covered in plan)").
+    /// Total credits consumed across plan + overages/additional credits.
+    /// When the CLI only reports plan-covered usage, this equals `usedCredits`.
     let totalConsumedCredits: Double?
 
     init(
@@ -281,16 +283,33 @@ final class KiroProvider: ProviderProtocol {
         let explicitUsedCredits = explicitUsedMatch.flatMap { match in
             match.count > 1 ? parseNumber(match[1]) : nil
         }
+        let additionalCredits = parseAdditionalCredits(from: normalized)
 
         let resolvedTotalCredits = totalCredits ?? planName.flatMap(planCreditTotal)
         // The "Credits (X of Y covered in plan)" line reflects plan-covered consumption.
-        // The "Credits used:" line reports overage credits beyond the plan.
-        // User-facing total consumption = covered-in-plan + overage.
+        // The "Credits used:" line is ambiguous across CLI versions:
+        //   - In newer outputs it reports overage credits beyond the plan.
+        //   - In older outputs it reports plan + overage combined.
+        // Treat it as total consumption only when it clearly exceeds the plan total;
+        // otherwise add it to plan-covered usage as overage.
+        let legacyOverageCredits: Double? = explicitUsedCredits.flatMap { explicit in
+            guard let total = resolvedTotalCredits, explicit <= total else { return nil }
+            return explicit
+        }
+        let legacyTotalCredits: Double? = explicitUsedCredits.flatMap { explicit in
+            guard let total = resolvedTotalCredits, explicit > total else { return nil }
+            return explicit
+        }
+
         let resolvedUsedCredits: Double?
-        if let covered = coveredUsedCredits, let overage = explicitUsedCredits {
-            resolvedUsedCredits = covered + overage
+        if let total = legacyTotalCredits {
+            // Older CLI: "Credits used:" reports plan + overage combined.
+            resolvedUsedCredits = total
+        } else if let covered = coveredUsedCredits {
+            let extras = (legacyOverageCredits ?? 0) + (additionalCredits.used ?? 0)
+            resolvedUsedCredits = covered + extras
         } else {
-            resolvedUsedCredits = coveredUsedCredits ?? explicitUsedCredits ?? percent.flatMap { parsedPercent in
+            resolvedUsedCredits = legacyOverageCredits ?? additionalCredits.used ?? percent.flatMap { parsedPercent in
                 resolvedTotalCredits.map { ($0 * parsedPercent) / 100.0 }
             }
         }
@@ -309,8 +328,12 @@ final class KiroProvider: ProviderProtocol {
         }
         let bonusCredits = parseBonusCredits(from: normalized)
 
+        // `usedCredits` reflects plan-covered consumption so that `remainingCredits`
+        // stays meaningful (plan remaining). `totalConsumedCredits` includes any
+        // overages or additional credit packs consumed beyond the plan.
+        let planUsedCredits = coveredUsedCredits ?? resolvedUsedCredits
         return KiroUsageSnapshot(
-            usedCredits: resolvedUsedCredits,
+            usedCredits: planUsedCredits,
             totalCredits: resolvedTotalCredits,
             planName: planName,
             resetDate: resetDate,
@@ -333,16 +356,25 @@ final class KiroProvider: ProviderProtocol {
             primaryReset: snapshot.resetDate,
             planType: snapshot.planName,
             monthlyCost: consumedCredits,
-            creditsRemaining: snapshot.remainingCredits,
+            creditsRemaining: max(snapshot.remainingCredits, 0),
             creditsTotal: snapshot.totalCredits,
             authSource: "kiro-cli at \(binaryPath.path)"
         )
+
+        let overageExplicitlyEnabled = snapshot.overageStatus
+            .map { status in
+                let normalized = status.trimmingCharacters(in: .whitespaces).lowercased()
+                return ["enabled", "on", "true", "yes"].contains(normalized)
+            } ?? false
+        // If consumption already exceeds the plan allowance, overages/additional credits
+        // are effectively permitted regardless of the explicit status line.
+        let overageInUse = consumedCredits > snapshot.totalCredits + 0.001
 
         return ProviderResult(
             usage: .quotaBased(
                 remaining: remaining,
                 entitlement: entitlement,
-                overagePermitted: snapshot.overageStatus?.localizedCaseInsensitiveContains("enabled") == true
+                overagePermitted: overageExplicitlyEnabled || overageInUse
             ),
             details: details
         )
@@ -432,6 +464,28 @@ final class KiroProvider: ProviderProtocol {
             total: bonusMatch.flatMap { $0.count > 2 ? parseNumber($0[2]) : nil },
             expiryDays: expiryMatch.flatMap { $0.count > 1 ? Int($0[1]) : nil }
         )
+    }
+
+    /// Parses newer "Additional credits" packs that replace the legacy overages section.
+    /// Matches lines like "Additional credits: 200/500 credits used" or
+    /// "Additional credits: 200 of 500 credits used".
+    private static func parseAdditionalCredits(from text: String) -> (used: Double?, total: Double?) {
+        let slashMatch = firstMatch(
+            in: text,
+            pattern: #"Additional\s+credits:[\s\S]{0,160}?([0-9][0-9,]*(?:\.[0-9]+)?)/([0-9][0-9,]*(?:\.[0-9]+)?)\s+credits\s+used"#
+        )
+        let ofMatch = firstMatch(
+            in: text,
+            pattern: #"Additional\s+credits:[\s\S]{0,160}?([0-9][0-9,]*(?:\.[0-9]+)?)\s+of\s+([0-9][0-9,]*(?:\.[0-9]+)?)\s+credits\s+used"#
+        )
+
+        if let match = slashMatch ?? ofMatch {
+            return (
+                used: match.count > 1 ? parseNumber(match[1]) : nil,
+                total: match.count > 2 ? parseNumber(match[2]) : nil
+            )
+        }
+        return (used: nil, total: nil)
     }
 
     private static func bonusUsagePercent(from snapshot: KiroUsageSnapshot) -> Double? {

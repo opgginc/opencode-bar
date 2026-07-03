@@ -190,7 +190,7 @@ class BrowserCookieService {
     // third-party keychain items. The security binary is Apple-signed and
     // matches the `apple-tool:` partition_id present on all keychain items,
     // so it never triggers a password prompt — even after app updates.
-    private func getEncryptionKey(for browser: SupportedBrowser) throws -> String {
+    internal func getEncryptionKey(for browser: SupportedBrowser) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = [
@@ -200,24 +200,14 @@ class BrowserCookieService {
             "-w"
         ]
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
+        let data: Data
         do {
-            try process.run()
-            process.waitUntilExit()
+            data = try runProcessAndReadStdout(process)
         } catch {
             logger.error("Failed to run security command for \(browser.displayName): \(error)")
             throw BrowserCookieError.keychainAccessFailed
         }
 
-        guard process.terminationStatus == 0 else {
-            logger.error("security find-generic-password failed for \(browser.displayName), exit: \(process.terminationStatus)")
-            throw BrowserCookieError.keychainAccessFailed
-        }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let password = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !password.isEmpty else {
@@ -226,6 +216,50 @@ class BrowserCookieService {
         }
 
         return password
+    }
+
+    /// Runs a process with stdout redirected to a temporary file and returns the captured output.
+    /// Using a file instead of a `Pipe` avoids deadlock when the child writes more data than the
+    /// pipe buffer can hold (~64KB on macOS), because the parent can wait for termination before
+    /// reading the full output.
+    internal func runProcessAndReadStdout(_ process: Process) throws -> Data {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("process_stdout_\(UUID().uuidString).tmp")
+        let cleanup = { try? FileManager.default.removeItem(at: tempURL) }
+
+        guard FileManager.default.createFile(atPath: tempURL.path, contents: nil, attributes: nil),
+              let outputHandle = try? FileHandle(forWritingTo: tempURL) else {
+            cleanup()
+            throw BrowserCookieError.keychainAccessFailed
+        }
+
+        process.standardOutput = outputHandle
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            try? outputHandle.close()
+            cleanup()
+            throw BrowserCookieError.keychainAccessFailed
+        }
+
+        try? outputHandle.close()
+
+        guard process.terminationStatus == 0 else {
+            cleanup()
+            throw BrowserCookieError.keychainAccessFailed
+        }
+
+        do {
+            let data = try Data(contentsOf: tempURL)
+            cleanup()
+            return data
+        } catch {
+            cleanup()
+            throw BrowserCookieError.keychainAccessFailed
+        }
     }
 
     // MARK: - Key Derivation (PBKDF2)

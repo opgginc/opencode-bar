@@ -223,9 +223,15 @@ func fetchMiniMaxCodingPlanUsage(
 
     let details = DetailedUsage(
         fiveHourUsage: fiveHourUsage,
-        fiveHourReset: dateFromMiniMaxMilliseconds(primaryRow.endTime),
+        fiveHourReset: resetDateFromMiniMaxFields(
+            endTime: primaryRow.endTime,
+            remainsTime: primaryRow.remainsTime
+        ),
         sevenDayUsage: weeklyUsage,
-        sevenDayReset: dateFromMiniMaxMilliseconds(primaryRow.weeklyEndTime),
+        sevenDayReset: resetDateFromMiniMaxFields(
+            endTime: primaryRow.weeklyEndTime,
+            remainsTime: primaryRow.weeklyRemainsTime
+        ),
         authSource: "~/.local/share/opencode/auth.json"
     )
 
@@ -260,4 +266,23 @@ private func primaryMiniMaxQuotaRow(from rows: [MiniMaxCodingPlanResponse.ModelR
 private func dateFromMiniMaxMilliseconds(_ milliseconds: Int64?) -> Date? {
     guard let milliseconds, milliseconds > 0 else { return nil }
     return Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1000.0)
+}
+
+/// Computes the reset date from MiniMax window fields.
+///
+/// The API returns both an absolute window end timestamp (`end_time`) and a
+/// relative remaining duration (`remains_time`). Prefer `remains_time` because
+/// it reflects the server-side "time until reset" at response generation time,
+/// which matches what users see in the MiniMax dashboard and avoids small
+/// drift from client/server clock skew. Fall back to the absolute `end_time`
+/// when the relative value is missing or invalid.
+func resetDateFromMiniMaxFields(
+    endTime: Int64?,
+    remainsTime: Int64?,
+    referenceDate: Date = Date()
+) -> Date? {
+    if let remainsTime = remainsTime, remainsTime > 0 {
+        return referenceDate.addingTimeInterval(TimeInterval(remainsTime) / 1000.0)
+    }
+    return dateFromMiniMaxMilliseconds(endTime)
 }

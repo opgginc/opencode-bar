@@ -3093,21 +3093,35 @@ final class TokenManager: @unchecked Sendable {
         return bytes
     }
 
-    // Uses /usr/bin/security instead of SecItemCopyMatching to avoid keychain
-    // password prompts. The security binary matches `apple-tool:` partition_id.
-    private func readKeychainPasswordData(service: String, account: String? = nil) -> Data? {
+    /// Runs a process with stdout redirected to a temporary file and returns the
+    /// captured data only when the process exits successfully.
+    ///
+    /// This avoids the classic pipe deadlock: a `Pipe` buffer is ~64 KB, so if the
+    /// child writes more than that and the parent calls `waitUntilExit()` before
+    /// draining the pipe, both processes block forever. Writing to a file lets the
+    /// child produce arbitrarily large output. The temporary file is removed in all
+    /// paths.
+    func runProcessCapturingStdout(executableURL: URL, arguments: [String]) -> Data? {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        var args = ["find-generic-password", "-s", service]
-        if let account = account {
-            args += ["-a", account]
-        }
-        args.append("-w")
-        process.arguments = args
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
+        process.executableURL = executableURL
+        process.arguments = arguments
         process.standardError = FileHandle.nullDevice
+
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("com.opencodeproviders.TokenManager.\(UUID().uuidString).stdout", isDirectory: false)
+        let stdoutHandle: FileHandle
+        do {
+            FileManager.default.createFile(atPath: tempURL.path, contents: nil, attributes: nil)
+            stdoutHandle = try FileHandle(forWritingTo: tempURL)
+        } catch {
+            logger.debug("[runProcessCapturingStdout] Failed to create temporary stdout file: \(error.localizedDescription)")
+            return nil
+        }
+        defer {
+            try? stdoutHandle.close()
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+        process.standardOutput = stdoutHandle
 
         do {
             try process.run()
@@ -3120,7 +3134,29 @@ final class TokenManager: @unchecked Sendable {
             return nil
         }
 
-        let rawData = pipe.fileHandleForReading.readDataToEndOfFile()
+        do {
+            return try Data(contentsOf: tempURL)
+        } catch {
+            return nil
+        }
+    }
+
+    // Uses /usr/bin/security instead of SecItemCopyMatching to avoid keychain
+    // password prompts. The security binary matches `apple-tool:` partition_id.
+    private func readKeychainPasswordData(service: String, account: String? = nil) -> Data? {
+        var args = ["find-generic-password", "-s", service]
+        if let account = account {
+            args += ["-a", account]
+        }
+        args.append("-w")
+
+        guard let rawData = runProcessCapturingStdout(
+            executableURL: URL(fileURLWithPath: "/usr/bin/security"),
+            arguments: args
+        ) else {
+            return nil
+        }
+
         guard let rawString = String(data: rawData, encoding: .utf8) else {
             // /usr/bin/security outputs text; non-UTF-8 data is unusable for
             // token/JSON consumers, so return nil instead of raw bytes.

@@ -112,6 +112,60 @@ final class MiniMaxCNProviderTests: XCTestCase {
         XCTAssertEqual(row.weeklyUsagePercent ?? -1, 60.0, accuracy: 0.001)
     }
 
+    func testResetDateUsesRemainsTimeWhenAvailable() {
+        let referenceDate = Date(timeIntervalSince1970: 1_774_603_884.703)
+        let fiveHourReset = resetDateFromMiniMaxFields(
+            endTime: 1_774_605_600_000,
+            remainsTime: 1_715_317,
+            referenceDate: referenceDate
+        )
+        let weeklyReset = resetDateFromMiniMaxFields(
+            endTime: 1_774_828_800_000,
+            remainsTime: 224_915_317,
+            referenceDate: referenceDate
+        )
+
+        XCTAssertNotNil(fiveHourReset)
+        XCTAssertEqual(fiveHourReset!.timeIntervalSince(referenceDate), 1_715_317 / 1_000.0, accuracy: 0.001)
+
+        XCTAssertNotNil(weeklyReset)
+        XCTAssertEqual(weeklyReset!.timeIntervalSince(referenceDate), 224_915_317 / 1_000.0, accuracy: 0.001)
+    }
+
+    func testResetDateFallsBackToEndTimeWhenRemainsTimeMissing() {
+        let fiveHourReset = resetDateFromMiniMaxFields(
+            endTime: 1_774_605_600_000,
+            remainsTime: nil
+        )
+        let weeklyReset = resetDateFromMiniMaxFields(
+            endTime: 1_774_828_800_000,
+            remainsTime: nil
+        )
+
+        XCTAssertNotNil(fiveHourReset)
+        XCTAssertEqual(fiveHourReset!.timeIntervalSince1970, 1_774_605_600.0, accuracy: 0.001)
+
+        XCTAssertNotNil(weeklyReset)
+        XCTAssertEqual(weeklyReset!.timeIntervalSince1970, 1_774_828_800.0, accuracy: 0.001)
+    }
+
+    func testResetDateFallsBackToEndTimeWhenRemainsTimeInvalid() {
+        let reset = resetDateFromMiniMaxFields(
+            endTime: 1_774_605_600_000,
+            remainsTime: 0
+        )
+        XCTAssertNotNil(reset)
+        XCTAssertEqual(reset!.timeIntervalSince1970, 1_774_605_600.0, accuracy: 0.001)
+    }
+
+    func testResetDateReturnsNilWhenBothFieldsMissing() {
+        let reset = resetDateFromMiniMaxFields(
+            endTime: nil,
+            remainsTime: nil
+        )
+        XCTAssertNil(reset)
+    }
+
     func testFetchUsesChinaEndpointOnly() async throws {
         guard TokenManager.shared.getMiniMaxCodingPlanCNAPIKey() != nil else {
             throw XCTSkip("MiniMax Coding Plan CN API key not available; skipping fetch test.")
@@ -167,6 +221,20 @@ final class MiniMaxCNProviderTests: XCTestCase {
 
         XCTAssertEqual(result.details?.fiveHourUsage ?? -1, 50.0, accuracy: 0.001)
         XCTAssertEqual(result.details?.sevenDayUsage ?? -1, 60.0, accuracy: 0.001)
+
+        // Reset dates are derived from remains_time relative to fetch time.
+        XCTAssertNotNil(result.details?.fiveHourReset)
+        XCTAssertEqual(
+            result.details?.fiveHourReset?.timeIntervalSinceNow ?? 0,
+            1_715_317 / 1_000.0,
+            accuracy: 1.0
+        )
+        XCTAssertNotNil(result.details?.sevenDayReset)
+        XCTAssertEqual(
+            result.details?.sevenDayReset?.timeIntervalSinceNow ?? 0,
+            224_915_317 / 1_000.0,
+            accuracy: 1.0
+        )
     }
 
     func testFetchDoesNotFallbackOnRegionMismatch() async throws {

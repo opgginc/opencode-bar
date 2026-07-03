@@ -417,6 +417,24 @@ final class ProviderUsageTests: XCTestCase {
         XCTAssertTrue(second.errors[.claude]?.contains("Rate limited") == true)
         XCTAssertTrue(second.errors[.claude]?.contains("Retrying in") == true)
     }
+
+    // MARK: - Provider Enablement
+
+    func testKiroIsDisabledByDefault() {
+        XCTAssertFalse(ProviderIdentifier.kiro.isEnabled)
+    }
+
+    func testOtherProvidersRemainEnabledByDefault() {
+        XCTAssertTrue(ProviderIdentifier.claude.isEnabled)
+        XCTAssertTrue(ProviderIdentifier.codex.isEnabled)
+        XCTAssertTrue(ProviderIdentifier.openCode.isEnabled)
+    }
+
+    func testProviderManagerDefaultProvidersExcludeKiro() async {
+        let manager = ProviderManager.shared
+        let providers = await manager.getAllProviders()
+        XCTAssertFalse(providers.contains { $0.identifier == .kiro })
+    }
     
     // MARK: - Helper Methods
     

@@ -49,7 +49,7 @@ actor ProviderManager {
             SyntheticProvider(),
             TavilySearchProvider(),
             BraveSearchProvider()
-        ]
+        ].filter { $0.identifier.isEnabled }
     }
 
     // Per-provider timeout is now defined in ProviderProtocol.fetchTimeout
@@ -282,6 +282,13 @@ actor ProviderManager {
             logger.error("🔴 [ProviderManager] ✗ \(provider.identifier.displayName) fetch failed: \(errorMessage)")
             debugLog("🔴 ✗ \(provider.identifier.displayName) fetch failed: \(errorMessage)")
 
+            // Extra diagnostics for OpenCode Zen: capture the raw failure so we can
+            // tell whether it is an auth, parse, binary, or timeout issue.
+            if identifier == .openCodeZen {
+                let detail = (error as? ProviderError).map { String(describing: $0) } ?? String(describing: error)
+                debugLog("🔴 ✗ OpenCodeZen raw error: \(detail)")
+            }
+
             let cached = cachedResults[identifier]
             if cached != nil {
                 logger.warning("🟡 [ProviderManager] Using cached value for \(provider.identifier.displayName)")
@@ -371,9 +378,12 @@ actor ProviderManager {
         return try await withCheckedThrowingContinuation { continuation in
             let fetchTask = Task {
                 do {
+                    debugLog("🟡 \(provider.identifier.displayName): starting fetch")
                     let result = try await provider.fetch()
+                    debugLog("🟢 \(provider.identifier.displayName): fetch returned result")
                     await box.resume(continuation, with: .success(result))
                 } catch {
+                    debugLog("🔴 \(provider.identifier.displayName): fetch threw \(error.localizedDescription)")
                     await box.resume(continuation, with: .failure(error))
                 }
             }
@@ -381,6 +391,7 @@ actor ProviderManager {
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                 fetchTask.cancel()
                 let timeoutError = ProviderError.networkError("Fetch timeout after \(timeout)s")
+                debugLog("⏱ \(provider.identifier.displayName): timed out after \(timeout)s")
                 await box.resume(continuation, with: .failure(timeoutError))
             }
         }

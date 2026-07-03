@@ -186,6 +186,17 @@ enum ProviderIdentifier: String, CaseIterable {
             return "BraveSearchIcon"
         }
     }
+
+    /// Whether this provider is enabled in the default app menu and refresh flow.
+    /// Disabled providers remain available for explicit instantiation and unit tests.
+    var isEnabled: Bool {
+        switch self {
+        case .kiro:
+            return false
+        default:
+            return true
+        }
+    }
 }
 
 /// Protocol for fetching usage data from AI providers

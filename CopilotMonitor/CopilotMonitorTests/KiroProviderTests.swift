@@ -141,10 +141,111 @@ final class KiroProviderTests: XCTestCase {
         let usage = try KiroProvider.parseUsageOutput(output)
 
         XCTAssertEqual(usage.totalCredits, 1000, accuracy: 0.001)
-        XCTAssertEqual(usage.usedCredits, 1472.94, accuracy: 0.001)
+        XCTAssertEqual(usage.usedCredits, 1000, accuracy: 0.001)
+        XCTAssertEqual(usage.remainingCredits, 0, accuracy: 0.001)
         XCTAssertEqual(try XCTUnwrap(usage.totalConsumedCredits), 1472.94, accuracy: 0.001)
         XCTAssertEqual(usage.planName, "Pro")
         XCTAssertEqual(usage.overageStatus, "Enabled")
+
+        let result = KiroProvider.makeResult(
+            from: usage,
+            binaryPath: URL(fileURLWithPath: "/Users/test/.local/bin/kiro-cli")
+        )
+        XCTAssertGreaterThan(result.usage.usagePercentage, 100)
+        if case .quotaBased(_, _, let overagePermitted) = result.usage {
+            XCTAssertTrue(overagePermitted)
+        } else {
+            XCTFail("Expected quota-based usage")
+        }
+    }
+
+    func testUsageParserHandlesLegacyCreditsUsedAsTotal() throws {
+        // Older CLI versions reported plan + overage combined on the "Credits used:" line.
+        let output = #"""
+        Estimated Usage | resets on 2026-08-01 | KIRO PRO
+        Credits (1000.00 of 1000 covered in plan)
+        147%
+        Overages: Enabled
+        Credits used: 1472.94
+        """#
+
+        let usage = try KiroProvider.parseUsageOutput(output)
+
+        XCTAssertEqual(usage.usedCredits, 1000, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(usage.totalConsumedCredits), 1472.94, accuracy: 0.001)
+    }
+
+    func testUsageParserHandlesAdditionalCreditsPacks() throws {
+        // Newer CLI versions replace the legacy overages section with prepaid
+        // "Additional credits" packs.
+        let output = #"""
+        Estimated Usage | resets on 2026-08-01 | KIRO PRO
+        Credits (1000.00 of 1000 covered in plan)
+        100%
+        Additional credits: 250/500 credits used
+        """#
+
+        let usage = try KiroProvider.parseUsageOutput(output)
+
+        XCTAssertEqual(usage.usedCredits, 1000, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(usage.totalConsumedCredits), 1250, accuracy: 0.001)
+
+        let result = KiroProvider.makeResult(
+            from: usage,
+            binaryPath: URL(fileURLWithPath: "/Users/test/.local/bin/kiro-cli")
+        )
+        XCTAssertEqual(result.usage.usagePercentage, 125, accuracy: 0.001)
+        if case .quotaBased(_, _, let overagePermitted) = result.usage {
+            XCTAssertTrue(overagePermitted)
+        } else {
+            XCTFail("Expected quota-based usage")
+        }
+    }
+
+    func testMakeResultInfersOveragePermittedFromConsumption() throws {
+        let snapshot = KiroUsageSnapshot(
+            usedCredits: 1_000,
+            totalCredits: 1_000,
+            planName: "Pro",
+            resetDate: nil,
+            overageStatus: nil,
+            totalConsumedCredits: 1_050
+        )
+
+        let result = KiroProvider.makeResult(
+            from: snapshot,
+            binaryPath: URL(fileURLWithPath: "/Users/test/.local/bin/kiro-cli")
+        )
+
+        if case .quotaBased(_, _, let overagePermitted) = result.usage {
+            XCTAssertTrue(overagePermitted)
+        } else {
+            XCTFail("Expected quota-based usage")
+        }
+    }
+
+    func testMakeResultRecognizesAlternativeOverageStatusWords() throws {
+        for status in ["On", "TRUE", "yes"] {
+            let snapshot = KiroUsageSnapshot(
+                usedCredits: 1_000,
+                totalCredits: 1_000,
+                planName: "Pro",
+                resetDate: nil,
+                overageStatus: status,
+                totalConsumedCredits: 1_000
+            )
+
+            let result = KiroProvider.makeResult(
+                from: snapshot,
+                binaryPath: URL(fileURLWithPath: "/Users/test/.local/bin/kiro-cli")
+            )
+
+            if case .quotaBased(_, _, let overagePermitted) = result.usage {
+                XCTAssertTrue(overagePermitted, "Expected overage permitted for status: \(status)")
+            } else {
+                XCTFail("Expected quota-based usage")
+            }
+        }
     }
 
     func testUsageParserPrefersRealTotalOverHardcodedPlanAllowance() throws {

@@ -38,13 +38,38 @@ final class KimiProviderTests: XCTestCase {
         return URLSession(configuration: configuration)
     }
 
+    private func makeStubTokenManager() -> TokenManager {
+        TokenManager.shared
+    }
+
     override func tearDown() {
         MockURLProtocol.requestHandler = nil
         super.tearDown()
     }
 
-    func testWeeklyUsedComputedFromLimitMinusRemaining() throws {
-        // Kimi 真实响应：usage 无 used 字段，只有 limit/remaining
+    func testWeeklyUsedUsesDirectUsedFieldWhenPresent() async throws {
+        let json = """
+        {
+          "user": {"userId": "u1", "membership": {"level": "LEVEL_VIVACE"}},
+          "usage": {"limit": "100", "used": "25", "remaining": "80", "resetTime": "2026-07-08T02:32:44Z"},
+          "limits": [{"window": {"duration": 5, "timeUnit": "HOUR"},
+                      "detail": {"limit": "50", "used": "0", "remaining": "46", "resetTime": "2026-07-01T08:00:00Z"}}]
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, json)
+        }
+
+        let provider = KimiCNProvider(tokenManager: makeStubTokenManager(), session: makeSession())
+        let result = try await provider.fetch()
+
+        XCTAssertEqual(result.details?.sevenDayUsage ?? -1, 25.0, accuracy: 0.01)
+        XCTAssertEqual(result.details?.fiveHourUsage ?? -1, 0.0, accuracy: 0.01)
+    }
+
+    func testWeeklyUsedFallsBackToLimitMinusRemainingWhenUsedMissing() async throws {
         let json = """
         {
           "user": {"userId": "u1", "membership": {"level": "LEVEL_VIVACE"}},
@@ -54,16 +79,15 @@ final class KimiProviderTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let decoded = try JSONDecoder().decode(KimiUsageResponse.self, from: json)
-        XCTAssertNil(decoded.usage?.used, "Kimi usage object should not contain a used field")
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, json)
+        }
 
-        let limit = Int(decoded.usage?.limit ?? "0") ?? 0
-        let remaining = Int(decoded.usage?.remaining ?? "0") ?? 0
-        let used = max(0, limit - remaining)
+        let provider = KimiCNProvider(tokenManager: makeStubTokenManager(), session: makeSession())
+        let result = try await provider.fetch()
 
-        XCTAssertEqual(used, 60)
-        let percent = limit > 0 ? Double(used) / Double(limit) * 100 : 0
-        XCTAssertEqual(percent, 60.0, accuracy: 0.01)
+        XCTAssertEqual(result.details?.sevenDayUsage ?? -1, 60.0, accuracy: 0.01)
     }
 
     func testIntermediateLevelMapsToModeratoInProviderResult() async throws {

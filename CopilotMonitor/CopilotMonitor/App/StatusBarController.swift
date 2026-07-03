@@ -440,7 +440,7 @@ final class StatusBarController: NSObject {
                     if onlyShowMode == .pinnedProvider {
                         let pinnedProviderItem = NSMenuItem(title: onlyShowMode.title, action: nil, keyEquivalent: "")
                         onlyShowProviderMenu = NSMenu()
-                        for identifier in ProviderIdentifier.allCases {
+                        for identifier in ProviderIdentifier.allCases.filter(\.isEnabled) {
                             let providerItem = NSMenuItem(
                                 title: identifier.displayName,
                                 action: #selector(menuBarOnlyShowProviderSelected(_:)),
@@ -681,6 +681,7 @@ final class StatusBarController: NSObject {
     }
 
     private func isProviderEnabled(_ identifier: ProviderIdentifier) -> Bool {
+        guard identifier.isEnabled else { return false }
         let key = "provider.\(identifier.rawValue).enabled"
         if UserDefaults.standard.object(forKey: key) == nil {
             return true
@@ -2773,7 +2774,13 @@ final class StatusBarController: NSObject {
             "No Gemini accounts",
             "credentials",
             "no enabled",
-            "cache unavailable"
+            "cache unavailable",
+            // OpenCode Zen safety net: any CLI auth/login hint should land in
+            // the unconfigured submenu rather than the generic error section.
+            "opencode login",
+            "sign in",
+            "not authenticated",
+            "unauthorized"
         ]
         let lowercased = errorMessage.lowercased()
         return authPatterns.contains { lowercased.contains($0.lowercased()) }
@@ -2855,7 +2862,12 @@ final class StatusBarController: NSObject {
                 "api key",
                 "credentials",
                 "no enabled",
-                "cache unavailable"
+                "cache unavailable",
+                // OpenCode Zen CLI auth/login hints are unconfigured-state, not errors.
+                "opencode login",
+                "sign in",
+                "not authenticated",
+                "unauthorized"
             ].contains { lowercased.contains($0) }
             let isNoSubscription = lowercased.contains("subscription")
             return !isNoCredentials && !isNoSubscription

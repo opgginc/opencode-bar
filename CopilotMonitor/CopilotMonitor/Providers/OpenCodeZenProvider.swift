@@ -3,22 +3,6 @@ import os.log
 
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "OpenCodeZenProvider")
 
-private func debugLog(_ message: String) {
-    let msg = "[\(Date())] OpenCodeZen: \(message)\n"
-    if let data = msg.data(using: .utf8) {
-        let path = "/tmp/opencode_debug.log"
-        if FileManager.default.fileExists(atPath: path) {
-            if let handle = FileHandle(forWritingAtPath: path) {
-                handle.seekToEndOfFile()
-                handle.write(data)
-                handle.closeFile()
-            }
-        } else {
-            try? data.write(to: URL(fileURLWithPath: path))
-        }
-    }
-}
-
 /// Provider for OpenCode Zen usage tracking via CLI stats.
 /// Tracks current summary only and does not build historical time-series.
 final class OpenCodeZenProvider: ProviderProtocol {
@@ -51,26 +35,29 @@ final class OpenCodeZenProvider: ProviderProtocol {
     /// 3. Fallback to common hardcoded paths
     private func findOpenCodeBinary() -> URL? {
         logger.info("OpenCodeZen: Searching for opencode binary...")
-        debugLog("Starting opencode binary search")
+        Self.debugLog("Starting opencode binary search")
 
         // Strategy 1: Try "which opencode" in current environment
         if let path = findBinaryViaWhich() {
             logger.info("OpenCodeZen: Found via 'which': \(path.path)")
-            debugLog("Found via 'which': \(path.path)")
+            Self.debugLog("Found via 'which': \(path.path)")
             binarySourceDescription = "PATH (\(path.path))"
             return path
         }
+        Self.debugLog("'which opencode' in current env returned nothing")
 
         // Strategy 2: Try via login shell to get user's full PATH
         if let path = findBinaryViaLoginShell() {
             logger.info("OpenCodeZen: Found via login shell: \(path.path)")
-            debugLog("Found via login shell: \(path.path)")
+            Self.debugLog("Found via login shell: \(path.path)")
             binarySourceDescription = "login shell PATH (\(path.path))"
             return path
         }
+        Self.debugLog("login shell 'which opencode' returned nothing")
 
         // Strategy 3: Hardcoded fallback paths
         let fallbackPaths = [
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".npm-global/bin/opencode").path, // npm global
             "/opt/homebrew/bin/opencode", // Apple Silicon Homebrew
             "/usr/local/bin/opencode", // Intel Homebrew
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".opencode/bin/opencode").path, // OpenCode default
@@ -80,73 +67,115 @@ final class OpenCodeZenProvider: ProviderProtocol {
 
         for path in fallbackPaths where FileManager.default.fileExists(atPath: path) {
             logger.info("OpenCodeZen: Found via fallback path: \(path)")
-            debugLog("Found via fallback: \(path)")
+            Self.debugLog("Found via fallback: \(path)")
             binarySourceDescription = "fallback (\(path))"
             return URL(fileURLWithPath: path)
         }
 
         logger.error("OpenCodeZen: Binary not found in any location")
-        debugLog("Binary not found anywhere")
+        Self.debugLog("Binary not found anywhere")
         return nil
     }
 
-    /// Finds opencode binary using `which` command in current environment.
-    private func findBinaryViaWhich() -> URL? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = ["opencode"]
+    /// Runs a process synchronously, redirecting stdout to a temporary file to
+    /// avoid pipe deadlock when output exceeds the pipe buffer. The temp file is
+    /// removed in all exit paths.
+    /// - Returns: The process's stdout as a string, or nil if the process fails
+    ///   or produces no readable output.
+    @discardableResult
+    internal static func runSynchronousCommand(process: Process) -> String? {
+        let tempFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("opencode_zen_stdout_\(UUID().uuidString).txt")
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+        defer {
+            try? FileManager.default.removeItem(at: tempFile)
+        }
+
+        let created = FileManager.default.createFile(atPath: tempFile.path, contents: nil, attributes: nil)
+        guard created, let stdoutHandle = try? FileHandle(forWritingTo: tempFile) else {
+            Self.debugLog("Failed to create stdout temp file at \(tempFile.path)")
+            return nil
+        }
+
+        process.standardOutput = stdoutHandle
 
         do {
             try process.run()
             process.waitUntilExit()
-
-            guard process.terminationStatus == 0 else { return nil }
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !output.isEmpty else { return nil }
-
-            guard FileManager.default.fileExists(atPath: output) else { return nil }
-            return URL(fileURLWithPath: output)
         } catch {
-            debugLog("'which opencode' failed: \(error.localizedDescription)")
+            stdoutHandle.closeFile()
+            Self.debugLog("Process failed to run: \(error.localizedDescription)")
             return nil
         }
+
+        stdoutHandle.closeFile()
+
+        guard process.terminationStatus == 0 else { return nil }
+
+        guard let output = try? String(contentsOf: tempFile, encoding: .utf8) else { return nil }
+        return output
+    }
+
+    /// Convenience wrapper that builds a Process and runs it synchronously.
+    @discardableResult
+    internal static func runSynchronousCommand(
+        executableURL: URL,
+        arguments: [String],
+        environment: [String: String]? = nil
+    ) -> String? {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        if let environment = environment {
+            process.environment = environment
+        }
+        process.standardError = FileHandle.nullDevice
+        return runSynchronousCommand(process: process)
+    }
+
+    /// Finds a binary by name using `which` either directly or via the login shell.
+    /// Extracted and made internal so tests can verify behavior with arbitrary
+    /// command names and controlled PATHs without relying on `opencode` being installed.
+    internal static func findBinary(
+        named name: String,
+        usingWhich: Bool,
+        environment: [String: String]? = nil
+    ) -> URL? {
+        let process = Process()
+        if usingWhich {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+            process.arguments = [name]
+        } else {
+            let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+            guard shell.hasPrefix("/") else {
+                Self.debugLog("SHELL env is not an absolute path: \(shell)")
+                return nil
+            }
+            process.executableURL = URL(fileURLWithPath: shell)
+            process.arguments = ["-lc", "which \(name) 2>/dev/null"]
+        }
+        if let environment = environment {
+            process.environment = environment
+        }
+        process.standardError = FileHandle.nullDevice
+
+        guard let output = runSynchronousCommand(process: process)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !output.isEmpty else { return nil }
+
+        guard FileManager.default.fileExists(atPath: output) else { return nil }
+        return URL(fileURLWithPath: output)
+    }
+
+    /// Finds opencode binary using `which` command in current environment.
+    internal func findBinaryViaWhich() -> URL? {
+        Self.findBinary(named: "opencode", usingWhich: true)
     }
 
     /// Finds opencode binary using login shell to capture user's full PATH.
     /// This is important because GUI apps do not inherit terminal PATH modifications.
-    private func findBinaryViaLoginShell() -> URL? {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-lc", "which opencode 2>/dev/null"]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            guard process.terminationStatus == 0 else { return nil }
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !output.isEmpty else { return nil }
-
-            guard FileManager.default.fileExists(atPath: output) else { return nil }
-            return URL(fileURLWithPath: output)
-        } catch {
-            debugLog("Login shell 'which opencode' failed: \(error.localizedDescription)")
-            return nil
-        }
+    internal func findBinaryViaLoginShell() -> URL? {
+        Self.findBinary(named: "opencode", usingWhich: false)
     }
 
     /// Parsed statistics from `opencode stats`.
@@ -181,7 +210,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
             throw ProviderError.authenticationFailed("OpenCode CLI not accessible at \(binaryPath.path). Install and sign in to OpenCode CLI first.")
         }
 
-        debugLog("Fetching current stats only (history tracking disabled)")
+        Self.debugLog("Fetching current stats only (history tracking disabled)")
         let output = try await runOpenCodeStats(days: 7)
         let stats = try parseStats(output)
         let displayStats = Self.adjustStatsForDisplay(
@@ -197,7 +226,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
         if displayStats.excludedCost > 0 {
             let excludedSummary = String(format: "%.2f", displayStats.excludedCost)
             logger.info("OpenCode Zen: Excluded $\(excludedSummary) of non-Zen OpenCode stats usage from pay-as-you-go totals")
-            debugLog("Excluded $\(excludedSummary) of non-Zen OpenCode stats usage from OpenCode Zen totals")
+            Self.debugLog("Excluded $\(excludedSummary) of non-Zen OpenCode stats usage from OpenCode Zen totals")
         }
 
         let details = DetailedUsage(
@@ -270,10 +299,43 @@ final class OpenCodeZenProvider: ProviderProtocol {
         }
     }
 
+    private static func debugLog(_ message: String) {
+        let msg = "[\(Date())] OpenCodeZen: \(message)\n"
+        if let data = msg.data(using: .utf8) {
+            let path = "/tmp/opencode_debug.log"
+            if FileManager.default.fileExists(atPath: path) {
+                if let handle = FileHandle(forWritingAtPath: path) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                try? data.write(to: URL(fileURLWithPath: path))
+            }
+        }
+    }
+
     static func handleStatsOutput(outputData: Data, exitStatus: Int32) throws -> String {
         if exitStatus != 0 {
             let errorOutput = String(data: outputData, encoding: .utf8) ?? ""
+            Self.debugLog("CLI exited \(exitStatus). Output:\n\(errorOutput)")
             if isOpenCodeAuthError(errorOutput) {
+                throw ProviderError.authenticationFailed("OpenCode CLI is not authenticated. Run `opencode login` first.")
+            }
+            // Conservative fallback: any CLI failure that points at login/sign-in
+            // should be treated as an unconfigured state rather than a runtime error.
+            let lowercased = errorOutput.lowercased()
+            let mentionsLogin = lowercased.contains("opencode login")
+                || lowercased.contains("login required")
+                || lowercased.contains("log in required")
+                || lowercased.contains("sign in required")
+                || lowercased.contains("signin required")
+            let mentionsAuth = lowercased.contains("auth")
+                || lowercased.contains("token")
+                || lowercased.contains("credential")
+                || lowercased.contains("session")
+                || lowercased.contains("unauthorized")
+            if mentionsLogin || (mentionsAuth && lowercased.contains("login")) {
                 throw ProviderError.authenticationFailed("OpenCode CLI is not authenticated. Run `opencode login` first.")
             }
             throw ProviderError.providerError("OpenCode CLI failed with exit code \(exitStatus)")
@@ -289,19 +351,41 @@ final class OpenCodeZenProvider: ProviderProtocol {
     private static func isOpenCodeAuthError(_ output: String) -> Bool {
         let lowercased = output.lowercased()
         let authPatterns = [
+            // Explicit auth states
             "not authenticated",
             "not logged in",
+            "not signed in",
+            "no active session",
+            // Requests to sign in / log in
             "please sign in",
             "please login",
             "please log in",
+            "sign in required",
+            "signin required",
+            "login required",
+            "log in required",
+            "auth required",
             "authentication required",
+            // Token/session problems
             "unauthorized",
             "invalid token",
             "token not found",
             "no valid token",
+            "token expired",
+            "session expired",
+            "no token",
+            "credentials not found",
+            "no credentials",
+            // CLI-specific hints (with various quote styles)
             "run 'opencode login'",
             "run `opencode login`",
-            "sign in to opencode"
+            "run \"opencode login\"",
+            "opencode login",
+            "sign in to opencode",
+            "login to opencode",
+            "must be logged in",
+            "must login",
+            "must log in"
         ]
         return authPatterns.contains { lowercased.contains($0) }
     }
@@ -312,31 +396,77 @@ final class OpenCodeZenProvider: ProviderProtocol {
     /// process alive in the background indefinitely, and these accumulate across our
     /// periodic refreshes. We reap anything past the threshold before starting a fresh
     /// run so the hung processes do not leak resources.
-    private func killStaleOpenCodeStatsProcesses() {
+    ///
+    /// - Note: Uses a temporary file for stdout instead of a Pipe to avoid deadlock
+    ///   when the process list is larger than the pipe buffer.
+    internal func killStaleOpenCodeStatsProcesses() {
         // 1 hour. Legitimate runs finish in seconds, so anything older is hung.
         let staleThresholdSeconds = 3600
+
+        let tempFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("token_king_ps_list_\(UUID().uuidString).txt")
+
+        // Always delete the temp file on the way out, regardless of success or failure.
+        defer {
+            try? FileManager.default.removeItem(at: tempFile)
+        }
 
         let listing = Process()
         listing.executableURL = URL(fileURLWithPath: "/bin/ps")
         // etimes = elapsed running time in seconds; command = full argv string.
         listing.arguments = ["-axo", "pid=,etimes=,command="]
 
-        let pipe = Pipe()
-        listing.standardOutput = pipe
+        // FileHandle(forWritingTo:) requires the file to already exist; create it first
+        // so the process has a valid stdout destination.
+        let created = FileManager.default.createFile(atPath: tempFile.path, contents: nil, attributes: nil)
+        guard created, let stdoutHandle = try? FileHandle(forWritingTo: tempFile) else {
+            Self.debugLog("Stale cleanup: failed to create stdout temp file")
+            return
+        }
+        listing.standardOutput = stdoutHandle
         listing.standardError = FileHandle.nullDevice
 
         do {
             try listing.run()
             listing.waitUntilExit()
         } catch {
-            debugLog("Stale cleanup: failed to list processes: \(error.localizedDescription)")
+            Self.debugLog("Stale cleanup: failed to list processes: \(error.localizedDescription)")
             return
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8) else { return }
+        stdoutHandle.closeFile()
+
+        guard let output = try? String(contentsOf: tempFile, encoding: .utf8) else {
+            return
+        }
 
         let selfPid = ProcessInfo.processInfo.processIdentifier
+        let stalePids = Self.identifyStaleOpenCodeStatsPids(
+            in: output,
+            staleThresholdSeconds: staleThresholdSeconds,
+            selfPid: selfPid
+        )
+
+        for stale in stalePids {
+            // Hung processes ignore SIGTERM, so SIGKILL guarantees the reap.
+            kill(stale.pid, SIGKILL)
+            logger.info("OpenCodeZen: Killed stale 'opencode stats' process pid=\(stale.pid) (running \(stale.etimes)s)")
+            Self.debugLog("Killed stale 'opencode stats' pid=\(stale.pid) etimes=\(stale.etimes)s")
+        }
+    }
+
+    /// Parses `ps -axo pid=,etimes=,command=` output and returns the PIDs (with their
+    /// elapsed times) of `opencode stats` processes that have run for at least
+    /// `staleThresholdSeconds` and are not the current process.
+    ///
+    /// Extracted and made `internal` so tests can verify it handles large process
+    /// lists without blocking or deadlocking.
+    internal static func identifyStaleOpenCodeStatsPids(
+        in output: String,
+        staleThresholdSeconds: Int,
+        selfPid: Int32
+    ) -> [(pid: Int32, etimes: Int)] {
+        var stalePids: [(pid: Int32, etimes: Int)] = []
 
         for line in output.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -354,11 +484,10 @@ final class OpenCodeZenProvider: ProviderProtocol {
             guard etimes >= staleThresholdSeconds else { continue }
             guard pid != selfPid else { continue }
 
-            // Hung processes ignore SIGTERM, so SIGKILL guarantees the reap.
-            kill(pid, SIGKILL)
-            logger.info("OpenCodeZen: Killed stale 'opencode stats' process pid=\(pid) (running \(etimes)s)")
-            debugLog("Killed stale 'opencode stats' pid=\(pid) etimes=\(etimes)s")
+            stalePids.append((pid, etimes))
         }
+
+        return stalePids
     }
 
     static func adjustStatsForDisplay(
@@ -372,10 +501,15 @@ final class OpenCodeZenProvider: ProviderProtocol {
             .reduce(0.0) { partialResult, item in
                 partialResult + max(item.value, 0)
             }
-        let excludedCost = max(0, totalCost - zenCost)
+        // Fallback: if no models matched the Zen prefix but the CLI reported a
+        // non-zero total, use the raw total so the user sees meaningful data
+        // rather than a misleading zero. This can happen when OpenCode changes
+        // model prefixes or when the account uses provider-specific aliases.
+        let adjustedZenCost = zenCost > 0 ? zenCost : max(0, totalCost)
+        let excludedCost = max(0, totalCost - adjustedZenCost)
         let adjustedAvgCostPerDay: Double
         if totalCost > 0, avgCostPerDay > 0 {
-            adjustedAvgCostPerDay = max(0, avgCostPerDay * (zenCost / totalCost))
+            adjustedAvgCostPerDay = max(0, avgCostPerDay * (adjustedZenCost / totalCost))
         } else {
             adjustedAvgCostPerDay = 0
         }
@@ -387,9 +521,9 @@ final class OpenCodeZenProvider: ProviderProtocol {
             }
 
         return DisplayStatsAdjustment(
-            totalCost: zenCost,
+            totalCost: adjustedZenCost,
             avgCostPerDay: adjustedAvgCostPerDay,
-            modelCosts: zenModelCosts,
+            modelCosts: zenModelCosts.isEmpty ? modelCosts : zenModelCosts,
             messages: zenMessages,
             excludedCost: excludedCost
         )
@@ -402,29 +536,37 @@ final class OpenCodeZenProvider: ProviderProtocol {
 
     /// Parses opencode stats output using regex patterns.
     private func parseStats(_ output: String) throws -> OpenCodeStats {
+        Self.debugLog("Parsing stats output (\(output.count) chars)")
+
         let totalCostPattern = #"│Total Cost\s+\$([0-9.]+)"#
         guard let totalCostMatch = output.range(of: totalCostPattern, options: .regularExpression) else {
             logger.error("Cannot parse total cost from output")
+            Self.debugLog("Failed to match Total Cost. Output preview:\n\(String(output.prefix(800)))")
             throw ProviderError.decodingError("Cannot parse total cost")
         }
         let totalCostStr = String(output[totalCostMatch])
             .replacingOccurrences(of: #"│Total Cost\s+\$"#, with: "", options: .regularExpression)
         guard let totalCost = Double(totalCostStr) else {
+            Self.debugLog("Failed to convert total cost '\(totalCostStr)' to Double")
             throw ProviderError.decodingError("Invalid total cost value")
         }
 
         let avgCostPattern = #"│Avg Cost/Day\s+\$([0-9.]+)"#
         guard let avgCostMatch = output.range(of: avgCostPattern, options: .regularExpression) else {
+            Self.debugLog("Failed to match Avg Cost/Day")
             throw ProviderError.decodingError("Cannot parse avg cost")
         }
         let avgCostStr = String(output[avgCostMatch])
             .replacingOccurrences(of: #"│Avg Cost/Day\s+\$"#, with: "", options: .regularExpression)
         guard let avgCost = Double(avgCostStr) else {
+            Self.debugLog("Failed to convert avg cost '\(avgCostStr)' to Double")
             throw ProviderError.decodingError("Invalid avg cost value")
         }
 
         let modelCosts = Self.parseModelCosts(from: output)
         let modelMessages = Self.parseModelMessages(from: output)
+
+        Self.debugLog("Parsed totalCost=\(totalCost), avgCost=\(avgCost), models=\(modelCosts.count), messages=\(modelMessages.count)")
 
         return OpenCodeStats(
             totalCost: totalCost,

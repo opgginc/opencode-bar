@@ -926,4 +926,39 @@ final class TokenManagerTests: XCTestCase {
             "Expected JSONC input to remain valid after stripping comments"
         )
     }
+
+    // MARK: - Process stdout capture regression tests
+
+    func testLargeStdoutCaptureDoesNotDeadlock() throws {
+        // Use a shell script that emits output larger than the typical pipe
+        // buffer (~64 KB). The previous Pipe-based implementation deadlocked
+        // here because the parent waited for exit before draining stdout.
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let largePayload = String(repeating: "x", count: 256 * 1024)
+        let scriptPath = tempDirectory.appendingPathComponent("emit.sh")
+        let script = "#!/bin/sh\nprintf '%s' '\(largePayload)'\n"
+        try script.write(to: scriptPath, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptPath.path)
+
+        let captured = TokenManager.shared.runProcessCapturingStdout(
+            executableURL: scriptPath,
+            arguments: []
+        )
+
+        let capturedString = try XCTUnwrap(String(data: XCTUnwrap(captured), encoding: .utf8))
+        XCTAssertEqual(capturedString, largePayload)
+    }
+
+    func testStdoutCaptureReturnsNilOnNonzeroExit() {
+        let captured = TokenManager.shared.runProcessCapturingStdout(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "exit 1"]
+        )
+        XCTAssertNil(captured)
+    }
 }

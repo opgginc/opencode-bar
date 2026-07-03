@@ -73,8 +73,13 @@ func fetchKimiUsage(
         }
 
         let weeklyLimit = Int(usage.limit ?? "0") ?? 0
-        let weeklyRemaining = Int(usage.remaining ?? "0") ?? 0
-        let weeklyUsed = max(0, weeklyLimit - weeklyRemaining)
+        let weeklyUsed: Int
+        if let usedString = usage.used, !usedString.isEmpty, let parsed = Int(usedString) {
+            weeklyUsed = max(0, parsed)
+        } else {
+            let weeklyRemaining = Int(usage.remaining ?? "0") ?? 0
+            weeklyUsed = max(0, weeklyLimit - weeklyRemaining)
+        }
 
         func parseISO8601Date(_ string: String) -> Date? {
             let formatterWithFrac = ISO8601DateFormatter()
@@ -96,15 +101,22 @@ func fetchKimiUsage(
             let limit = limits[0]
             if let detail = limit.detail {
                 let detailLimit = Double(detail.limit ?? "0") ?? 0
-                let detailRemaining = Double(detail.remaining ?? "0") ?? 0
+                let detailUsed: Double
+                if let usedString = detail.used, !usedString.isEmpty, let parsed = Double(usedString) {
+                    detailUsed = max(0, parsed)
+                } else {
+                    let detailRemaining = Double(detail.remaining ?? "0") ?? 0
+                    detailUsed = max(0, detailLimit - detailRemaining)
+                }
                 if detailLimit > 0 {
-                    fiveHourUsage = ((detailLimit - detailRemaining) / detailLimit) * 100
+                    fiveHourUsage = (detailUsed / detailLimit) * 100
                 }
                 fiveHourReset = detail.resetTime.flatMap { parseISO8601Date($0) }
             }
         }
 
         let weeklyUsagePercent = weeklyLimit > 0 ? (Double(weeklyUsed) / Double(weeklyLimit)) * 100 : 0
+        let weeklyRemaining = Int(usage.remaining ?? "0") ?? 0
         let remainingPercent = weeklyLimit > 0 ? (Double(weeklyRemaining) / Double(weeklyLimit)) * 100 : 100
 
         logger.info("Kimi usage fetched: weekly=\(weeklyUsagePercent)% used, 5h=\(fiveHourUsage?.description ?? "N/A")% used")
