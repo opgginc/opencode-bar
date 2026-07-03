@@ -145,6 +145,13 @@
 		TAVILYAPP111111111111111 /* TavilySearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = TAVILYFILE22222222222222 /* TavilySearchProvider.swift */; };
 		TOKENTESTBF1111111111111 /* TokenManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TOKENTESTFR1111111111111 /* TokenManagerTests.swift */; };
 		SBCCTRLTESTBF111111111 /* StatusBarControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBCCTRLTESTFR111111111 /* StatusBarControllerTests.swift */; };
+		VOLCANOSIGNERAPP1111111111 /* VolcanoArkSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOLCANOSIGNERFILE222222222 /* VolcanoArkSigner.swift */; };
+		VOLCANOSIGNERCLI1111111111 /* VolcanoArkSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOLCANOSIGNERFILE222222222 /* VolcanoArkSigner.swift */; };
+		VOLCANOTYPESAPP11111111111 /* VolcanoArkTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOLCANOTYPESFILE2222222222 /* VolcanoArkTypes.swift */; };
+		VOLCANOTYPESCLI11111111111 /* VolcanoArkTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOLCANOTYPESFILE2222222222 /* VolcanoArkTypes.swift */; };
+		VOLCANOPROVAPP111111111111 /* VolcanoArkProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOLCANOPROVFILE22222222222 /* VolcanoArkProvider.swift */; };
+		VOLCANOPROVCLI111111111111 /* VolcanoArkProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOLCANOPROVFILE22222222222 /* VolcanoArkProvider.swift */; };
+		VOLCANOTESTBF111111111111 /* VolcanoArkProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOLCANOTESTFR11111111111 /* VolcanoArkProviderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -286,6 +293,10 @@
 		TAVILYFILE22222222222222 /* TavilySearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TavilySearchProvider.swift; sourceTree = "<group>"; };
 		TDDDDDDDDDDDDDDDDDDDDDD /* CopilotMonitorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CopilotMonitorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		TOKENTESTFR1111111111111 /* TokenManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenManagerTests.swift; sourceTree = "<group>"; };
+		VOLCANOSIGNERFILE222222222 /* VolcanoArkSigner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VolcanoArkSigner.swift; sourceTree = "<group>"; };
+		VOLCANOTYPESFILE2222222222 /* VolcanoArkTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VolcanoArkTypes.swift; sourceTree = "<group>"; };
+		VOLCANOPROVFILE22222222222 /* VolcanoArkProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VolcanoArkProvider.swift; sourceTree = "<group>"; };
+		VOLCANOTESTFR11111111111 /* VolcanoArkProviderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VolcanoArkProviderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -360,6 +371,9 @@
 				TAVILYFILE22222222222222 /* TavilySearchProvider.swift */,
 				BRAVEFILE22222222222222 /* BraveSearchProvider.swift */,
 				SYNTHETIC2222222222222222 /* SyntheticProvider.swift */,
+				VOLCANOSIGNERFILE222222222 /* VolcanoArkSigner.swift */,
+				VOLCANOTYPESFILE2222222222 /* VolcanoArkTypes.swift */,
+				VOLCANOPROVFILE22222222222 /* VolcanoArkProvider.swift */,
 			);
 			path = Providers;
 			sourceTree = "<group>";
@@ -531,6 +545,7 @@
 				CF11AA22BB33CC44DD55EE04 /* CurrencyFormatterTests.swift */,
 				PRRESULTTESTFILE11111111 /* ProviderResultTests.swift */,
 				SBCCTRLTESTFR111111111 /* StatusBarControllerTests.swift */,
+				VOLCANOTESTFR11111111111 /* VolcanoArkProviderTests.swift */,
 				36C2B344956C6CBB5D2AA5E3 /* TavilySearchProviderTests.swift */,
 				3757ACF7CDCF402D9A9280465146654E /* BraveSearchProviderTests.swift */,
 				8F0ECB3B429456A48F1A4E69 /* SearchEngineTitleTests.swift */,
@@ -733,6 +748,9 @@
 				TAVILYAPP111111111111111 /* TavilySearchProvider.swift in Sources */,
 				BRAVEAPP1111111111111111 /* BraveSearchProvider.swift in Sources */,
 				SYNTHETIC1111111111111111 /* SyntheticProvider.swift in Sources */,
+				VOLCANOSIGNERAPP1111111111 /* VolcanoArkSigner.swift in Sources */,
+				VOLCANOTYPESAPP11111111111 /* VolcanoArkTypes.swift in Sources */,
+				VOLCANOPROVAPP111111111111 /* VolcanoArkProvider.swift in Sources */,
 				283348FF2F313096004DADE1 /* BrowserCookieService.swift in Sources */,
 				6C4146861DE2C13836DE1D35 /* CopilotHistoryService.swift in Sources */,
 				PMB111111111111111111111 /* ProviderMenuBuilder.swift in Sources */,
@@ -782,6 +800,9 @@
 				CLITAVILY111111111111111 /* TavilySearchProvider.swift in Sources */,
 				CLIBRAVE1111111111111111 /* BraveSearchProvider.swift in Sources */,
 				CLISYNTHETIC1111111111111 /* SyntheticProvider.swift in Sources */,
+				VOLCANOSIGNERCLI1111111111 /* VolcanoArkSigner.swift in Sources */,
+				VOLCANOTYPESCLI11111111111 /* VolcanoArkTypes.swift in Sources */,
+				VOLCANOPROVCLI111111111111 /* VolcanoArkProvider.swift in Sources */,
 				CLIPROVMGR11111111111111 /* CLIProviderManager.swift in Sources */,
 				CLICOPILOT11111111111111 /* CopilotCLIProvider.swift in Sources */,
 				CLIHISTORY11111111111111 /* CopilotHistoryService.swift in Sources */,
@@ -816,6 +837,7 @@
 				PROVREGIONTESTBF1111111111 /* ProviderRegionTests.swift in Sources */,
 				CURSORTSTBF11111111111 /* CursorProviderTests.swift in Sources */,
 				TOKENTESTBF1111111111111 /* TokenManagerTests.swift in Sources */,
+				VOLCANOTESTBF111111111111 /* VolcanoArkProviderTests.swift in Sources */,
 				CODEXTESTBF111111111111 /* CodexProviderTests.swift in Sources */,
 				CMDCODETESTBF111111111 /* CommandCodeProviderTests.swift in Sources */,
 				OCAUTHTESTBF11111111111 /* OpenCodeAuthDecodingTests.swift in Sources */,

@@ -45,6 +45,7 @@ actor ProviderManager {
             GrokProvider(),
             KimiCNProvider(),
             KimiGlobalProvider(),
+            VolcanoArkProvider(),
             ChutesProvider(),
             SyntheticProvider(),
             TavilySearchProvider(),
