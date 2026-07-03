@@ -267,10 +267,10 @@ struct OpenCodeAuth: Codable {
         nanoGpt: APIKey?,
         synthetic: APIKey?,
         chutes: APIKey? = nil,
-        mimoForCoding: APIKey?,
-        volcanoArk: APIKey?,
-        hunyuan: APIKey?,
-        zhipuGLM: APIKey?
+        mimoForCoding: APIKey? = nil,
+        volcanoArk: APIKey? = nil,
+        hunyuan: APIKey? = nil,
+        zhipuGLM: APIKey? = nil
     ) {
         self.anthropic = anthropic
         self.openai = openai
