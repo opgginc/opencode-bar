@@ -131,4 +131,45 @@ final class OpenCodeZenProviderTests: XCTestCase {
         XCTAssertFalse(OpenCodeZenProvider.isOpenCodeZenModel("openrouter/opencode/gpt-5.5"))
         XCTAssertFalse(OpenCodeZenProvider.isOpenCodeZenModel("nano-gpt/minimax/minimax-m2.5"))
     }
+
+    func testParseETimeSecondsParsesMinutesHoursAndDaysFormats() {
+        XCTAssertEqual(OpenCodeZenProvider.parseETimeSeconds("05:23"), 323)
+        XCTAssertEqual(OpenCodeZenProvider.parseETimeSeconds("01:02:03"), 3_723)
+        XCTAssertEqual(OpenCodeZenProvider.parseETimeSeconds("2-03:04:05"), 183_845)
+    }
+
+    func testParseETimeSecondsReturnsNilForMalformedInput() {
+        XCTAssertNil(OpenCodeZenProvider.parseETimeSeconds("03"))
+        XCTAssertNil(OpenCodeZenProvider.parseETimeSeconds("garbage"))
+        XCTAssertNil(OpenCodeZenProvider.parseETimeSeconds(""))
+    }
+
+    func testStaleOpenCodeStatsPIDsIncludesOnlyStaleOpenCodeStatsLines() {
+        // Mirrors real `ps -axo pid=,etime=,command=` output: a stale hung stats run
+        // (123), a fresh healthy one (124), a stale one that is our own pid (125, must
+        // be excluded so we never kill ourselves), an unrelated process with a huge argv
+        // (126), `ps` itself (127), an unrelated "opencode" subcommand that isn't
+        // "stats" (128), and malformed/empty lines that must be skipped, not crash.
+        let output = #"""
+        123 01:00:01 /opt/homebrew/bin/opencode stats --days 7 --models
+        124 00:05 /opt/homebrew/bin/opencode stats --days 7
+        125 02:00:00 /opt/homebrew/bin/opencode stats --days 7 --models
+        126 02:00:00 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --type=renderer --field-trial-handle=1,i,9999999999999999999,1234567890123456,262144
+        127 00:00 /bin/ps -axo pid=,etime=,command=
+        128 02:00:00 /opt/homebrew/bin/opencode run something
+
+        129 abc /opt/homebrew/bin/opencode stats --days 7
+        weird
+        """#
+
+        let staleProcesses = OpenCodeZenProvider.staleOpenCodeStatsPIDs(
+            fromPSOutput: output,
+            staleThresholdSeconds: 3_600,
+            selfPid: 125
+        )
+
+        // Tuple arrays aren't Equatable, so compare pids and elapsed seconds separately.
+        XCTAssertEqual(staleProcesses.map(\.pid), [123])
+        XCTAssertEqual(staleProcesses.map(\.etimeSeconds), [3_601])
+    }
 }

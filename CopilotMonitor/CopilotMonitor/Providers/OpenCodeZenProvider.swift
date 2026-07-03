@@ -276,8 +276,13 @@ final class OpenCodeZenProvider: ProviderProtocol {
 
         let listing = Process()
         listing.executableURL = URL(fileURLWithPath: "/bin/ps")
-        // etimes = elapsed running time in seconds; command = full argv string.
-        listing.arguments = ["-axo", "pid=,etimes=,command="]
+        // `etime` (elapsed wall-clock time), not `etimes`: macOS BSD ps has no `etimes`
+        // keyword (that's Linux procps-only) and prints "ps: etimes: keyword not found",
+        // silently dropping the column. That shifted every row out from under this
+        // pid/etimes/command parse, so the stale-kill logic never actually matched
+        // anything. `etime` instead prints `[[dd-]hh:]mm:ss`, parsed by
+        // parseETimeSeconds below; command = full argv string.
+        listing.arguments = ["-axo", "pid=,etime=,command="]
 
         let pipe = Pipe()
         listing.standardOutput = pipe
@@ -285,38 +290,107 @@ final class OpenCodeZenProvider: ProviderProtocol {
 
         do {
             try listing.run()
-            listing.waitUntilExit()
         } catch {
             debugLog("Stale cleanup: failed to list processes: \(error.localizedDescription)")
             return
         }
 
+        // Drain the pipe BEFORE calling waitUntilExit(). `ps -axo` output here runs
+        // ~291KB, well past the pipe's 64KB kernel buffer. Calling waitUntilExit()
+        // first would block this thread waiting for `ps` to exit while `ps` blocks on
+        // write() waiting for buffer space that never frees — a permanent mutual
+        // deadlock. readDataToEndOfFile() keeps draining as `ps` writes, so `ps` can
+        // always make progress and actually reach EOF.
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        listing.waitUntilExit()
+
         guard let output = String(data: data, encoding: .utf8) else { return }
 
         let selfPid = ProcessInfo.processInfo.processIdentifier
+        let staleProcesses = Self.staleOpenCodeStatsPIDs(
+            fromPSOutput: output,
+            staleThresholdSeconds: staleThresholdSeconds,
+            selfPid: selfPid
+        )
+
+        for (pid, etimeSeconds) in staleProcesses {
+            // Hung processes ignore SIGTERM, so SIGKILL guarantees the reap.
+            kill(pid, SIGKILL)
+            logger.info("OpenCodeZen: Killed stale 'opencode stats' process pid=\(pid) (running \(etimeSeconds)s)")
+            debugLog("Killed stale 'opencode stats' pid=\(pid) etime=\(etimeSeconds)s")
+        }
+    }
+
+    /// Parses BSD `ps -o etime=` elapsed-time format `[[dd-]hh:]mm:ss` into total
+    /// seconds. macOS `ps` has no `etimes` (seconds-only) keyword, so the stale-kill
+    /// logic must parse this human-readable string itself instead of reading a plain
+    /// integer column. Returns nil for anything that doesn't match the format.
+    static func parseETimeSeconds(_ field: String) -> Int? {
+        guard !field.isEmpty else { return nil }
+
+        // Optional "dd-" day prefix, e.g. "2-03:04:05" for 2 days.
+        let dayAndTime = field.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        let days: Int
+        let timePart: Substring
+        if dayAndTime.count == 2 {
+            guard let parsedDays = Int(dayAndTime[0]) else { return nil }
+            days = parsedDays
+            timePart = dayAndTime[1]
+        } else {
+            days = 0
+            timePart = field[...]
+        }
+
+        // Remainder is either "mm:ss" or "hh:mm:ss".
+        let components = timePart.split(separator: ":")
+        let parsedComponents = components.compactMap { Int($0) }
+        guard parsedComponents.count == components.count else { return nil }
+
+        let seconds: Int
+        switch parsedComponents.count {
+        case 2:
+            seconds = parsedComponents[0] * 60 + parsedComponents[1]
+        case 3:
+            seconds = parsedComponents[0] * 3_600 + parsedComponents[1] * 60 + parsedComponents[2]
+        default:
+            return nil
+        }
+
+        return days * 86_400 + seconds
+    }
+
+    /// Filters `ps -axo pid=,etime=,command=` output down to (pid, elapsed seconds)
+    /// pairs of `opencode stats` invocations that have outlived `staleThresholdSeconds`.
+    /// Elapsed seconds ride along so the caller can still log how long each one ran.
+    /// Split out of `killStaleOpenCodeStatsProcesses()` as pure string-in/data-out
+    /// logic so it is unit-testable without spawning a real `ps` process.
+    static func staleOpenCodeStatsPIDs(
+        fromPSOutput output: String,
+        staleThresholdSeconds: Int,
+        selfPid: Int32
+    ) -> [(pid: Int32, etimeSeconds: Int)] {
+        var staleProcesses: [(pid: Int32, etimeSeconds: Int)] = []
 
         for line in output.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
 
-            // Split into: pid, etimes, command (command keeps its own spaces).
+            // Split into: pid, etime, command (command keeps its own spaces).
             let parts = trimmed.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
             guard parts.count == 3,
                   let pid = Int32(parts[0]),
-                  let etimes = Int(parts[1]) else { continue }
+                  let etimeSeconds = parseETimeSeconds(String(parts[1])) else { continue }
 
             let command = String(parts[2])
 
             guard command.contains("opencode"), command.contains(" stats") else { continue }
-            guard etimes >= staleThresholdSeconds else { continue }
+            guard etimeSeconds >= staleThresholdSeconds else { continue }
             guard pid != selfPid else { continue }
 
-            // Hung processes ignore SIGTERM, so SIGKILL guarantees the reap.
-            kill(pid, SIGKILL)
-            logger.info("OpenCodeZen: Killed stale 'opencode stats' process pid=\(pid) (running \(etimes)s)")
-            debugLog("Killed stale 'opencode stats' pid=\(pid) etimes=\(etimes)s")
+            staleProcesses.append((pid: pid, etimeSeconds: etimeSeconds))
         }
+
+        return staleProcesses
     }
 
     static func adjustStatsForDisplay(
