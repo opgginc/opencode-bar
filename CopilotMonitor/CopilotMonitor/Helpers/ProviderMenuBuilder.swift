@@ -901,7 +901,6 @@ extension StatusBarController {
                 )
                 submenu.addItem(item)
             }
-            submenu.addItem(NSMenuItem.separator())
             addSubscriptionItems(to: submenu, provider: .synthetic, accountId: subscriptionAccountId)
             debugLog("createDetailSubmenu: added subscription items for Synthetic")
 
@@ -957,7 +956,6 @@ extension StatusBarController {
                 submenu.addItem(planItem)
             }
 
-            submenu.addItem(NSMenuItem.separator())
             addSubscriptionItems(to: submenu, provider: .kiro, accountId: subscriptionAccountId)
             debugLog("createDetailSubmenu: added subscription items for Kiro")
 
@@ -1247,10 +1245,6 @@ extension StatusBarController {
             let hintItem = NSMenuItem(title: "按量计费，无预置订阅套餐", action: nil, keyEquivalent: "")
             hintItem.isEnabled = false
             submenu.addItem(hintItem)
-        } else if visiblePresets.isEmpty {
-            let hintItem = NSMenuItem(title: "该版本仅海外", action: nil, keyEquivalent: "")
-            hintItem.isEnabled = false
-            submenu.addItem(hintItem)
         } else {
             for preset in visiblePresets {
                 let item = NSMenuItem(
@@ -1263,7 +1257,14 @@ extension StatusBarController {
                 item.representedObject = SubscriptionMenuAction(subscriptionKey: subscriptionKey, plan: .preset(preset.name, preset.cost))
                 let selectedName = manualPresetName ?? detectedPlanName
                 if selectedName == preset.name {
-                    item.state = .on
+                    switch currentPlan {
+                    case .preset(_, let cost) where cost == preset.cost:
+                        item.state = .on
+                    case .none where detectedPlanName == preset.name:
+                        item.state = .on
+                    default:
+                        break
+                    }
                 }
                 submenu.addItem(item)
             }

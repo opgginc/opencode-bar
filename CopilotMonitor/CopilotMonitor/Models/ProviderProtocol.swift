@@ -82,7 +82,7 @@ enum ProviderIdentifier: String, CaseIterable {
 
     var region: ProviderRegion {
         switch self {
-        case .kimiCN, .minimaxCodingPlanCN: return .china
+        case .kimiCN, .minimaxCodingPlanCN, .mimo, .volcanoArk, .hunyuan, .zhipuGLM: return .china
         default: return .global
         }
     }

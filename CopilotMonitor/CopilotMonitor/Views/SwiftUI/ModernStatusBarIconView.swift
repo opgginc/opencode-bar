@@ -102,7 +102,7 @@ struct SwiftUIProviderAlertView: View {
                 .scaledToFit()
                 .frame(width: 12, height: 12)
                 .foregroundColor(.red)
-        } else if identifier == .minimaxCodingPlan {
+        } else if identifier == .minimaxCodingPlan || identifier == .minimaxCodingPlanCN {
             Image("MinimaxIcon")
                 .renderingMode(.template)
                 .resizable()
@@ -143,7 +143,7 @@ struct SwiftUIProviderAlertView: View {
         case .codex: return "terminal"
         case .commandCode: return "command"
         case .cursor: return nil
-        case .geminiCLI: return "sparkles"
+        case .geminiCLI: return "g.circle"
         case .copilot: return "airplane"
         case .openRouter: return "dollarsign.circle"
         case .openCode, .openCodeZen, .openCodeGo: return "chevron.left.forwardslash.chevron.right"
@@ -156,11 +156,12 @@ struct SwiftUIProviderAlertView: View {
         case .nanoGpt: return "n.circle"
         case .synthetic: return "diamond"
         case .chutes: return "c.circle"
-        case .tavilySearch, .braveSearch, .minimaxCodingPlan, .minimaxCodingPlanCN: return nil
+        case .tavilySearch, .braveSearch, .minimaxCodingPlan: return nil
+        case .minimaxCodingPlanCN: return nil
         case .mimo: return "m.circle"
         case .volcanoArk: return "v.circle"
         case .hunyuan: return "h.circle"
-        case .zhipuGLM: return "g.circle"
+        case .zhipuGLM: return "z.circle"
         }
     }
 }

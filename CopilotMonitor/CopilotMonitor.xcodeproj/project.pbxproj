@@ -119,6 +119,7 @@
 		NANOGPTCLI11111111111111 /* NanoGptProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = NANOGPTFILE222222222222 /* NanoGptProvider.swift */; };
 		NANOGPTTESTBF1111111111 /* NanoGptProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = NANOGPTTESTFR1111111111 /* NanoGptProviderTests.swift */; };
 		OC1111111111111111111111 /* OpenCodeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OC2222222222222222222222 /* OpenCodeProvider.swift */; };
+		4DC6ED1C88C04187A63ED81C361099DA /* OpenCodeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OC2222222222222222222222 /* OpenCodeProvider.swift */; };
 		OCAUTHTESTBF11111111111 /* OpenCodeAuthDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = OCAUTHTESTFR11111111111 /* OpenCodeAuthDecodingTests.swift */; };
 		OCGOAPP11111111111111 /* OpenCodeGoProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OCGOFILE2222222222222 /* OpenCodeGoProvider.swift */; };
 		OCGOCLI11111111111111 /* OpenCodeGoProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = OCGOFILE2222222222222 /* OpenCodeGoProvider.swift */; };
@@ -598,6 +599,7 @@
 				AAAAAAAAAAAAAAAAAAAAAAAA /* Frameworks */,
 				B33333333333333333333333 /* Resources */,
 				CLICOPYPH11111111111111111 /* Embed CLI */,
+			99B4F502FF874C55842630C0E0F9A031 /* Inject Git Hash */,
 			);
 			buildRules = (
 			);
@@ -804,6 +806,7 @@
 				CLIANTIGRAVITY11111111 /* AntigravityProvider.swift in Sources */,
 				CLIOPENCZEN1111111111111 /* OpenCodeZenProvider.swift in Sources */,
 				OCGOCLI11111111111111 /* OpenCodeGoProvider.swift in Sources */,
+				4DC6ED1C88C04187A63ED81C361099DA /* OpenCodeProvider.swift in Sources */,
 				GROKCLI11111111111111 /* GrokProvider.swift in Sources */,
 				KIMICNCLI11111111111111 /* KimiCNProvider.swift in Sources */,
 				KIMIGLOBALCLI1111111111 /* KimiGlobalProvider.swift in Sources */,
@@ -878,6 +881,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		99B4F502FF874C55842630C0E0F9A031 /* Inject Git Hash */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Inject Git Hash";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(INFOPLIST_FILE)",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "GIT_HASH=$(git -C \"$SRCROOT\" rev-parse HEAD 2>/dev/null || echo \"unknown\")\nPLIST=\"$SRCROOT/$INFOPLIST_FILE\"\n/usr/libexec/PlistBuddy -c \"Delete :GitCommitHash\" \"$PLIST\" 2>/dev/null || true\n/usr/libexec/PlistBuddy -c \"Add :GitCommitHash string $GIT_HASH\" \"$PLIST\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXTargetDependency section */
 		CLIDEP1111111111111111111 /* PBXTargetDependency */ = {

@@ -24,6 +24,10 @@ private struct UsagePercentCandidate {
     let priority: UsageDisplayWindowPriority
 }
 
+private enum MenuItemTag {
+    static let dynamic = 999
+}
+
 extension StatusBarController: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === self.menu else { return }
@@ -513,7 +517,9 @@ final class StatusBarController: NSObject {
         settingsSubmenu.addItem(checkForUpdatesItem)
 
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
-        let versionItem = NSMenuItem(title: "Token King v\(version)", action: #selector(openGitHub), keyEquivalent: "")
+        let gitHash = Bundle.main.infoDictionary?["GitCommitHash"] as? String ?? "unknown"
+        let shortHash = String(gitHash.prefix(7))
+        let versionItem = NSMenuItem(title: "Token King v\(version) (\(shortHash))", action: #selector(openGitHub), keyEquivalent: "")
         versionItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Version")
         versionItem.target = self
         settingsSubmenu.addItem(versionItem)
@@ -1096,11 +1102,6 @@ final class StatusBarController: NSObject {
             add(details?.fiveHourUsage, priority: .hourly)
         case .tavilySearch, .braveSearch:
             add(details?.mcpUsagePercent, priority: .monthly)
-        case .volcanoArk:
-            add(details?.sevenDayUsage, priority: .weekly)
-            add(details?.fiveHourUsage, priority: .hourly)
-        case .mimo, .hunyuan, .zhipuGLM:
-            add(usage.usagePercentage, priority: .fallback)
         case .antigravity, .geminiCLI, .openRouter, .openCode, .openCodeZen:
             break
         }
@@ -1686,7 +1687,7 @@ final class StatusBarController: NSObject {
           if startIndex < menu.items.count {
               for i in startIndex..<menu.items.count {
                   let item = menu.items[i]
-                  if item.tag == 999 {
+                  if item.tag == MenuItemTag.dynamic {
                       itemsToRemove.append(item)
                   }
               }
@@ -1713,7 +1714,7 @@ final class StatusBarController: NSObject {
         var unconfiguredItems: [NSMenuItem] = []
 
          let separator1 = NSMenuItem.separator()
-         separator1.tag = 999
+         separator1.tag = MenuItemTag.dynamic
          menu.insertItem(separator1, at: insertIndex)
          insertIndex += 1
 
@@ -1721,13 +1722,13 @@ final class StatusBarController: NSObject {
 
           let payAsYouGoHeader = NSMenuItem()
           payAsYouGoHeader.view = createHeaderView(title: "按量付费：\(CurrencyFormatter.shared.format(usd: payAsYouGoTotal))")
-          payAsYouGoHeader.tag = 999
+          payAsYouGoHeader.tag = MenuItemTag.dynamic
           menu.insertItem(payAsYouGoHeader, at: insertIndex)
           insertIndex += 1
 
          var hasPayAsYouGo = false
 
-            let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen]
+            let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen, .openCode]
             for identifier in payAsYouGoOrder {
                 guard isProviderEnabled(identifier) else { continue }
 
@@ -1751,7 +1752,7 @@ final class StatusBarController: NSObject {
                             action: nil, keyEquivalent: ""
                         )
                         item.image = iconForProvider(identifier)
-                        item.tag = 999
+                        item.tag = MenuItemTag.dynamic
 
                         if let details = result.details, details.hasAnyValue {
                             item.submenu = createDetailSubmenu(details, identifier: identifier)
@@ -1782,7 +1783,7 @@ final class StatusBarController: NSObject {
                     let item = NSMenuItem(title: "\(identifier.displayName)（加载中…）", action: nil, keyEquivalent: "")
                     item.image = iconForProvider(identifier)
                     item.isEnabled = false
-                    item.tag = 999
+                    item.tag = MenuItemTag.dynamic
                     menu.insertItem(item, at: insertIndex)
                     insertIndex += 1
                 }
@@ -1799,7 +1800,7 @@ final class StatusBarController: NSObject {
                         action: nil, keyEquivalent: ""
                     )
                     addOnItem.image = iconForProvider(.copilot)
-                    addOnItem.tag = 999
+                    addOnItem.tag = MenuItemTag.dynamic
 
                     let submenu = NSMenu()
                     let overageRequests = details.copilotOverageRequests ?? 0
@@ -1846,7 +1847,7 @@ final class StatusBarController: NSObject {
                     let item = NSMenuItem(title: "Copilot 加购包（加载中…）", action: nil, keyEquivalent: "")
                     item.image = iconForProvider(.copilot)
                     item.isEnabled = false
-                    item.tag = 999
+                    item.tag = MenuItemTag.dynamic
                     menu.insertItem(item, at: insertIndex)
                     insertIndex += 1
                 }
@@ -1855,7 +1856,7 @@ final class StatusBarController: NSObject {
         if !hasPayAsYouGo && unconfiguredItems.isEmpty {
             let noItem = NSMenuItem()
             noItem.view = createDisabledLabelView(text: "无服务商")
-            noItem.tag = 999
+            noItem.tag = MenuItemTag.dynamic
             menu.insertItem(noItem, at: insertIndex)
             insertIndex += 1
         }
@@ -1865,7 +1866,7 @@ final class StatusBarController: NSObject {
         }
 
         let separator2 = NSMenuItem.separator()
-        separator2.tag = 999
+        separator2.tag = MenuItemTag.dynamic
         menu.insertItem(separator2, at: insertIndex)
         insertIndex += 1
 
@@ -1882,7 +1883,7 @@ final class StatusBarController: NSObject {
              ? "额度状态：\(subscriptionDisplay)/月"
              : "额度状态"
          quotaHeader.view = createHeaderView(title: quotaTitle)
-         quotaHeader.tag = 999
+         quotaHeader.tag = MenuItemTag.dynamic
          menu.insertItem(quotaHeader, at: insertIndex)
          insertIndex += 1
 
@@ -1924,7 +1925,7 @@ final class StatusBarController: NSObject {
                         icon: iconForProvider(.copilot),
                         isEnabled: !isUnavailableRateLimited
                     )
-                    quotaItem.tag = 999
+                    quotaItem.tag = MenuItemTag.dynamic
 
                     if quotaItem.isEnabled,
                        let details = account.details,
@@ -1946,7 +1947,7 @@ final class StatusBarController: NSObject {
                     usedPercent: usedPercent,
                     icon: iconForProvider(.copilot)
                 )
-                quotaItem.tag = 999
+                quotaItem.tag = MenuItemTag.dynamic
 
                 if let details = providerResults[.copilot]?.details, details.hasAnyValue {
                     quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot)
@@ -2235,7 +2236,7 @@ final class StatusBarController: NSObject {
                             icon: iconForProvider(identifier),
                             isEnabled: !isUnavailableRateLimited
                         )
-                        item.tag = 999
+                        item.tag = MenuItemTag.dynamic
 
                         if item.isEnabled,
                            let details = account.details,
@@ -2313,7 +2314,7 @@ final class StatusBarController: NSObject {
                         usedPercents = [singlePercent]
                     }
                     let item = createNativeQuotaMenuItem(name: identifier.displayName, usedPercents: usedPercents, icon: iconForProvider(identifier))
-                    item.tag = 999
+                    item.tag = MenuItemTag.dynamic
 
                     if let details = result.details, details.hasAnyValue {
                         item.submenu = createDetailSubmenu(details, identifier: identifier)
@@ -2344,7 +2345,7 @@ final class StatusBarController: NSObject {
                 let item = NSMenuItem(title: "\(identifier.displayName)（加载中…）", action: nil, keyEquivalent: "")
                 item.image = iconForProvider(identifier)
                 item.isEnabled = false
-                item.tag = 999
+                item.tag = MenuItemTag.dynamic
                 menu.insertItem(item, at: insertIndex)
                 insertIndex += 1
             }
@@ -2399,7 +2400,7 @@ final class StatusBarController: NSObject {
                         usedPercents: usedPercents,
                         icon: iconForProvider(.geminiCLI)
                     )
-                    item.tag = 999
+                    item.tag = MenuItemTag.dynamic
 
                     item.submenu = createGeminiAccountSubmenu(account)
 
@@ -2428,7 +2429,7 @@ final class StatusBarController: NSObject {
                 let item = NSMenuItem(title: "Gemini CLI（加载中…）", action: nil, keyEquivalent: "")
                 item.image = iconForProvider(.geminiCLI)
                 item.isEnabled = false
-                item.tag = 999
+                item.tag = MenuItemTag.dynamic
                 menu.insertItem(item, at: insertIndex)
                 insertIndex += 1
             }
@@ -2437,11 +2438,11 @@ final class StatusBarController: NSObject {
         if let searchEnginesItem = createSearchEnginesQuotaMenuItem() {
             hasQuota = true
             let separator = NSMenuItem.separator()
-            separator.tag = 999
+            separator.tag = MenuItemTag.dynamic
             menu.insertItem(separator, at: insertIndex)
             insertIndex += 1
 
-            searchEnginesItem.tag = 999
+            searchEnginesItem.tag = MenuItemTag.dynamic
             menu.insertItem(searchEnginesItem, at: insertIndex)
             insertIndex += 1
         }
@@ -2449,14 +2450,14 @@ final class StatusBarController: NSObject {
         if !hasQuota && unconfiguredItems.isEmpty {
             let noItem = NSMenuItem()
             noItem.view = createDisabledLabelView(text: "无服务商")
-            noItem.tag = 999
+            noItem.tag = MenuItemTag.dynamic
             menu.insertItem(noItem, at: insertIndex)
             insertIndex += 1
         }
 
         if !unconfiguredItems.isEmpty {
             let unconfiguredSeparator = NSMenuItem.separator()
-            unconfiguredSeparator.tag = 999
+            unconfiguredSeparator.tag = MenuItemTag.dynamic
             menu.insertItem(unconfiguredSeparator, at: insertIndex)
             insertIndex += 1
 
@@ -2481,13 +2482,13 @@ final class StatusBarController: NSObject {
             orphanedItem.target = self
             orphanedItem.attributedTitle = italicMenuTitle(title)
             orphanedItem.image = orphanedIcon()
-            orphanedItem.tag = 999
+            orphanedItem.tag = MenuItemTag.dynamic
             menu.insertItem(orphanedItem, at: insertIndex)
             insertIndex += 1
         }
 
         let separator3 = NSMenuItem.separator()
-        separator3.tag = 999
+        separator3.tag = MenuItemTag.dynamic
         menu.insertItem(separator3, at: insertIndex)
 
         let totalCost = calculateTotalWithSubscriptions(providerResults: providerResults, copilotUsage: currentUsage)
@@ -2926,7 +2927,7 @@ final class StatusBarController: NSObject {
         let submenu = NSMenu()
         items.forEach { submenu.addItem($0) }
         parent.submenu = submenu
-        parent.tag = 999
+        parent.tag = MenuItemTag.dynamic
         return parent
     }
 
@@ -2943,7 +2944,7 @@ final class StatusBarController: NSObject {
             item.representedObject = identifier
             item.image = tintedImage(iconForProvider(identifier), color: .systemGray)
             item.isEnabled = true
-            item.tag = 999
+            item.tag = MenuItemTag.dynamic
             item.toolTip = "点击配置 \(identifier.displayName)"
             return item
         }
@@ -2955,7 +2956,7 @@ final class StatusBarController: NSObject {
         let iconColor: NSColor = status.shouldDisableListItem ? .disabledControlTextColor : .systemOrange
         item.image = tintedImage(iconForProvider(identifier), color: iconColor)
         item.isEnabled = !status.shouldDisableListItem
-        item.tag = 999
+        item.tag = MenuItemTag.dynamic
         item.toolTip = errorMessage
 
         return item
@@ -3015,6 +3016,18 @@ final class StatusBarController: NSObject {
             return ("OPENAI_API_KEY 或 tokens", "~/.codex/auth.json")
         case .antigravity:
             return ("antigravity-accounts.json", "~/.local/share/opencode/")
+        case .cursor:
+            return ("Cursor 登录状态", "请确保 Cursor app 或 Cursor Agent 已登录")
+        case .commandCode:
+            return ("command-code", "~/.local/share/opencode/auth.json")
+        case .kiro:
+            return ("kiro", "~/.local/share/opencode/auth.json")
+        case .geminiCLI:
+            return ("google", "~/.local/share/opencode/auth.json")
+        case .tavilySearch:
+            return ("tavily", "~/.local/share/opencode/auth.json")
+        case .braveSearch:
+            return ("brave-search", "~/.local/share/opencode/auth.json")
         default:
             return ("对应 provider 的 key 字段", "~/.local/share/opencode/auth.json")
         }
@@ -3797,7 +3810,7 @@ final class StatusBarController: NSObject {
     private func topPayAsYouGoShareLine() -> String? {
         var candidates: [(name: String, cost: Double)] = []
 
-        let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen]
+        let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen, .openCode]
         for identifier in payAsYouGoOrder where isProviderEnabled(identifier) {
             guard let result = providerResults[identifier] else { continue }
             guard case .payAsYouGo(_, let cost, _) = result.usage else { continue }
@@ -4177,7 +4190,7 @@ final class StatusBarController: NSObject {
             keyEquivalent: ""
         )
         eomItem.image = NSImage(systemSymbolName: "chart.line.uptrend.xyaxis", accessibilityDescription: "Predicted EOM")
-        eomItem.tag = 999
+        eomItem.tag = MenuItemTag.dynamic
 
         // Create submenu with daily breakdown
         let submenu = NSMenu()
@@ -4208,7 +4221,7 @@ final class StatusBarController: NSObject {
 
             // Create day item with provider breakdown submenu
             let dayItem = NSMenuItem(title: label, action: nil, keyEquivalent: "")
-            dayItem.tag = 999
+            dayItem.tag = MenuItemTag.dynamic
 
             // Only add submenu if there's more than one provider or any cost
             if !dayData.breakdown.isEmpty {

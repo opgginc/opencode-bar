@@ -14,11 +14,12 @@ actor CLIProviderManager {
     
     static let registeredProviders: [ProviderIdentifier] = [
         .claude, .codex, .commandCode, .cursor, .geminiCLI, .openRouter,
-        .antigravity, .openCodeZen, .openCodeGo, .kiro, .grok, .kimiCN, .kimi, .minimaxCodingPlanCN, .minimaxCodingPlan, .zaiCodingPlan,
+        .antigravity, .openCode, .openCodeZen, .openCodeGo, .grok, .kimiCN, .kimi, .minimaxCodingPlanCN, .minimaxCodingPlan, .zaiCodingPlan,
         .nanoGpt,
         .chutes, .copilot,
         .synthetic, .volcanoArk,
-        .mimo, .hunyuan, .zhipuGLM
+        .mimo, .hunyuan, .zhipuGLM,
+        .tavilySearch, .braveSearch
     ]
     
     // MARK: - Initialization
@@ -33,9 +34,9 @@ actor CLIProviderManager {
         let geminiCLIProvider = GeminiCLIProvider()
         let openRouterProvider = OpenRouterProvider()
         let antigravityProvider = AntigravityProvider()
+        let openCodeProvider = OpenCodeProvider()
         let openCodeZenProvider = OpenCodeZenProvider()
         let openCodeGoProvider = OpenCodeGoProvider()
-        let kiroProvider = KiroProvider()
         let grokProvider = GrokProvider()
         let kimiCNProvider = KimiCNProvider()
         let kimiGlobalProvider = KimiGlobalProvider()
@@ -54,6 +55,10 @@ actor CLIProviderManager {
         let hunyuanProvider = HunyuanProvider()
         let zhipuGLMProvider = ZhipuGLMProvider()
 
+        // Search engine providers
+        let tavilySearchProvider = TavilySearchProvider()
+        let braveSearchProvider = BraveSearchProvider()
+
         // 1 CLI-specific provider (uses browser cookies instead of WebView)
         let copilotCLIProvider = CopilotCLIProvider()
 
@@ -65,9 +70,9 @@ actor CLIProviderManager {
             geminiCLIProvider,
             openRouterProvider,
             antigravityProvider,
+            openCodeProvider,
             openCodeZenProvider,
             openCodeGoProvider,
-            kiroProvider,
             grokProvider,
             kimiCNProvider,
             kimiGlobalProvider,
@@ -81,7 +86,9 @@ actor CLIProviderManager {
             volcanoArkProvider,
             mimoProvider,
             hunyuanProvider,
-            zhipuGLMProvider
+            zhipuGLMProvider,
+            tavilySearchProvider,
+            braveSearchProvider
         ]
 
         let providerCount = providers.count

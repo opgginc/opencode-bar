@@ -186,7 +186,7 @@ final class MultiProviderStatusBarIconView: NSView {
         case .hunyuan:
             iconName = "h.circle"
         case .zhipuGLM:
-            iconName = "g.circle"
+            iconName = "z.circle"
         }
 
         let icon: NSImage
