@@ -17,7 +17,7 @@
 	<key>CFBundleVersion</key>
 	<string>2.11.1</string>
 	<key>GitCommitHash</key>
-	<string>6372a49629b8bf247a83896539c216894cf3b4bd</string>
+	<string>0f4fe5514909f3487bd6e70f67c71797ac7363fe</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>MACOSX_DEPLOYMENT_TARGET</key>

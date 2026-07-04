@@ -1,5 +1,12 @@
 import Foundation
 
+#if CLI_TARGET
+/// Stand-in type for CLI builds. `CurrencyFormatter.swift` is not compiled into
+/// the CLI target, but `TableFormatter` (shared between app and CLI) needs a
+/// stable type name in its parameter list.
+struct CurrencyFormatter {}
+#endif
+
 enum UsagePercentDisplayFormatter {
     static func string(from percent: Double) -> String {
         let normalized = min(max(percent, 0.0), 999.0)
@@ -821,7 +828,8 @@ struct TableFormatter {
     }
 
     private static func computeMetricsWidth(
-        _ sortedResults: [(key: ProviderIdentifier, value: ProviderResult)]
+        _ sortedResults: [(key: ProviderIdentifier, value: ProviderResult)],
+        formatter: CurrencyFormatter? = nil
     ) -> Int {
         let minMetricsWidth = 30
         var maxWidth = minMetricsWidth
@@ -844,7 +852,7 @@ struct TableFormatter {
                     switch account.usage {
                     case .payAsYouGo(_, let cost, _):
                         if let cost = cost {
-                            metricsStr = formatSpentCost(cost)
+                            metricsStr = formatSpentCost(cost, formatter: formatter)
                         } else {
                             metricsStr = "Cost unavailable"
                         }
@@ -860,7 +868,7 @@ struct TableFormatter {
                     maxWidth = max(maxWidth, metricsStr.count + sourceLabel.count)
                 }
             } else {
-                maxWidth = max(maxWidth, formatMetrics(result).count)
+                maxWidth = max(maxWidth, formatMetrics(result, formatter: formatter).count)
             }
         }
         return maxWidth
@@ -888,14 +896,15 @@ struct TableFormatter {
         return maxWidth
     }
 
-    static func format(_ results: [ProviderIdentifier: ProviderResult]) -> String {
+    static func format(_ results: [ProviderIdentifier: ProviderResult],
+                       formatter: CurrencyFormatter? = nil) -> String {
         guard !results.isEmpty else {
             return "No provider data available"
         }
 
         let sortedResults = results.sorted { $0.key.displayName < $1.key.displayName }
         let providerWidth = computeProviderWidth(sortedResults)
-        let metricsWidth = computeMetricsWidth(sortedResults)
+        let metricsWidth = computeMetricsWidth(sortedResults, formatter: formatter)
 
         var output = ""
 
@@ -914,11 +923,11 @@ struct TableFormatter {
                 }
             } else if let accounts = result.accounts, accounts.count > 1 {
                 for account in accounts {
-                    output += formatAccountRow(identifier: identifier, account: account, providerWidth: providerWidth)
+                    output += formatAccountRow(identifier: identifier, account: account, providerWidth: providerWidth, formatter: formatter)
                     output += "\n"
                 }
             } else {
-                output += formatRow(identifier: identifier, result: result, providerWidth: providerWidth)
+                output += formatRow(identifier: identifier, result: result, providerWidth: providerWidth, formatter: formatter)
                 output += "\n"
             }
         }
@@ -940,7 +949,7 @@ struct TableFormatter {
         return String(repeating: "─", count: totalWidth)
     }
 
-    private static func formatRow(identifier: ProviderIdentifier, result: ProviderResult, providerWidth: Int) -> String {
+    private static func formatRow(identifier: ProviderIdentifier, result: ProviderResult, providerWidth: Int, formatter: CurrencyFormatter? = nil) -> String {
         let providerName = identifier.displayName
         let providerPadded = providerName.padding(toLength: providerWidth, withPad: " ", startingAt: 0)
 
@@ -950,7 +959,7 @@ struct TableFormatter {
         let usageStr = formatUsagePercentage(identifier: identifier, result: result)
         let usagePadded = usageStr.padding(toLength: usageWidth, withPad: " ", startingAt: 0)
 
-        let metricsStr = formatMetrics(result)
+        let metricsStr = formatMetrics(result, formatter: formatter)
 
         return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)"
     }
@@ -1022,7 +1031,7 @@ struct TableFormatter {
         return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)"
     }
 
-    private static func formatAccountRow(identifier: ProviderIdentifier, account: ProviderAccountResult, providerWidth: Int) -> String {
+    private static func formatAccountRow(identifier: ProviderIdentifier, account: ProviderAccountResult, providerWidth: Int, formatter: CurrencyFormatter? = nil) -> String {
         let label = accountLabel(identifier: identifier, account: account)
         let providerPadded = label.padding(toLength: providerWidth, withPad: " ", startingAt: 0)
 
@@ -1035,7 +1044,7 @@ struct TableFormatter {
             typeStr = "Pay-as-you-go"
             usageStr = "-"
             if let cost = cost {
-                metricsStr = formatSpentCost(cost)
+                metricsStr = formatSpentCost(cost, formatter: formatter)
             } else {
                 metricsStr = "Cost unavailable"
             }
@@ -1058,13 +1067,13 @@ struct TableFormatter {
         return "\(providerPadded)  \(typePadded)  \(usagePadded)  \(metricsStr)\(sourceLabel)"
     }
 
-    private static func formatMetrics(_ result: ProviderResult) -> String {
+    private static func formatMetrics(_ result: ProviderResult, formatter: CurrencyFormatter? = nil) -> String {
         switch result.usage {
         case .payAsYouGo(_, let cost, let resetsAt):
             var metrics = ""
 
             if let cost = cost {
-                metrics += formatSpentCost(cost)
+                metrics += formatSpentCost(cost, formatter: formatter)
             } else {
                 metrics += "Cost unavailable"
             }
@@ -1086,11 +1095,12 @@ struct TableFormatter {
             )
         }
     }
-    private static func formatSpentCost(_ cost: Double) -> String {
+    private static func formatSpentCost(_ cost: Double, formatter: CurrencyFormatter? = nil) -> String {
         #if CLI_TARGET
         return String(format: "$%.2f spent", cost)
         #else
-        return CurrencyFormatter.shared.format(usd: cost) + " spent"
+        let f = formatter ?? .shared
+        return f.format(usd: cost) + " spent"
         #endif
     }
 }
