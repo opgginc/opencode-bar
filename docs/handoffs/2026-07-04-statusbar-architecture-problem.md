@@ -6,21 +6,22 @@
 
 ## 0. Why does Token King fork need a "hack" that upstream doesn't?
 
-**Short answer**: upstream `isMenuEnabled = false` → no menu bar item at all. They don't need a hack because the item doesn't exist.
+**Short answer**: Both Token King fork and upstream have a menu bar item, but they get it from **different sources**, and only one of them works on macOS 26.x.
 
 **Details**:
-- Upstream `opgginc/opencode-bar` `upstream/main` ModernApp.swift:
-  ```swift
-  @State private var isMenuEnabled = false  // OFF
-  MenuBarExtra(isInserted: $isMenuEnabled) { ... }
-  ```
-  With `isInserted: false`, `MenuBarExtra` is NOT inserted into the system. There is no menu bar item, no rendering, no clicks. **The token's `Image(systemName: "gauge.medium")` label is dead code.**
+- Upstream `opgginc/opencode-bar` `upstream/main` has TWO menu bar item sources that intentionally DON'T overlap:
+  1. `StatusBarController.setupStatusItem()` creates one via `NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)` — pure AppKit path.
+  2. `MenuBarExtra(isInserted: $isMenuEnabled)` where `isMenuEnabled = false` — intentionally hidden to avoid double-icon.
 
-- Token King fork needs a real menu bar item (it's the whole point of the app — show usage in the menu bar). So the fork has to set `isMenuEnabled = true`. This is what exposes the macOS 26.x regression: `NSStatusBar.system.statusItem(withLength:)` in a pure AppKit context returns an item that does not get bound to a `NSStatusBarWindow`, so `SystemUIServer` never renders it. Button frame is `(0, 0, 20, 22)` (origin), invisible and unclickable.
+  Commit `8126dc0` ("fix: SwiftUI MenuBarExtra 중복 아이콘 버그 수정", 2026-02-01) explains this: the upstream author *tried* the bridge approach (with `isInserted = true` and `MenuBarExtraAccess`) in commit `97aa22d`, but the bridge caused *two* icons to appear (one from `MenuBarExtra`, one from `StatusBarController`). They "fixed" this by setting `isInserted = false`, leaving only the pure-AppKit item from `StatusBarController`.
 
-- The `MenuBarExtraAccess` library exists to obtain a properly-bound `NSSceneStatusItem` from SwiftUI's `NSStatusBarWindow` — the only path that works on macOS 26.x.
+  This pure-AppKit path works on macOS 13-15 (where the upstream author developed and tested). **It does NOT work on macOS 26.x** because the resulting `NSSceneStatusItem` is in `[NSStatusBar systemStatusBar] _statusItems` but is not bound to a `NSStatusBarWindow`, so `SystemUIServer` doesn't render it in a clickable position. `button.frame` is `(0, 0, 20, 22)` (origin, not the menu bar).
 
-**Upstream's "no hack" is a broken state they haven't noticed.** The upstream author probably developed on macOS 13-15 where pure AppKit `NSStatusBar.system.statusItem(...)` worked fine. They never tested on macOS 26.x.
+- Token King fork (with my current commit `f5a2676`) does the opposite: `isMenuEnabled = true` (re-enabling the `MenuBarExtra` item) + the `MenuBarExtraAccess` bridge that hands the SwiftUI-managed `NSSceneStatusItem` (which IS bound to a `NSStatusBarWindow`) to `StatusBarController.attachTo(_:)`. This sidesteps the macOS 26.x regression: the item from `MenuBarExtraAccess` has `button.frame = (3488, -427, 92, 34)` — visible and clickable.
+
+**The previous "double-icon" problem that upstream hit in commit `97aa22d` is a non-issue for the bridge path**, because we don't create a separate pure-AppKit item in `StatusBarController.setupStatusItem()` anymore — the `setupStatusItem` now just prepares the icon view, and the actual `NSStatusItem` is supplied later via the bridge. No conflict.
+
+**Why the fork needs a path that upstream doesn't**: Token King fork's whole point is to have a working menu bar item on macOS 26.x, which requires the bridge. Upstream's design (pure-AppKit, `isInserted: false`) silently doesn't have a working item on macOS 26.x, but the author hasn't yet noticed because (a) they probably developed on macOS 13-15 where pure-AppKit works, and (b) there's no visible error — the item just doesn't appear.
 
 ## 1. TL;DR — What I Got Wrong, and What's Actually True
 
