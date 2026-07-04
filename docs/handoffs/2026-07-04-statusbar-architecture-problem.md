@@ -1,8 +1,26 @@
 # Status Bar Architecture — Final Notes (2026-07-04)
 
 **Date**: 2026-07-04
-**Branch**: main (HEAD `f5a2676` + future)
+**Branch**: main (HEAD `426e0f5` and later)
 **Status**: ✅ **RESOLVED**. The bridge design is now correct architecture, not a hack.
+
+## 0. Why does Token King fork need a "hack" that upstream doesn't?
+
+**Short answer**: upstream `isMenuEnabled = false` → no menu bar item at all. They don't need a hack because the item doesn't exist.
+
+**Details**:
+- Upstream `opgginc/opencode-bar` `upstream/main` ModernApp.swift:
+  ```swift
+  @State private var isMenuEnabled = false  // OFF
+  MenuBarExtra(isInserted: $isMenuEnabled) { ... }
+  ```
+  With `isInserted: false`, `MenuBarExtra` is NOT inserted into the system. There is no menu bar item, no rendering, no clicks. **The token's `Image(systemName: "gauge.medium")` label is dead code.**
+
+- Token King fork needs a real menu bar item (it's the whole point of the app — show usage in the menu bar). So the fork has to set `isMenuEnabled = true`. This is what exposes the macOS 26.x regression: `NSStatusBar.system.statusItem(withLength:)` in a pure AppKit context returns an item that does not get bound to a `NSStatusBarWindow`, so `SystemUIServer` never renders it. Button frame is `(0, 0, 20, 22)` (origin), invisible and unclickable.
+
+- The `MenuBarExtraAccess` library exists to obtain a properly-bound `NSSceneStatusItem` from SwiftUI's `NSStatusBarWindow` — the only path that works on macOS 26.x.
+
+**Upstream's "no hack" is a broken state they haven't noticed.** The upstream author probably developed on macOS 13-15 where pure AppKit `NSStatusBar.system.statusItem(...)` worked fine. They never tested on macOS 26.x.
 
 ## 1. TL;DR — What I Got Wrong, and What's Actually True
 
@@ -45,12 +63,7 @@ The intent was to bypass SwiftUI entirely. **The result:**
 
 When the user clicked the menu bar icon, the system found no `NSStatusBarWindow` associated with the item, so the click went nowhere. I initially thought it was because `setMenu:` returned NO, but a corrected lldb query (`respondsToSelector:setMenu:`) returns YES — `setMenu:` does work. The real problem is that **no `NSStatusBarWindow` is created for pure-AppKit items, so SystemUIServer doesn't accept them**.
 
-## 3. The Real Two Bugs in `0f4fe55` / `9a77e17`
-
-1. **`@NSApplicationMain` macro is broken in Xcode 26.x debug builds** (in debug dylib mode, the macro's stub `_main` doesn't pass the delegate class, so `NSApp.delegate == nil`). The agent's workaround was a manual `main.swift`. Replaced by the new `EntryDocumentation.swift` (comment-only) plus the `@main struct ModernApp: App` entry in `ModernApp.swift`.
-2. **Pure AppKit can't create a usable menu bar item on macOS 26.x** (above).
-
-## 4. The Correct Architecture (commit `f5a2676`)
+## 3. The Correct Architecture (commit `f5a2676`)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -83,34 +96,35 @@ When the user clicked the menu bar icon, the system found no `NSStatusBarWindow`
 │  - setupStatusItem(): 准备 StatusBarIconView (status item 还没)  │
 │  - attachTo(_: statusItem: NSStatusItem):                        │
 │    1. self.statusItem = statusItem                                │
-│    2. statusItem.menu = self.menu  (best-effort, 可能被忽略)     │
+│    2. statusItem.menu = self.menu  (setMenu: work)                │
 │    3. statusItem.length = variableLength                          │
 │    4. attachStatusIconViewToButton()                              │
 │    5. updateStatusItemLayout("attach")                            │
 │  - renderStatusItemImage():                                      │
 │    1. NSImage 锁焦点画 StatusBarIconView                          │
-│    2. 赋给 button.image (NSSceneStatusItem 接受 image 但不渲染 subview)│
+│    2. 赋给 button.image (subview 在 NSSceneStatusItem 不可靠)    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## 5. Lessons Learned
+## 4. Lessons Learned
 
-1. **Always run `lldb` to check if a method actually exists** before assuming a fix. Specifically `[item performSelector:@selector(setMenu:)]` would have caught this in 5 minutes.
+1. **Always run `lldb` to check what selectors exist** before assuming a fix. Specifically `[item performSelector:setMenu:]` vs `respondsToSelector:setMenu:` give different results; the second is the right test.
 2. **`@NSApplicationMain` is broken in Xcode 26.x debug builds**. Use `@main struct App` with SwiftUI App lifecycle OR a manual `main.swift` (not both — Swift rejects).
 3. **`MenuBarExtraAccess` is the right path for macOS 26.x menu bar apps**. Don't try to bypass it.
-4. **The previous 3-layer architecture was correct**; my Phase 1+2/3 was based on a wrong premise.
-5. **"NSSceneStatusItem doesn't respond to setMenu:"** is the critical diagnostic fact that drives this whole design. The MenuBarExtraAccess library exists to work around it.
+4. **The "3 layers" architecture is correct**; Phase 1+2/3 was based on a wrong premise.
+5. **Pure AppKit `NSStatusBar.system.statusItem(withLength:)` creates items that are NOT bound to `NSStatusBarWindow` on macOS 26.x** — they are in `_statusItems` but invisible/unclickable. This is what differentiates them from MenuBarExtraAccess-obtained items.
+6. **`isMenuEnabled = true` is what triggers the macOS 26.x issue** — `false` means no item, no problem visible.
 
-## 6. Current Open Issues (out of scope of this work)
+## 5. Current Open Issues (out of scope of this work)
 
 - **Item position on secondary display** (X=3488) instead of primary. SwiftUI NSSceneStatusItem uses a different coordinate system than AppKit. Click works, just visual placement is unexpected.
 - **2 items in `_statusItems`** (one is the SwiftUI Settings scene, one is our Token King). Cosmetic only.
 
-## 7. Files in Current Design
+## 6. Files in Current Design
 
 | File | Purpose |
 |---|---|
-| `CopilotMonitor/CopilotMonitor/App/ModernApp.swift` | `@main` SwiftUI App with `MenuBarExtra` + `MenuBarExtraAccess` bridge |
+| `CopilotMonitor/CopilotMonitor/App/ModernApp.swift` | `@main` SwiftUI App with `MenuBarExtra(isInserted: true)` + `MenuBarExtraAccess` bridge |
 | `CopilotMonitor/CopilotMonitor/App/EntryDocumentation.swift` | Pure documentation (replaces old `main.swift`; Swift can't have both `@main` and top-level code in `main.swift`) |
 | `CopilotMonitor/CopilotMonitor/App/AppDelegate.swift` | NSApplicationDelegate; `pendingStatusItem` queue + `attachStatusItem(_:)` bridge entry; `statusBarController` lifecycle |
 | `CopilotMonitor/CopilotMonitor/App/StatusBarController.swift` | Owns the NSMenu; `setupStatusItem` (view setup only) + `attachTo(_:)` (bridge receiver) + `renderStatusItemImage()` (subview → image path) |
