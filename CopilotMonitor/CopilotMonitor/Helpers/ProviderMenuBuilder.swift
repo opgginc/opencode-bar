@@ -1222,6 +1222,14 @@ extension StatusBarController {
             visiblePresets = hasCNYPresets ? presets.filter { $0.cnyCost != nil } : presets
         }
 
+        // Compute this once near the top of the function, after `visiblePresets` is defined.
+        // When the API detected a plan name that matches a visible preset, the detected
+        // preset is the implicit selection — suppress the "无" highlight so the user
+        // never sees two checked rows simultaneously (B38).
+        let hasDetectedMatch = detectedPlanName.flatMap { name in
+            visiblePresets.first { $0.name == name }
+        } != nil
+
         // Manual selection takes precedence; otherwise let the API-detected plan highlight the matching preset.
         let manualPresetName: String?
         switch currentPlan {
@@ -1238,7 +1246,7 @@ extension StatusBarController {
         )
         noneItem.target = self
         noneItem.representedObject = SubscriptionMenuAction(subscriptionKey: subscriptionKey, plan: .none)
-        noneItem.state = (currentPlan == .none) ? .on : .off
+        noneItem.state = (currentPlan == .none && !hasDetectedMatch) ? .on : .off
         submenu.addItem(noneItem)
 
         if presets.isEmpty {

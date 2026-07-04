@@ -287,6 +287,175 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertNil(TokenManager.shared.getMiniMaxCodingPlanAPIKey())
     }
 
+    func testKimiLegacyForCodingKeyFeedsCNProvider() throws {
+        // Existing users only have `kimi-for-coding` (the global key name) but the
+        // key is actually CN-valid. The CN provider should read it via fallback;
+        // the global provider should not be impacted.
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let authDirectory = tempDirectory.appendingPathComponent("opencode", isDirectory: true)
+        let authPath = authDirectory.appendingPathComponent("auth.json")
+
+        try fileManager.createDirectory(at: authDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let originalXDGDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
+        defer {
+            if let originalXDGDataHome {
+                setenv("XDG_DATA_HOME", originalXDGDataHome, 1)
+            } else {
+                unsetenv("XDG_DATA_HOME")
+            }
+            TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+        }
+
+        let json = """
+        {
+          "kimi-for-coding": {
+            "type": "api",
+            "key": "legacy-cn-key"
+          }
+        }
+        """
+        try XCTUnwrap(json.data(using: .utf8)).write(to: authPath)
+
+        setenv("XDG_DATA_HOME", tempDirectory.path, 1)
+        TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+
+        XCTAssertEqual(TokenManager.shared.getKimiCNAPIKey(), "legacy-cn-key",
+                       "CN provider must fall back to the legacy global Kimi key when CN-specific key is absent")
+    }
+
+    func testKimiGlobalKeyIsInactiveWhenOnlyLegacyKeyExists() throws {
+        // Only the legacy `kimi-for-coding` key exists in auth.json. The CN
+        // provider claims it via fallback, so the global provider must NOT
+        // also surface it (otherwise the same auth key appears twice).
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let authDirectory = tempDirectory.appendingPathComponent("opencode", isDirectory: true)
+        let authPath = authDirectory.appendingPathComponent("auth.json")
+
+        try fileManager.createDirectory(at: authDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let originalXDGDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
+        defer {
+            if let originalXDGDataHome {
+                setenv("XDG_DATA_HOME", originalXDGDataHome, 1)
+            } else {
+                unsetenv("XDG_DATA_HOME")
+            }
+            TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+        }
+
+        let json = """
+        {
+          "kimi-for-coding": {
+            "type": "api",
+            "key": "legacy-cn-key"
+          }
+        }
+        """
+        try XCTUnwrap(json.data(using: .utf8)).write(to: authPath)
+
+        setenv("XDG_DATA_HOME", tempDirectory.path, 1)
+        TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+
+        XCTAssertNil(TokenManager.shared.getKimiAPIKey(),
+                     "Global provider must yield when CN provider claims the legacy key via fallback")
+        // Sanity check that CN still picks it up via fallback
+        XCTAssertEqual(TokenManager.shared.getKimiCNAPIKey(), "legacy-cn-key")
+    }
+
+    func testKimiGlobalKeyIsActiveWhenBothKeysExist() throws {
+        // Both `kimi-for-coding` AND `kimi-for-coding-cn` are present. Each
+        // provider should claim its own key (no conflict).
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let authDirectory = tempDirectory.appendingPathComponent("opencode", isDirectory: true)
+        let authPath = authDirectory.appendingPathComponent("auth.json")
+
+        try fileManager.createDirectory(at: authDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let originalXDGDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
+        defer {
+            if let originalXDGDataHome {
+                setenv("XDG_DATA_HOME", originalXDGDataHome, 1)
+            } else {
+                unsetenv("XDG_DATA_HOME")
+            }
+            TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+        }
+
+        let json = """
+        {
+          "kimi-for-coding": {
+            "type": "api",
+            "key": "global-key"
+          },
+          "kimi-for-coding-cn": {
+            "type": "api",
+            "key": "cn-key"
+          }
+        }
+        """
+        try XCTUnwrap(json.data(using: .utf8)).write(to: authPath)
+
+        setenv("XDG_DATA_HOME", tempDirectory.path, 1)
+        TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+
+        XCTAssertEqual(TokenManager.shared.getKimiAPIKey(), "global-key",
+                       "Global provider must surface the global key when both keys exist")
+        XCTAssertEqual(TokenManager.shared.getKimiCNAPIKey(), "cn-key",
+                       "CN provider must prefer its own explicit key over the global fallback")
+    }
+
+    func testKimiCNKeyIsPreferredOverLegacyForCodingKey() throws {
+        // When both keys are present, the CN-specific key wins.
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let authDirectory = tempDirectory.appendingPathComponent("opencode", isDirectory: true)
+        let authPath = authDirectory.appendingPathComponent("auth.json")
+
+        try fileManager.createDirectory(at: authDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let originalXDGDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
+        defer {
+            if let originalXDGDataHome {
+                setenv("XDG_DATA_HOME", originalXDGDataHome, 1)
+            } else {
+                unsetenv("XDG_DATA_HOME")
+            }
+            TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+        }
+
+        let json = """
+        {
+          "kimi-for-coding": {
+            "type": "api",
+            "key": "legacy-cn-key"
+          },
+          "kimi-for-coding-cn": {
+            "type": "api",
+            "key": "explicit-cn-key"
+          }
+        }
+        """
+        try XCTUnwrap(json.data(using: .utf8)).write(to: authPath)
+
+        setenv("XDG_DATA_HOME", tempDirectory.path, 1)
+        TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+
+        XCTAssertEqual(TokenManager.shared.getKimiCNAPIKey(), "explicit-cn-key",
+                       "CN-specific key must take precedence over the legacy fallback")
+    }
+
     func testMiniMaxGlobalKeyIsIsolatedFromCNKey() throws {
         let fileManager = FileManager.default
         let tempDirectory = fileManager.temporaryDirectory

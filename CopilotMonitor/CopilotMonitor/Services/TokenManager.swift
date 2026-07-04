@@ -4260,12 +4260,19 @@ final class TokenManager: @unchecked Sendable {
 
     func getKimiAPIKey() -> String? {
         guard let auth = readOpenCodeAuth() else { return nil }
+        // When only the global key exists, the CN provider claims it via
+        // fallback. Yield here so the same auth key is not surfaced twice.
+        if auth.kimiForCodingCN == nil && auth.kimiForCoding != nil {
+            return nil
+        }
         return auth.kimiForCoding?.key
     }
 
     func getKimiCNAPIKey() -> String? {
         guard let auth = readOpenCodeAuth() else { return nil }
-        return auth.kimiForCodingCN?.key
+        // CN-specific key wins; otherwise fall back to the legacy global key name
+        // (`kimi-for-coding`) which existing CN users often have under the global slot.
+        return auth.kimiForCodingCN?.key ?? auth.kimiForCoding?.key
     }
 
     func getMiniMaxCodingPlanAPIKey() -> String? {

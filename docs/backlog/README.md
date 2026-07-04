@@ -23,12 +23,25 @@
 | ID | 现象 | 状态 |
 |----|------|------|
 | B01 | 金额/货币显示异常 | ✅已修 |
-| B02 | Provider wiring 遗漏 | 已诊断待修 |
-| B03 | usagePercentCandidates 重复 case | 已诊断待修 |
-| B04 | 图标映射错误/缺失 | 已诊断待修 |
-| B05 | 国服 provider region 默认值错误 | 已诊断待修 |
-| B06 | MiniMax 旧档位不兼容 | 已诊断待修 |
-| B07 | 测试污染/Flaky tests | 已诊断待修 |
+| B02 | Provider wiring 遗漏 | ✅已修 |
+| B03 | usagePercentCandidates 重复 case | ✅已修 |
+| B04 | 图标映射错误/缺失 | ✅已修 |
+| B05 | 国服 provider region 默认值错误 | ✅已修 |
+| B06 | MiniMax 旧档位不兼容 | ✅已修 |
+| B07 | 测试污染/Flaky tests | ✅已修（多管齐下） |
+| B08 | StatusBarControllerTests 未清理共享状态 | ✅已修（testMode init） |
+| B09 | StatusBarController init 硬编码 UserDefaults | ✅已修 |
+| B10 | ProviderResultTests addTeardownBlock 模式 | ✅已修（formatter 注入） |
+| B11 | ProviderRegionTests 创建 StatusBarController | ✅已修（testMode init） |
+| B12 | SubscriptionSettingsManager 单例写 .standard | ✅已修（userDefaults 注入） |
+| B13 | BraveSearchProviderTests 未保留原始 UserDefaults | ✅已修（snapshot save/restore） |
+| B14 | ProviderUsageTests 使用 .shared SubscriptionSettingsManager | ✅已修（subscription 部分） |
+| B15 | Provider 测试使用 .shared tokenManager/session | ✅已修（XDG + auth.json mock） |
+| B31 | ProviderRegionTests 未覆盖新国服 provider region | ✅已修 |
+| B35 | Kimi CN provider 无 legacy global key fallback | ✅已修 |
+| B36 | MiniMax 重置时间显示固定窗口而非 Dashboard 滑动 | ✅已修 |
+| B37 | Kimi CN fallback 后出现重复 Kimi 入口 | ✅已修 |
+| B38 | 「无」与 API 检测到的套餐同时 .on | ✅已修 |
 
 ## 状态定义
 - **想法**：一句话毛想法，还没细化

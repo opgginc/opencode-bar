@@ -89,4 +89,121 @@ final class SubscriptionPlanDisplayTests: XCTestCase {
         XCTAssertNotNil(pro200, "Codex subscription menu should contain 'Pro $200' preset: \(titles)")
         XCTAssertNotEqual(pro100, pro200, "Pro $100 and Pro $200 should be distinct menu items")
     }
+
+    // MARK: - B38: "无" highlight must not double up with a detected preset match.
+
+    @MainActor
+    func testNoneItemIsNotSelectedWhenDetectedPlanMatchesPreset() {
+        // User has no saved plan for CN Kimi (currentPlan == .none because we
+        // never persisted anything) and the API reports the user is on
+        // "Moderato". The detected preset is the implicit selection, so "无"
+        // must NOT also be marked .on.
+        let previousCurrency = CurrencyFormatter.shared.currency
+        CurrencyFormatter.shared.currency = .usd
+        defer { CurrencyFormatter.shared.currency = previousCurrency }
+
+        let testAccount = "b38-detected-\(UUID().uuidString.lowercased())"
+        let manager = SubscriptionSettingsManager.shared
+        let key = manager.subscriptionKey(for: .kimiCN, accountId: testAccount)
+        // Make sure no plan is persisted for this account.
+        manager.removePlan(forKey: key)
+        defer { manager.removePlan(forKey: key) }
+
+        let controller = StatusBarController()
+        // Suppress the GitHub star alert that the default init triggers.
+        let dismissKey = "githubStarPromptDismissed"
+        let previousDismiss = UserDefaults.standard.bool(forKey: dismissKey)
+        UserDefaults.standard.set(true, forKey: dismissKey)
+        defer { UserDefaults.standard.set(previousDismiss, forKey: dismissKey) }
+        let menu = NSMenu()
+        controller.addSubscriptionItems(
+            to: menu,
+            provider: .kimiCN,
+            accountId: testAccount,
+            detectedPlanName: "Moderato"
+        )
+
+        let items = menu.items
+        let noneItem = items.first { $0.title.contains("无") }
+        let moderatoItem = items.first { $0.title.contains("Moderato") }
+
+        XCTAssertNotNil(noneItem)
+        XCTAssertNotNil(moderatoItem)
+        XCTAssertNotEqual(noneItem?.state, .on,
+                         "无 should NOT be selected when a detected preset matches a known tier")
+        XCTAssertEqual(moderatoItem?.state, .on,
+                       "Moderato should be auto-selected when it matches the API-detected plan")
+    }
+
+    @MainActor
+    func testNoneItemIsSelectedWhenNoDetectedPlan() {
+        // No saved plan AND no detected plan name → "无" is the only sensible
+        // selection, so it must be marked .on.
+        let previousCurrency = CurrencyFormatter.shared.currency
+        CurrencyFormatter.shared.currency = .usd
+        defer { CurrencyFormatter.shared.currency = previousCurrency }
+
+        let testAccount = "b38-nodetected-\(UUID().uuidString.lowercased())"
+        let manager = SubscriptionSettingsManager.shared
+        let key = manager.subscriptionKey(for: .kimiCN, accountId: testAccount)
+        manager.removePlan(forKey: key)
+        defer { manager.removePlan(forKey: key) }
+
+        let controller = StatusBarController()
+        let menu = NSMenu()
+        controller.addSubscriptionItems(
+            to: menu,
+            provider: .kimiCN,
+            accountId: testAccount,
+            detectedPlanName: nil
+        )
+
+        let items = menu.items
+        let noneItem = items.first { $0.title.contains("无") }
+
+        XCTAssertNotNil(noneItem)
+        XCTAssertEqual(noneItem?.state, .on,
+                       "无 must be selected when there is no detected preset match")
+    }
+
+    @MainActor
+    func testUserPickedPresetStillSelectedAndNotNone() {
+        // When the user has explicitly saved a preset and the API confirms it,
+        // that preset is .on and "无" is NOT. This protects existing behavior.
+        let previousCurrency = CurrencyFormatter.shared.currency
+        CurrencyFormatter.shared.currency = .usd
+        defer { CurrencyFormatter.shared.currency = previousCurrency }
+
+        let testAccount = "b38-picked-\(UUID().uuidString.lowercased())"
+        let manager = SubscriptionSettingsManager.shared
+        let key = manager.subscriptionKey(for: .kimiCN, accountId: testAccount)
+        manager.removePlan(forKey: key)
+        manager.setPlan(.preset("Moderato", 19), forKey: key)
+        defer { manager.removePlan(forKey: key) }
+
+        let controller = StatusBarController()
+        // Suppress the GitHub star alert that the default init triggers.
+        let dismissKey = "githubStarPromptDismissed"
+        let previousDismiss = UserDefaults.standard.bool(forKey: dismissKey)
+        UserDefaults.standard.set(true, forKey: dismissKey)
+        defer { UserDefaults.standard.set(previousDismiss, forKey: dismissKey) }
+        let menu = NSMenu()
+        controller.addSubscriptionItems(
+            to: menu,
+            provider: .kimiCN,
+            accountId: testAccount,
+            detectedPlanName: "Moderato"
+        )
+
+        let items = menu.items
+        let noneItem = items.first { $0.title.contains("无") }
+        let moderatoItem = items.first { $0.title.contains("Moderato") }
+
+        XCTAssertNotNil(noneItem)
+        XCTAssertNotNil(moderatoItem)
+        XCTAssertNotEqual(noneItem?.state, .on,
+                         "无 must not be selected when the user has explicitly picked Moderato")
+        XCTAssertEqual(moderatoItem?.state, .on,
+                       "Moderato must be selected when the user has explicitly picked it")
+    }
 }
