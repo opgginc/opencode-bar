@@ -147,6 +147,7 @@
 		TAVILYAPP111111111111111 /* TavilySearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = TAVILYFILE22222222222222 /* TavilySearchProvider.swift */; };
 		TOKENTESTBF1111111111111 /* TokenManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TOKENTESTFR1111111111111 /* TokenManagerTests.swift */; };
 		SBCCTRLTESTBF111111111 /* StatusBarControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBCCTRLTESTFR111111111 /* StatusBarControllerTests.swift */; };
+		SBCCTRLMODETMBF1111 /* StatusBarControllerTestingModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBCCTRLMODETMFR1111 /* StatusBarControllerTestingModeTests.swift */; };
 		VOLCANOSIGNERAPP1111111111 /* VolcanoArkSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOLCANOSIGNERFILE222222222 /* VolcanoArkSigner.swift */; };
 		VOLCANOSIGNERCLI1111111111 /* VolcanoArkSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOLCANOSIGNERFILE222222222 /* VolcanoArkSigner.swift */; };
 		VOLCANOTYPESAPP11111111111 /* VolcanoArkTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = VOLCANOTYPESFILE2222222222 /* VolcanoArkTypes.swift */; };
@@ -220,6 +221,7 @@
 		CF11AA22BB33CC44DD55EE04 /* CurrencyFormatterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CurrencyFormatterTests.swift; sourceTree = "<group>"; };
 		PRRESULTTESTFILE11111111 /* ProviderResultTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderResultTests.swift; sourceTree = "<group>"; };
 		SBCCTRLTESTFR111111111 /* StatusBarControllerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StatusBarControllerTests.swift; sourceTree = "<group>"; };
+		SBCCTRLMODETMFR1111 /* StatusBarControllerTestingModeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StatusBarControllerTestingModeTests.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B61 /* exchange_rate_success.json */ = {isa = PBXFileReference; includeInIndex = 1; path = exchange_rate_success.json; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B63 /* exchange_rate_error.json */ = {isa = PBXFileReference; includeInIndex = 1; path = exchange_rate_error.json; sourceTree = "<group>"; };
 		9B1085A77EF4A58E5B5EC71B /* CopilotHistoryService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CopilotHistoryService.swift; sourceTree = "<group>"; };
@@ -562,6 +564,7 @@
 				CF11AA22BB33CC44DD55EE04 /* CurrencyFormatterTests.swift */,
 				PRRESULTTESTFILE11111111 /* ProviderResultTests.swift */,
 				SBCCTRLTESTFR111111111 /* StatusBarControllerTests.swift */,
+				SBCCTRLMODETMFR1111 /* StatusBarControllerTestingModeTests.swift */,
 				VOLCANOTESTFR11111111111 /* VolcanoArkProviderTests.swift */,
 				NEWPROVTESTFR1111111111 /* NewProviderTests.swift */,
 				36C2B344956C6CBB5D2AA5E3 /* TavilySearchProviderTests.swift */,
@@ -879,6 +882,7 @@
 				CF11AA22BB33CC44DD55EE03 /* CurrencyFormatterTests.swift in Sources */,
 				PRRESULTTESTBUILD11111111 /* ProviderResultTests.swift in Sources */,
 				SBCCTRLTESTBF111111111 /* StatusBarControllerTests.swift in Sources */,
+				SBCCTRLMODETMBF1111 /* StatusBarControllerTestingModeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

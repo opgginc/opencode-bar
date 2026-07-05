@@ -2,11 +2,31 @@ import XCTest
 @testable import OpenCode_Bar
 
 final class StatusBarControllerTests: XCTestCase {
+    private var suite: UserDefaults!
+    private var suiteName: String!
+
+    @MainActor
+    override func setUp() {
+        super.setUp()
+        // B09: use the new injection seam so init() does not start
+        // background tasks / GitHub star prompts / write UserDefaults.standard.
+        suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
+        suite = UserDefaults(suiteName: suiteName)!
+        suite.removePersistentDomain(forName: suiteName)
+    }
+
+    @MainActor
+    override func tearDown() {
+        // Defensive: drop the suite even if the test threw mid-flight.
+        if let suite, let suiteName {
+            suite.removePersistentDomain(forName: suiteName)
+        }
+        super.tearDown()
+    }
+
     @MainActor
     func testTopLevelMenuContainsOnlyRefreshAndSettings() {
-        UserDefaults.standard.set(true, forKey: "githubStarPromptDismissed")
-
-        let controller = StatusBarController()
+        let controller = StatusBarController(options: .testing(userDefaults: suite))
         guard let menu = controller.topMenuForTesting else {
             XCTFail("顶层菜单未创建")
             return
@@ -21,9 +41,7 @@ final class StatusBarControllerTests: XCTestCase {
 
     @MainActor
     func testUnconfiguredCopilotErrorAppearsInUnconfiguredSubmenu() {
-        UserDefaults.standard.set(true, forKey: "githubStarPromptDismissed")
-
-        let controller = StatusBarController()
+        let controller = StatusBarController(options: .testing(userDefaults: suite))
         controller.injectProviderStateForTesting(
             results: [
                 .synthetic: ProviderResult(
@@ -58,9 +76,7 @@ final class StatusBarControllerTests: XCTestCase {
 
     @MainActor
     func testUnconfiguredOpenCodeZenErrorAppearsInUnconfiguredSubmenu() {
-        UserDefaults.standard.set(true, forKey: "githubStarPromptDismissed")
-
-        let controller = StatusBarController()
+        let controller = StatusBarController(options: .testing(userDefaults: suite))
         controller.injectProviderStateForTesting(
             results: [
                 .synthetic: ProviderResult(
@@ -95,9 +111,7 @@ final class StatusBarControllerTests: XCTestCase {
 
     @MainActor
     func testOpenCodeZenCLIAuthHintAppearsInUnconfiguredSubmenuEvenWhenProviderError() {
-        UserDefaults.standard.set(true, forKey: "githubStarPromptDismissed")
-
-        let controller = StatusBarController()
+        let controller = StatusBarController(options: .testing(userDefaults: suite))
         // Simulate the edge case where the CLI output reaches the UI as a providerError
         // but still contains an unmistakable auth/login hint.
         controller.injectProviderStateForTesting(

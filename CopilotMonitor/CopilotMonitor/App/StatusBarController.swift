@@ -80,9 +80,61 @@ enum UsageFetcherError: LocalizedError {
 
 @MainActor
 final class StatusBarController: NSObject {
-    private var statusItem: NSStatusItem?
+    /// Configuration for `StatusBarController.init(options:)`. Tests use
+    /// `.testing(userDefaults:)` to isolate UserDefaults and disable
+    /// background work; production callers stay on `.production` (the default).
+    struct InitOptions {
+        let userDefaults: UserDefaults
+        let currencyFormatter: CurrencyFormatter
+        /// When false, the controller skips the refresh timer, GitHub star
+        /// prompt, and `CurrencyFormatter.refreshRateInBackground()`.
+        let runBackgroundTasks: Bool
+        /// When false, no GitHub star prompt is shown on init.
+        let promptGitHubStar: Bool
+        /// When false, `TokenManager.shared.logDebugEnvironmentInfo()` is skipped.
+        let logDebugEnvironmentInfo: Bool
+
+        static let production = InitOptions(
+            userDefaults: .standard,
+            currencyFormatter: .shared,
+            runBackgroundTasks: true,
+            promptGitHubStar: true,
+            logDebugEnvironmentInfo: true
+        )
+
+        /// Default for unit tests. Auto-generates a unique suite if no
+        /// UserDefaults is provided; turns off background work so a single
+        /// init call doesn't trigger background fetches / timers.
+        static func testing(userDefaults: UserDefaults? = nil) -> InitOptions {
+            let suite: UserDefaults
+            if let userDefaults {
+                suite = userDefaults
+            } else {
+                suite = UserDefaults(
+                    suiteName: "StatusBarController.Tests.\(UUID().uuidString)"
+                )!
+            }
+            return InitOptions(
+                userDefaults: suite,
+                currencyFormatter: CurrencyFormatter(defaults: suite),
+                runBackgroundTasks: false,
+                promptGitHubStar: false,
+                logDebugEnvironmentInfo: false
+            )
+        }
+    }
+
+    private(set) var initOptions: InitOptions
+
+    /// B09: UserDefaults facade routing reads/writes through the injected suite.
+    private var userDefaults: UserDefaults { initOptions.userDefaults }
+
+    /// B09: CurrencyFormatter facade routing through the injected formatter.
+    private var currencyFormatter: CurrencyFormatter { initOptions.currencyFormatter }
+
+    private(set) var statusItem: NSStatusItem?
     private var statusBarIconView: StatusBarIconView?
-    private var menu: NSMenu!
+    private(set) var menu: NSMenu!
     private var signInItem: NSMenuItem!
     private var resetLoginItem: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
@@ -158,11 +210,11 @@ final class StatusBarController: NSObject {
 
     private var refreshInterval: RefreshInterval {
         get {
-            let rawValue = UserDefaults.standard.integer(forKey: "refreshInterval")
+            let rawValue = userDefaults.integer(forKey: "refreshInterval")
             return RefreshInterval(rawValue: rawValue) ?? .defaultInterval
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: "refreshInterval")
+            userDefaults.set(newValue.rawValue, forKey: "refreshInterval")
             restartRefreshTimer()
             updateRefreshIntervalMenu()
         }
@@ -170,11 +222,11 @@ final class StatusBarController: NSObject {
 
     private var braveRefreshMode: BraveSearchRefreshMode {
         get {
-            let rawValue = UserDefaults.standard.integer(forKey: SearchEnginePreferences.braveRefreshModeKey)
+            let rawValue = userDefaults.integer(forKey: SearchEnginePreferences.braveRefreshModeKey)
             return BraveSearchRefreshMode(rawValue: rawValue) ?? .defaultMode
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: SearchEnginePreferences.braveRefreshModeKey)
+            userDefaults.set(newValue.rawValue, forKey: SearchEnginePreferences.braveRefreshModeKey)
             debugLog("braveRefreshMode updated: \(newValue.title)")
             refreshClicked()
         }
@@ -182,11 +234,11 @@ final class StatusBarController: NSObject {
 
     private var predictionPeriod: PredictionPeriod {
         get {
-            let rawValue = UserDefaults.standard.integer(forKey: "predictionPeriod")
+            let rawValue = userDefaults.integer(forKey: "predictionPeriod")
             return PredictionPeriod(rawValue: rawValue) ?? .defaultPeriod
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: "predictionPeriod")
+            userDefaults.set(newValue.rawValue, forKey: "predictionPeriod")
             updatePredictionPeriodMenu()
             updateHistorySubmenu()
             updateMultiProviderMenu()
@@ -195,24 +247,24 @@ final class StatusBarController: NSObject {
 
     private var menuBarDisplayMode: MenuBarDisplayMode {
         get {
-            let rawValue = UserDefaults.standard.integer(forKey: StatusBarDisplayPreferences.modeKey)
+            let rawValue = userDefaults.integer(forKey: StatusBarDisplayPreferences.modeKey)
             if let mode = MenuBarDisplayMode(rawValue: rawValue) {
                 return mode
             }
 
             // Legacy migration: old enum used rawValue 3 for recent-change mode.
             if rawValue == 3 {
-                if UserDefaults.standard.object(forKey: StatusBarDisplayPreferences.onlyShowModeKey) == nil {
-                    UserDefaults.standard.set(OnlyShowMode.recentChange.rawValue, forKey: StatusBarDisplayPreferences.onlyShowModeKey)
+                if userDefaults.object(forKey: StatusBarDisplayPreferences.onlyShowModeKey) == nil {
+                    userDefaults.set(OnlyShowMode.recentChange.rawValue, forKey: StatusBarDisplayPreferences.onlyShowModeKey)
                 }
-                UserDefaults.standard.set(MenuBarDisplayMode.onlyShow.rawValue, forKey: StatusBarDisplayPreferences.modeKey)
+                userDefaults.set(MenuBarDisplayMode.onlyShow.rawValue, forKey: StatusBarDisplayPreferences.modeKey)
                 return .onlyShow
             }
 
             return .defaultMode
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: StatusBarDisplayPreferences.modeKey)
+            userDefaults.set(newValue.rawValue, forKey: StatusBarDisplayPreferences.modeKey)
             updateStatusBarDisplayMenuState()
             updateStatusBarText()
         }
@@ -220,7 +272,7 @@ final class StatusBarController: NSObject {
 
     private var onlyShowMode: OnlyShowMode {
         get {
-            if let object = UserDefaults.standard.object(forKey: StatusBarDisplayPreferences.onlyShowModeKey) {
+            if let object = userDefaults.object(forKey: StatusBarDisplayPreferences.onlyShowModeKey) {
                 if let rawValue = object as? Int, let mode = OnlyShowMode(rawValue: rawValue) {
                     return mode
                 }
@@ -238,7 +290,7 @@ final class StatusBarController: NSObject {
             return .defaultMode
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: StatusBarDisplayPreferences.onlyShowModeKey)
+            userDefaults.set(newValue.rawValue, forKey: StatusBarDisplayPreferences.onlyShowModeKey)
             updateStatusBarDisplayMenuState()
             updateStatusBarText()
         }
@@ -246,13 +298,13 @@ final class StatusBarController: NSObject {
 
     private var menuBarDisplayProvider: ProviderIdentifier? {
         get {
-            guard let rawValue = UserDefaults.standard.string(forKey: StatusBarDisplayPreferences.providerKey) else {
+            guard let rawValue = userDefaults.string(forKey: StatusBarDisplayPreferences.providerKey) else {
                 return nil
             }
             return ProviderIdentifier(rawValue: rawValue)
         }
         set {
-            UserDefaults.standard.set(newValue?.rawValue, forKey: StatusBarDisplayPreferences.providerKey)
+            userDefaults.set(newValue?.rawValue, forKey: StatusBarDisplayPreferences.providerKey)
             updateStatusBarDisplayMenuState()
             updateStatusBarText()
         }
@@ -263,7 +315,7 @@ final class StatusBarController: NSObject {
             boolPreference(forKey: StatusBarDisplayPreferences.criticalBadgeKey, defaultValue: true)
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: StatusBarDisplayPreferences.criticalBadgeKey)
+            userDefaults.set(newValue, forKey: StatusBarDisplayPreferences.criticalBadgeKey)
             updateStatusBarDisplayMenuState()
             updateStatusBarText()
         }
@@ -274,18 +326,21 @@ final class StatusBarController: NSObject {
             boolPreference(forKey: StatusBarDisplayPreferences.showProviderNameKey, defaultValue: false)
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: StatusBarDisplayPreferences.showProviderNameKey)
+            userDefaults.set(newValue, forKey: StatusBarDisplayPreferences.showProviderNameKey)
             updateStatusBarDisplayMenuState()
             updateStatusBarText()
         }
     }
 
-    override init() {
+    init(options: InitOptions = .production) {
+        self.initOptions = options
         super.init()
-        debugLog("StatusBarController init started")
+        debugLog("StatusBarController init started (testMode=\(!options.runBackgroundTasks))")
 
-        TokenManager.shared.logDebugEnvironmentInfo()
-        debugLog("Environment debug info logged")
+        if options.logDebugEnvironmentInfo {
+            TokenManager.shared.logDebugEnvironmentInfo()
+            debugLog("Environment debug info logged")
+        }
 
         ensureBraveRefreshModeDefault()
 
@@ -295,11 +350,22 @@ final class StatusBarController: NSObject {
         debugLog("setupMenu completed")
         setupNotificationObservers()
         debugLog("setupNotificationObservers completed")
-        CurrencyFormatter.shared.refreshRateInBackground()
-        startRefreshTimer()
-        debugLog("startRefreshTimer completed")
-        checkAndPromptGitHubStar()
-        debugLog("checkAndPromptGitHubStar called")
+
+        if options.runBackgroundTasks {
+            options.currencyFormatter.refreshRateInBackground()
+            startRefreshTimer()
+            debugLog("startRefreshTimer completed")
+        } else {
+            debugLog("Background tasks suppressed by InitOptions")
+        }
+
+        if options.promptGitHubStar {
+            checkAndPromptGitHubStar()
+            debugLog("checkAndPromptGitHubStar called")
+        } else {
+            debugLog("GitHub star prompt suppressed by InitOptions")
+        }
+
         logger.info("Init completed")
         debugLog("Init completed")
     }
@@ -326,10 +392,10 @@ final class StatusBarController: NSObject {
     }
 
     private func boolPreference(forKey key: String, defaultValue: Bool) -> Bool {
-        if UserDefaults.standard.object(forKey: key) == nil {
+        if userDefaults.object(forKey: key) == nil {
             return defaultValue
         }
-        return UserDefaults.standard.bool(forKey: key)
+        return userDefaults.bool(forKey: key)
     }
 
     private func flushDeferredUIUpdatesIfNeeded() {
@@ -377,18 +443,47 @@ final class StatusBarController: NSObject {
     /// `button.image`. On macOS 26.x NSSceneStatusItem the button's subview
     /// drawing is unreliable, so the image-assignment path is what actually
     /// shows up in the menu bar.
+    ///
+    /// We create an `NSBitmapImageRep` with `pixelsWide/pixelsHigh` scaled by
+    /// the active screen's `backingScaleFactor`. This ensures the rep holds a
+    /// Retina-resolution bitmap; when macOS then composites it into a Retina
+    /// menu bar it stays crisp instead of being upscaled from a 1x raster
+    /// (which is what `NSImage(size:).lockFocus()` produces on macOS 26.x).
     private func renderStatusItemImage() {
         guard let iconView = statusBarIconView, let button = statusItem?.button else {
             return
         }
-        let size = NSSize(
+        let logicalSize = NSSize(
             width: max(iconView.intrinsicContentSize.width, 22),
             height: iconView.intrinsicContentSize.height
         )
-        let image = NSImage(size: size)
-        image.lockFocus()
-        iconView.draw(NSRect(origin: .zero, size: size))
-        image.unlockFocus()
+        let scale = NSScreen.main?.backingScaleFactor ?? 1.0
+        let pixelSize = NSSize(
+            width: logicalSize.width * scale,
+            height: logicalSize.height * scale
+        )
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: max(1, Int(pixelSize.width)),
+            pixelsHigh: max(1, Int(pixelSize.height)),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 32
+        ) else { return }
+        bitmap.size = logicalSize
+        let image = NSImage(size: logicalSize)
+        image.addRepresentation(bitmap)
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        if let ctx = NSGraphicsContext(bitmapImageRep: bitmap) {
+            NSGraphicsContext.current = ctx
+            ctx.imageInterpolation = .high
+            iconView.draw(NSRect(origin: .zero, size: logicalSize))
+        }
         image.isTemplate = true
         button.image = image
         button.title = ""
@@ -621,8 +716,8 @@ final class StatusBarController: NSObject {
     }
 
     private func ensureBraveRefreshModeDefault() {
-        if UserDefaults.standard.object(forKey: SearchEnginePreferences.braveRefreshModeKey) == nil {
-            UserDefaults.standard.set(
+        if userDefaults.object(forKey: SearchEnginePreferences.braveRefreshModeKey) == nil {
+            userDefaults.set(
                 BraveSearchRefreshMode.eventOnly.rawValue,
                 forKey: SearchEnginePreferences.braveRefreshModeKey
             )
@@ -733,10 +828,10 @@ final class StatusBarController: NSObject {
     private func isProviderEnabled(_ identifier: ProviderIdentifier) -> Bool {
         guard identifier.isEnabled else { return false }
         let key = "provider.\(identifier.rawValue).enabled"
-        if UserDefaults.standard.object(forKey: key) == nil {
+        if userDefaults.object(forKey: key) == nil {
             return true
         }
-        return UserDefaults.standard.bool(forKey: key)
+        return userDefaults.bool(forKey: key)
     }
 
     @objc private func toggleProvider(_ sender: NSMenuItem) {
@@ -744,7 +839,7 @@ final class StatusBarController: NSObject {
               let identifier = ProviderIdentifier(rawValue: idString) else { return }
         let key = "provider.\(identifier.rawValue).enabled"
         let current = isProviderEnabled(identifier)
-        UserDefaults.standard.set(!current, forKey: key)
+        userDefaults.set(!current, forKey: key)
         updateEnabledProvidersMenu()
         updateStatusBarDisplayMenuState()
         updateStatusBarText()
@@ -768,7 +863,7 @@ final class StatusBarController: NSObject {
                                   keyEquivalent: "")
             item.target = self
             item.representedObject = currency.rawValue
-            item.state = (CurrencyFormatter.shared.currency == currency) ? .on : .off
+            item.state = (currencyFormatter.currency == currency) ? .on : .off
             submenu.addItem(item)
         }
         parent.submenu = submenu
@@ -778,7 +873,7 @@ final class StatusBarController: NSObject {
 
     private func updateCurrencyMenuState() {
         guard let currencyMenu = currencyMenu else { return }
-        let selected = CurrencyFormatter.shared.currency.rawValue
+        let selected = currencyFormatter.currency.rawValue
         for item in currencyMenu.items {
             guard let raw = item.representedObject as? String else { continue }
             item.state = (raw == selected) ? .on : .off
@@ -788,7 +883,7 @@ final class StatusBarController: NSObject {
     @objc private func selectCurrency(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let currency = Currency(rawValue: raw) else { return }
-        CurrencyFormatter.shared.currency = currency
+        currencyFormatter.currency = currency
         updateStatusBarText()
         refreshClicked()
         updateCurrencyMenuState()
@@ -977,9 +1072,9 @@ final class StatusBarController: NSObject {
 
     private func calculateTotalWithSubscriptions(providerResults: [ProviderIdentifier: ProviderResult], copilotUsage: CopilotUsage?) -> Double {
         let payAsYouGoUSD = calculatePayAsYouGoTotal(providerResults: providerResults, copilotUsage: copilotUsage)
-        let currency = CurrencyFormatter.shared.currency
-        let payAsYouGoInCurrency = payAsYouGoUSD * (currency == .rmb ? CurrencyFormatter.shared.currentRate : 1.0)
-        let subscriptionsInCurrency = SubscriptionSettingsManager.shared.totalMonthlyCost(inCurrency: currency, formatter: CurrencyFormatter.shared)
+        let currency = currencyFormatter.currency
+        let payAsYouGoInCurrency = payAsYouGoUSD * (currency == .rmb ? currencyFormatter.currentRate : 1.0)
+        let subscriptionsInCurrency = SubscriptionSettingsManager.shared.totalMonthlyCost(inCurrency: currency, formatter: currencyFormatter)
         return payAsYouGoInCurrency + subscriptionsInCurrency
     }
 
@@ -989,11 +1084,11 @@ final class StatusBarController: NSObject {
     }
 
     private func formatCostForStatusBar(_ cost: Double) -> String {
-        CurrencyFormatter.shared.format(usd: cost)
+        currencyFormatter.format(usd: cost)
     }
 
     private func formatCurrencyAmountForStatusBar(_ amount: Double) -> String {
-        CurrencyFormatter.shared.format(amount: amount, as: CurrencyFormatter.shared.currency)
+        currencyFormatter.format(amount: amount, as: currencyFormatter.currency)
     }
 
     private func formatCostOrStatusBarBrand(_ cost: Double) -> String {
@@ -1657,7 +1752,7 @@ final class StatusBarController: NSObject {
     private func calculateOrphanedSubscriptions(providerResults: [ProviderIdentifier: ProviderResult]) -> (keys: [String], total: Double) {
         let visibleKeys = collectVisibleSubscriptionKeys(providerResults: providerResults)
         let allKeys = SubscriptionSettingsManager.shared.getAllSubscriptionKeys()
-        let currency = CurrencyFormatter.shared.currency
+        let currency = currencyFormatter.currency
 
         var orphaned: [String] = []
         var total = 0.0
@@ -1693,7 +1788,7 @@ final class StatusBarController: NSObject {
                 }
 
                 orphaned.append(key)
-                total += SubscriptionSettingsManager.shared.monthlyCost(forKey: key, inCurrency: currency, formatter: CurrencyFormatter.shared)
+                total += SubscriptionSettingsManager.shared.monthlyCost(forKey: key, inCurrency: currency, formatter: currencyFormatter)
                 continue
             }
 
@@ -1703,13 +1798,13 @@ final class StatusBarController: NSObject {
             }
 
             orphaned.append(key)
-            total += SubscriptionSettingsManager.shared.monthlyCost(forKey: key, inCurrency: currency, formatter: CurrencyFormatter.shared)
+            total += SubscriptionSettingsManager.shared.monthlyCost(forKey: key, inCurrency: currency, formatter: currencyFormatter)
         }
 
         if orphaned.isEmpty {
             debugLog("Orphaned subscriptions: none")
         } else {
-            let displayTotal = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(currency: currency, formatter: CurrencyFormatter.shared)
+            let displayTotal = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(currency: currency, formatter: currencyFormatter)
             let sanitizedKeys = orphaned.map { sanitizedSubscriptionKey($0) }.joined(separator: ", ")
             debugLog("Orphaned subscriptions detected: \(orphaned.count) key(s), total=\(displayTotal), keys=[\(sanitizedKeys)]")
         }
@@ -1772,7 +1867,7 @@ final class StatusBarController: NSObject {
           let payAsYouGoTotal = calculatePayAsYouGoTotal(providerResults: providerResults, copilotUsage: currentUsage)
 
           let payAsYouGoHeader = NSMenuItem()
-          payAsYouGoHeader.view = createHeaderView(title: "按量付费：\(CurrencyFormatter.shared.format(usd: payAsYouGoTotal))")
+          payAsYouGoHeader.view = createHeaderView(title: "按量付费：\(currencyFormatter.format(usd: payAsYouGoTotal))")
           payAsYouGoHeader.tag = MenuItemTag.dynamic
           menu.insertItem(payAsYouGoHeader, at: insertIndex)
           insertIndex += 1
@@ -1799,7 +1894,7 @@ final class StatusBarController: NSObject {
                         hasPayAsYouGo = true
                         let costValue = cost ?? 0.0
                         let item = NSMenuItem(
-                            title: "\(identifier.displayName) (\(CurrencyFormatter.shared.format(usd: costValue)))",
+                            title: "\(identifier.displayName) (\(currencyFormatter.format(usd: costValue)))",
                             action: nil, keyEquivalent: ""
                         )
                         item.image = iconForProvider(identifier)
@@ -1847,7 +1942,7 @@ final class StatusBarController: NSObject {
                    let overageCost = details.copilotOverageCost {
                     hasPayAsYouGo = true
                     let addOnItem = NSMenuItem(
-                        title: "Copilot 加购包（\(CurrencyFormatter.shared.format(usd: overageCost))）",
+                        title: "Copilot 加购包（\(currencyFormatter.format(usd: overageCost))）",
                         action: nil, keyEquivalent: ""
                     )
                     addOnItem.image = iconForProvider(.copilot)
@@ -1923,12 +2018,12 @@ final class StatusBarController: NSObject {
 
          let quotaHeader = NSMenuItem()
          let totalMonthlyCost = SubscriptionSettingsManager.shared.totalMonthlyCost(
-             inCurrency: CurrencyFormatter.shared.currency,
-             formatter: CurrencyFormatter.shared
+             inCurrency: currencyFormatter.currency,
+             formatter: currencyFormatter
          )
          let subscriptionDisplay = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
-             currency: CurrencyFormatter.shared.currency,
-             formatter: CurrencyFormatter.shared
+             currency: currencyFormatter.currency,
+             formatter: currencyFormatter
          )
          let quotaTitle = totalMonthlyCost > 0
              ? "额度状态：\(subscriptionDisplay)/月"
@@ -2521,8 +2616,8 @@ final class StatusBarController: NSObject {
         orphanedSubscriptionTotal = orphaned.total
         if orphaned.total > 0 {
             let displayTotal = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
-                currency: CurrencyFormatter.shared.currency,
-                formatter: CurrencyFormatter.shared
+                currency: currencyFormatter.currency,
+                formatter: currencyFormatter
             )
             let title = "Orphaned (\(displayTotal))"
             let orphanedItem = NSMenuItem(
@@ -3316,7 +3411,7 @@ final class StatusBarController: NSObject {
 
         if identifier == .braveSearch {
             if braveRefreshMode != .eventOnly {
-                let lastSyncEpoch = UserDefaults.standard.double(forKey: SearchEnginePreferences.braveLastAPISyncAtKey)
+                let lastSyncEpoch = userDefaults.double(forKey: SearchEnginePreferences.braveLastAPISyncAtKey)
                 if lastSyncEpoch > 0 {
                     let date = Date(timeIntervalSince1970: lastSyncEpoch)
                     let formatter = DateFormatter()
@@ -3683,8 +3778,8 @@ final class StatusBarController: NSObject {
 
         let orphanedCount = keysToReset.count
         let displayTotal = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
-            currency: CurrencyFormatter.shared.currency,
-            formatter: CurrencyFormatter.shared
+            currency: currencyFormatter.currency,
+            formatter: currencyFormatter
         )
         let sanitizedKeys = keysToReset.map { sanitizedSubscriptionKey($0) }.joined(separator: ", ")
         debugLog("confirmResetOrphanedSubscriptions: \(orphanedCount) key(s) pending, total=\(displayTotal), keys=[\(sanitizedKeys)]")
@@ -3717,8 +3812,8 @@ final class StatusBarController: NSObject {
 
         let orphanedCount = keys.count
         let displayTotal = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
-            currency: CurrencyFormatter.shared.currency,
-            formatter: CurrencyFormatter.shared
+            currency: currencyFormatter.currency,
+            formatter: currencyFormatter
         )
         let sanitizedKeys = keys.map { sanitizedSubscriptionKey($0) }.joined(separator: ", ")
         debugLog("resetOrphanedSubscriptions: resetting \(orphanedCount) key(s), total=\(displayTotal), keys=[\(sanitizedKeys)]")
@@ -3819,8 +3914,8 @@ final class StatusBarController: NSObject {
             return nil
         }
 
-        let currency = CurrencyFormatter.shared.currency
-        let rate = CurrencyFormatter.shared.currentRate
+        let currency = currencyFormatter.currency
+        let rate = currencyFormatter.currentRate
         let payAsYouGoUSD = calculatePayAsYouGoTotal(
             providerResults: providerResults,
             copilotUsage: currentUsage
@@ -3828,18 +3923,18 @@ final class StatusBarController: NSObject {
         let payAsYouGoInCurrency = payAsYouGoUSD * (currency == .rmb ? rate : 1.0)
         let subscriptionInCurrency = SubscriptionSettingsManager.shared.totalMonthlyCost(
             inCurrency: currency,
-            formatter: CurrencyFormatter.shared
+            formatter: currencyFormatter
         )
         let totalTracked = payAsYouGoInCurrency + subscriptionInCurrency
         let subscriptionDisplay = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
             currency: currency,
-            formatter: CurrencyFormatter.shared
+            formatter: currencyFormatter
         )
 
         var lines = [
             "我的 Token King 用量快照",
-            "- 本月累计追踪：\(CurrencyFormatter.shared.format(amount: totalTracked, as: currency))",
-            "- 按量付费支出：\(CurrencyFormatter.shared.format(amount: payAsYouGoInCurrency, as: currency))",
+            "- 本月累计追踪：\(currencyFormatter.format(amount: totalTracked, as: currency))",
+            "- 按量付费支出：\(currencyFormatter.format(amount: payAsYouGoInCurrency, as: currency))",
             "- 额度订阅：\(subscriptionDisplay)/月"
         ]
 
@@ -3879,7 +3974,7 @@ final class StatusBarController: NSObject {
             return nil
         }
 
-        return "支出最高：\(top.name)，\(CurrencyFormatter.shared.format(usd: top.cost))"
+        return "支出最高：\(top.name)，\(currencyFormatter.format(usd: top.cost))"
     }
 
     private func topQuotaShareLine() -> String? {
@@ -3912,9 +4007,9 @@ final class StatusBarController: NSObject {
         let keyPrefix = "growth.\(event.rawValue)"
         let countKey = "\(keyPrefix).count"
         let timestampKey = "\(keyPrefix).lastTimestamp"
-        let count = UserDefaults.standard.integer(forKey: countKey) + 1
-        UserDefaults.standard.set(count, forKey: countKey)
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: timestampKey)
+        let count = userDefaults.integer(forKey: countKey) + 1
+        userDefaults.set(count, forKey: countKey)
+        userDefaults.set(Date().timeIntervalSince1970, forKey: timestampKey)
         logger.info("Growth event recorded: \(event.rawValue, privacy: .public), count: \(count)")
         debugLog("growthEvent: \(event.rawValue), count=\(count)")
     }
@@ -3955,7 +4050,7 @@ final class StatusBarController: NSObject {
     /// Prompts user to star GitHub repo once on first launch.
     private func checkAndPromptGitHubStar() {
         let dismissedKey = "githubStarPromptDismissed"
-        guard !UserDefaults.standard.bool(forKey: dismissedKey) else {
+        guard !userDefaults.bool(forKey: dismissedKey) else {
             debugLog("GitHub star prompt: skipped (already dismissed)")
             return
         }
@@ -3971,7 +4066,7 @@ final class StatusBarController: NSObject {
         alert.alertStyle = .informational
 
         let response = alert.runModal()
-        UserDefaults.standard.set(true, forKey: dismissedKey)
+        userDefaults.set(true, forKey: dismissedKey)
 
         if response == .alertFirstButtonReturn {
             debugLog("GitHub star prompt: opening GitHub page")
@@ -4077,22 +4172,22 @@ final class StatusBarController: NSObject {
 
     private func saveCache(usage: CopilotUsage) {
         if let data = try? JSONEncoder().encode(CachedUsage(usage: usage, timestamp: Date())) {
-            UserDefaults.standard.set(data, forKey: "copilot.usage.cache")
+            userDefaults.set(data, forKey: "copilot.usage.cache")
         }
     }
 
     private func clearCaches() {
-        UserDefaults.standard.removeObject(forKey: "copilot.history.cache")
+        userDefaults.removeObject(forKey: "copilot.history.cache")
     }
 
     private func saveHistoryCache(_ history: UsageHistory) {
         if let data = try? JSONEncoder().encode(history) {
-            UserDefaults.standard.set(data, forKey: "copilot.history.cache")
+            userDefaults.set(data, forKey: "copilot.history.cache")
         }
     }
 
     private func loadHistoryCache() -> UsageHistory? {
-        guard let data = UserDefaults.standard.data(forKey: "copilot.history.cache") else { return nil }
+        guard let data = userDefaults.data(forKey: "copilot.history.cache") else { return nil }
         return try? JSONDecoder().decode(UsageHistory.self, from: data)
     }
 
@@ -4110,7 +4205,7 @@ final class StatusBarController: NSObject {
 
         if hasMonthChanged(cached.fetchedAt) {
             logger.info("Month change detected - deleting cache")
-            UserDefaults.standard.removeObject(forKey: "copilot.history.cache")
+            userDefaults.removeObject(forKey: "copilot.history.cache")
             return
         }
 
@@ -4236,7 +4331,7 @@ final class StatusBarController: NSObject {
 
         // Create Predicted EOM menu item
         let eomItem = NSMenuItem(
-            title: "预计月末：\(CurrencyFormatter.shared.format(usd: predictedEOM, decimals: 0))",
+            title: "预计月末：\(currencyFormatter.format(usd: predictedEOM, decimals: 0))",
             action: nil,
             keyEquivalent: ""
         )
@@ -4265,7 +4360,7 @@ final class StatusBarController: NSObject {
             if dayData.total < 0.01 {
                 costStr = "Zero"
             } else {
-                costStr = CurrencyFormatter.shared.format(usd: dayData.total)
+                costStr = currencyFormatter.format(usd: dayData.total)
             }
 
             let label = isToday ? "\(dateStr): \(costStr) (Today)" : "\(dateStr): \(costStr)"
@@ -4286,7 +4381,7 @@ final class StatusBarController: NSObject {
                         if cost < 0.01 {
                             providerLabel = "\(provider.displayName): Zero"
                         } else {
-                            providerLabel = "\(provider.displayName): \(CurrencyFormatter.shared.format(usd: cost))"
+                            providerLabel = "\(provider.displayName): \(currencyFormatter.format(usd: cost))"
                         }
                         let providerItem = NSMenuItem()
                         providerItem.view = createDisabledLabelView(
@@ -4377,7 +4472,7 @@ final class StatusBarController: NSObject {
             debugLog("updateHistorySubmenu: monthlyItem added")
 
             if prediction.predictedBilledAmount > 0 {
-                let costText = "预计加购包：\(CurrencyFormatter.shared.format(usd: prediction.predictedBilledAmount))"
+                let costText = "预计加购包：\(currencyFormatter.format(usd: prediction.predictedBilledAmount))"
                 let costItem = NSMenuItem()
                 costItem.view = createDisabledLabelView(
                     text: costText,
