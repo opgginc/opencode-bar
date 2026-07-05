@@ -165,11 +165,6 @@ final class StatusBarController: NSObject {
     private var usageHistory: UsageHistory?
     private var lastHistoryFetchResult: HistoryFetchResult = .none
 
-    // History UI properties
-    private var historySubmenu: NSMenu!
-    private var historyMenuItem: NSMenuItem!
-    var predictionPeriodMenu: NSMenu!
-
     // Multi-provider properties
     private var providerResults: [ProviderIdentifier: ProviderResult] = [:]
     private var loadingProviders: Set<ProviderIdentifier> = []
@@ -239,8 +234,6 @@ final class StatusBarController: NSObject {
         }
         set {
             userDefaults.set(newValue.rawValue, forKey: "predictionPeriod")
-            updatePredictionPeriodMenu()
-            updateHistorySubmenu()
             updateMultiProviderMenu()
         }
     }
@@ -517,16 +510,6 @@ final class StatusBarController: NSObject {
         menu = NSMenu()
         menu.delegate = self
 
-        historyMenuItem = NSMenuItem(title: "用量历史", action: nil, keyEquivalent: "")
-        historyMenuItem.image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Usage History")
-        historySubmenu = NSMenu()
-        historyMenuItem.submenu = historySubmenu
-        let loadingItem = NSMenuItem(title: "加载中…", action: nil, keyEquivalent: "")
-        loadingItem.isEnabled = false
-        historySubmenu.addItem(loadingItem)
-        // Removed: History now in Copilot submenu only (see createCopilotHistorySubmenu())
-        // menu.addItem(historyMenuItem)
-
         // Load cached history immediately on startup (before API fetch completes)
         loadCachedHistoryOnStartup()
 
@@ -663,15 +646,6 @@ final class StatusBarController: NSObject {
         settingsMenuItem.submenu = settingsSubmenu
         menu.addItem(settingsMenuItem)
 
-        predictionPeriodMenu = NSMenu()
-        for period in PredictionPeriod.allCases {
-            let item = NSMenuItem(title: period.title, action: #selector(predictionPeriodSelected(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = period.rawValue
-            predictionPeriodMenu.addItem(item)
-        }
-        updatePredictionPeriodMenu()
-
         // 这条分隔线是 updateMultiProviderMenu() 定位动态区起点的锚，必须保留。
         menu.addItem(NSMenuItem.separator())
 
@@ -783,12 +757,6 @@ final class StatusBarController: NSObject {
 
         criticalBadgeMenuItem?.state = criticalBadgeEnabled ? .on : .off
         showProviderNameMenuItem?.state = showProviderName ? .on : .off
-    }
-
-    private func updatePredictionPeriodMenu() {
-        for item in predictionPeriodMenu.items {
-            item.state = (item.tag == predictionPeriod.rawValue) ? .on : .off
-        }
     }
 
     @objc func predictionPeriodSelected(_ sender: NSMenuItem) {
@@ -1846,8 +1814,7 @@ final class StatusBarController: NSObject {
 
          var hasPayAsYouGo = false
 
-            let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen, .openCode]
-            for identifier in payAsYouGoOrder {
+            for identifier in Self.payAsYouGoProviderIdentifiers {
                 guard isProviderEnabled(identifier) else { continue }
 
                 let result = providerResults[identifier]
@@ -3709,7 +3676,6 @@ final class StatusBarController: NSObject {
           currentUsage = usage
           updateStatusBarText()
           signInItem.isHidden = true
-          updateHistorySubmenu()
           updateMultiProviderMenu()
       }
 
@@ -3978,8 +3944,7 @@ final class StatusBarController: NSObject {
     private func topPayAsYouGoShareLine() -> String? {
         var candidates: [(name: String, cost: Double)] = []
 
-        let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen, .openCode]
-        for identifier in payAsYouGoOrder where isProviderEnabled(identifier) {
+        for identifier in Self.payAsYouGoProviderIdentifiers where isProviderEnabled(identifier) {
             guard let result = providerResults[identifier] else { continue }
             guard case .payAsYouGo(_, let cost, _) = result.usage else { continue }
             guard let cost, cost > 0 else { continue }
@@ -4233,7 +4198,6 @@ final class StatusBarController: NSObject {
 
         self.usageHistory = cached
         self.lastHistoryFetchResult = .failedWithCache
-        updateHistorySubmenu()
     }
 
     func getHistoryUIState() -> HistoryUIState {
@@ -4453,141 +4417,6 @@ final class StatusBarController: NSObject {
         insertIndex += 1
 
         return insertIndex
-    }
-
-    private func updateHistorySubmenu() {
-        debugLog("updateHistorySubmenu: started")
-        let state = getHistoryUIState()
-        debugLog("updateHistorySubmenu: getHistoryUIState completed")
-        historySubmenu.removeAllItems()
-        debugLog("updateHistorySubmenu: removeAllItems completed")
-
-        if state.hasNoData {
-            debugLog("updateHistorySubmenu: hasNoData=true, returning early")
-            let item = NSMenuItem()
-            item.view = createDisabledLabelView(
-                text: "无数据",
-                icon: NSImage(systemSymbolName: "tray", accessibilityDescription: "No data")
-            )
-            historySubmenu.addItem(item)
-            return
-        }
-        debugLog("updateHistorySubmenu: hasNoData=false, continuing")
-
-        if let prediction = state.prediction {
-            debugLog("updateHistorySubmenu: prediction exists, processing")
-            let formatter = NumberFormatter()
-            formatter.numberStyle = .decimal
-            formatter.maximumFractionDigits = 0
-
-            debugLog("updateHistorySubmenu: creating monthlyText")
-            let monthlyText = "预计月末：\(formatter.string(from: NSNumber(value: prediction.predictedMonthlyRequests)) ?? "0") 次请求"
-            debugLog("updateHistorySubmenu: creating monthlyItem")
-            let monthlyItem = NSMenuItem()
-            monthlyItem.view = createDisabledLabelView(
-                text: monthlyText,
-                icon: NSImage(systemSymbolName: "chart.line.uptrend.xyaxis", accessibilityDescription: "Predicted EOM"),
-                font: NSFont.boldSystemFont(ofSize: 13)
-            )
-            debugLog("updateHistorySubmenu: adding monthlyItem to submenu")
-            historySubmenu.addItem(monthlyItem)
-            debugLog("updateHistorySubmenu: monthlyItem added")
-
-            if prediction.predictedBilledAmount > 0 {
-                let costText = "预计加购包：\(currencyFormatter.format(usd: prediction.predictedBilledAmount))"
-                let costItem = NSMenuItem()
-                costItem.view = createDisabledLabelView(
-                    text: costText,
-                    icon: NSImage(systemSymbolName: "dollarsign.circle", accessibilityDescription: "Predicted Add-on"),
-                    font: NSFont.boldSystemFont(ofSize: 13),
-                    underline: true
-                )
-                historySubmenu.addItem(costItem)
-            }
-
-            if prediction.confidenceLevel == .low {
-                let confItem = NSMenuItem()
-                confItem.view = createDisabledLabelView(
-                    text: "预测准确度低",
-                    icon: NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Low accuracy")
-                )
-                historySubmenu.addItem(confItem)
-            } else if prediction.confidenceLevel == .medium {
-                let confItem = NSMenuItem()
-                confItem.view = createDisabledLabelView(
-                    text: "预测准确度中",
-                    icon: NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Medium accuracy")
-                )
-                historySubmenu.addItem(confItem)
-            }
-
-            debugLog("updateHistorySubmenu: adding separator after prediction")
-            historySubmenu.addItem(NSMenuItem.separator())
-            debugLog("updateHistorySubmenu: separator added")
-        } else {
-            debugLog("updateHistorySubmenu: no prediction data")
-        }
-
-        if state.isStale {
-            debugLog("updateHistorySubmenu: data is stale, adding stale item")
-            let staleItem = NSMenuItem()
-            staleItem.view = createDisabledLabelView(
-                text: "数据已过期",
-                icon: NSImage(systemSymbolName: "clock.badge.exclamationmark", accessibilityDescription: "Data is stale")
-            )
-            historySubmenu.addItem(staleItem)
-            debugLog("updateHistorySubmenu: stale item added")
-        }
-
-        if let history = state.history {
-            debugLog("updateHistorySubmenu: history exists, processing \(history.recentDays.count) days")
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "MMM d"
-            dateFormatter.timeZone = TimeZone(identifier: "UTC")
-
-            var utcCalendar = Calendar(identifier: .gregorian)
-            if let utc = TimeZone(identifier: "UTC") {
-                utcCalendar.timeZone = utc
-            }
-            let today = utcCalendar.startOfDay(for: Date())
-
-            let numberFormatter = NumberFormatter()
-            numberFormatter.numberStyle = .decimal
-            numberFormatter.maximumFractionDigits = 0
-
-            for day in history.recentDays {
-                let dayStart = utcCalendar.startOfDay(for: day.date)
-                let isToday = dayStart == today
-                let dateStr = dateFormatter.string(from: day.date)
-                let reqStr = numberFormatter.string(from: NSNumber(value: day.totalRequests)) ?? "0"
-                let label = isToday ? "\(dateStr) (Today): \(reqStr) req" : "\(dateStr): \(reqStr) req"
-
-                let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: label, monospaced: true)
-                historySubmenu.addItem(item)
-            }
-            debugLog("updateHistorySubmenu: all history items added")
-        } else {
-            debugLog("updateHistorySubmenu: no history data")
-        }
-
-        debugLog("updateHistorySubmenu: adding final separator and prediction period menu")
-        historySubmenu.addItem(NSMenuItem.separator())
-        let predictionPeriodItem = NSMenuItem(title: "预测周期", action: nil, keyEquivalent: "")
-        predictionPeriodItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Prediction Period")
-        
-        // Create a fresh submenu to avoid NSMenu parent conflict
-        let freshPeriodSubmenu = NSMenu()
-        for period in PredictionPeriod.allCases {
-            let item = NSMenuItem(title: period.title, action: #selector(predictionPeriodSelected(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = period.rawValue
-            item.state = (period.rawValue == predictionPeriod.rawValue) ? .on : .off
-            freshPeriodSubmenu.addItem(item)
-        }
-        predictionPeriodItem.submenu = freshPeriodSubmenu
-        historySubmenu.addItem(predictionPeriodItem)
-        debugLog("updateHistorySubmenu: completed successfully")
     }
 }
 
@@ -4809,6 +4638,14 @@ extension StatusBarController {
 #endif
 
 extension StatusBarController {
+    /// Pay-as-you-go providers iterated for the "按量付费" menu section and the
+    /// share snapshot. Each entry must have `ProviderType == .payAsYouGo`.
+    static let payAsYouGoProviderIdentifiers: [ProviderIdentifier] = [
+        .openRouter,
+        .openCodeZen,
+        .openCode
+    ]
+
     /// Order in which quota-based providers are inserted into the top-level dynamic menu.
     /// CN variants must precede their Global counterparts (国内优先).
     static let providerQuotaOrder: [ProviderIdentifier] = [
