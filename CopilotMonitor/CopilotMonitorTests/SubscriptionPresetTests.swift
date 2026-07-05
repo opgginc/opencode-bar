@@ -57,4 +57,36 @@ final class SubscriptionPresetTests: XCTestCase {
         XCTAssertFalse(ProviderSubscriptionPresets.presets(for: .hunyuan).isEmpty)
         XCTAssertFalse(ProviderSubscriptionPresets.presets(for: .zhipuGLM).isEmpty)
     }
+
+    // MARK: - B30: Gemini CLI 套餐名称不能撞名（否则菜单里同名高亮 B22 会同时点亮两档）
+    //
+    // 原 catalog 里 "Plus" 同时给 $4 Monthly 和 $8 Annual，"Ultra" 同时给 $125/$250
+    // 两套价格。ProviderMenuBuilder.addSubscriptionItems 只比较 name 不比较 cost，
+    // 用户存 Plus $4 时菜单里 Plus Annual 也会被 .on 高亮，视觉冲突。
+    // 重命名后 "Plus Monthly" / "Plus Annual" 各自独立、名字不再前缀重叠。
+
+    func testGeminiCLIPresetsHaveUniqueNames() {
+        let presets = ProviderSubscriptionPresets.geminiCLI
+        let names = presets.map(\.name)
+        let uniqueNames = Set(names)
+        XCTAssertEqual(names.count, uniqueNames.count,
+                       "Gemini CLI preset names must be unique to avoid menu ambiguity (B22/B30): \(names)")
+    }
+
+    func testGeminiCLIPlusAndUltraTiersAreDisambiguated() {
+        let presets = ProviderSubscriptionPresets.geminiCLI
+        let plusMonthly = presets.first { $0.name == "Plus Monthly" }
+        let plusAnnual = presets.first { $0.name == "Plus Annual" }
+        let ultraMonthly = presets.first { $0.name == "Ultra Monthly" }
+        let ultraAnnual = presets.first { $0.name == "Ultra Annual" }
+
+        XCTAssertNotNil(plusMonthly, "Gemini CLI must keep a Monthly Plus tier")
+        XCTAssertNotNil(plusAnnual, "Gemini CLI must keep an Annual Plus tier")
+        XCTAssertNotNil(ultraMonthly, "Gemini CLI must keep a Monthly Ultra tier")
+        XCTAssertNotNil(ultraAnnual, "Gemini CLI must keep an Annual Ultra tier")
+
+        // Plus Monthly 价格应低于 Plus Annual 折算到月的水平（年付是预付一次性）
+        XCTAssertLessThan(plusMonthly!.cost, plusAnnual!.cost * 2,
+                          "Monthly tier should be cheaper per-cycle than the annual equivalent")
+    }
 }
