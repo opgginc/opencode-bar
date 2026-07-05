@@ -439,53 +439,21 @@ final class StatusBarController: NSObject {
         button.addSubview(iconView)
     }
 
-    /// Render the StatusBarIconView into a template NSImage and assign it to
-    /// `button.image`. On macOS 26.x NSSceneStatusItem the button's subview
-    /// drawing is unreliable, so the image-assignment path is what actually
-    /// shows up in the menu bar.
+    /// Keep `button.title` clear so the menu bar shows only the icon.
     ///
-    /// We create an `NSBitmapImageRep` with `pixelsWide/pixelsHigh` scaled by
-    /// the active screen's `backingScaleFactor`. This ensures the rep holds a
-    /// Retina-resolution bitmap; when macOS then composites it into a Retina
-    /// menu bar it stays crisp instead of being upscaled from a 1x raster
-    /// (which is what `NSImage(size:).lockFocus()` produces on macOS 26.x).
+    /// On macOS 26.x with the `MenuBarExtraAccess` bridge, the button's
+    /// subview (the `StatusBarIconView` attached in `attachStatusIconViewToButton`)
+    /// is what the system actually composites in the menu bar. The previous
+    /// implementation built an `NSBitmapImageRep` at the active screen's
+    /// `backingScaleFactor` and assigned it to `button.image`, but lldb
+    /// capture + menu-bar diff (see
+    /// `docs/handoffs/2026-07-05-token-king-icon-blurry.md`) showed that
+    /// path was visually compressed: the SF Symbol ended up at ~16pt inside
+    /// the 22pt logical button frame, with the inner detail (needle / ticks)
+    /// blurred. Disabling the `button.image` assignment lets the subview
+    /// draw at its natural ~17.5pt size with full opaque rendering.
     private func renderStatusItemImage() {
-        guard let iconView = statusBarIconView, let button = statusItem?.button else {
-            return
-        }
-        let logicalSize = NSSize(
-            width: max(iconView.intrinsicContentSize.width, 22),
-            height: iconView.intrinsicContentSize.height
-        )
-        let scale = NSScreen.main?.backingScaleFactor ?? 1.0
-        let pixelSize = NSSize(
-            width: logicalSize.width * scale,
-            height: logicalSize.height * scale
-        )
-        guard let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: max(1, Int(pixelSize.width)),
-            pixelsHigh: max(1, Int(pixelSize.height)),
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 32
-        ) else { return }
-        bitmap.size = logicalSize
-        let image = NSImage(size: logicalSize)
-        image.addRepresentation(bitmap)
-        NSGraphicsContext.saveGraphicsState()
-        defer { NSGraphicsContext.restoreGraphicsState() }
-        if let ctx = NSGraphicsContext(bitmapImageRep: bitmap) {
-            NSGraphicsContext.current = ctx
-            ctx.imageInterpolation = .high
-            iconView.draw(NSRect(origin: .zero, size: logicalSize))
-        }
-        image.isTemplate = true
-        button.image = image
+        guard let button = statusItem?.button else { return }
         button.title = ""
     }
 
