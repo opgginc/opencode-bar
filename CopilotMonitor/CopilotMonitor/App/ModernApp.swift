@@ -33,7 +33,18 @@ struct ModernApp: App {
             // with the StatusBarController's NSMenu at runtime.
             Text("Loading...")
         } label: {
-            Image(systemName: "gauge.medium")
+            // The visible menu bar icon is drawn by `StatusBarIconView` (a subview
+            // of `statusItem.button`, attached in `StatusBarController.attachStatusIconViewToButton`).
+            // Keeping a visible SwiftUI `Image(systemName:)` label here caused
+            // `button.image` to flicker between our `nil` (after commit 5fe507c)
+            // and SwiftUI's own `NSSymbolImageRep` of gauge.medium — every time
+            // SwiftUI re-evaluated the label the MenuBar briefly showed two icons:
+            // the SwiftUI label on top of the subview. See
+            // `docs/handoffs/2026-07-05-token-king-icon-blurry.md`. We render a
+            // zero-size transparent placeholder here so MenuBarExtraAccess still
+            // provisions an NSSceneStatusItem (the bridge needs that), but
+            // SwiftUI never paints a competing icon in the menu bar.
+            Color.clear.frame(width: 1, height: 1)
         }
         .menuBarExtraStyle(.menu)
         .menuBarExtraAccess(
