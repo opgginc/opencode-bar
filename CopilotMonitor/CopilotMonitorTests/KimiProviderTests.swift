@@ -44,6 +44,12 @@ final class KimiProviderTests: XCTestCase {
 
     override func tearDown() {
         MockURLProtocol.requestHandler = nil
+        // B15: tests that swap XDG_DATA_HOME and call
+        // `TokenManager.shared.resetCachedAuthForTesting()` leave the shared
+        // cache pointing at the temp auth.json. Wipe it again so the next
+        // test that reads TokenManager.shared sees the developer's real auth,
+        // not the test temp file.
+        TokenManager.shared.resetCachedAuthForTesting()
         super.tearDown()
     }
 
