@@ -3092,7 +3092,7 @@ final class StatusBarController: NSObject {
         alert.runModal()
     }
 
-    private func configInfo(for identifier: ProviderIdentifier) -> (fieldName: String, path: String) {
+    func configInfo(for identifier: ProviderIdentifier) -> (fieldName: String, path: String) {
         switch identifier {
         case .copilot:
             return ("github-copilot", "~/.local/share/opencode/auth.json")
@@ -3104,6 +3104,8 @@ final class StatusBarController: NSObject {
             return ("opencode", "~/.local/share/opencode/auth.json")
         case .openCodeGo:
             return ("opencode-go", "~/.local/share/opencode/auth.json")
+        case .openCodeZen:
+            return ("opencode CLI auth", "Run `opencode login` (no auth.json key)")
         case .kimi:
             return ("kimi-for-coding", "~/.local/share/opencode/auth.json")
         case .kimiCN:
@@ -3135,15 +3137,17 @@ final class StatusBarController: NSObject {
         case .cursor:
             return ("Cursor 登录状态", "请确保 Cursor app 或 Cursor Agent 已登录")
         case .commandCode:
-            return ("command-code", "~/.local/share/opencode/auth.json")
+            return ("browser cookie (__Secure-better-auth.session_token)", "请确保 CommandCode Agent 在浏览器中已登录")
         case .kiro:
-            return ("kiro", "~/.local/share/opencode/auth.json")
+            return ("kiro-cli binary", "请安装 kiro-cli 并 `kiro login`")
         case .geminiCLI:
-            return ("google", "~/.local/share/opencode/auth.json")
+            return ("google (jenslys/opencode-gemini-auth)", "~/.local/share/opencode/auth.json")
         case .tavilySearch:
-            return ("tavily", "~/.local/share/opencode/auth.json")
+            return ("mcp.tavily.environment.TAVILY_API_KEY", "~/.config/opencode/opencode.json")
         case .braveSearch:
-            return ("brave-search", "~/.local/share/opencode/auth.json")
+            return ("mcp.brave-search.environment.BRAVE_API_KEY", "~/.config/opencode/opencode.json")
+        case .grok:
+            return ("auth.json", "~/.grok/auth.json (或 `GROK_HOME`)")
         default:
             return ("对应 provider 的 key 字段", "~/.local/share/opencode/auth.json")
         }
