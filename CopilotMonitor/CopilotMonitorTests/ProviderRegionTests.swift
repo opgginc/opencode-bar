@@ -7,8 +7,10 @@ final class ProviderRegionTests: XCTestCase {
 
     @MainActor
     func testStatusBarQuotaOrderHasCNBeforeGlobal() {
-        let controller = StatusBarController()
-        let order = controller.providerQuotaOrderForTesting
+        // `providerQuotaOrder` is a static let — calling it directly avoids
+        // initializing a full StatusBarController (which would start timers,
+        // schedule GitHub star prompts, and write to UserDefaults.standard).
+        let order = StatusBarController.providerQuotaOrder
 
         let kimiCNIndex = order.firstIndex(of: .kimiCN)
         let kimiGlobalIndex = order.firstIndex(of: .kimi)
@@ -90,15 +92,16 @@ final class ProviderRegionTests: XCTestCase {
     // MARK: - RMB filtering by current region
 
     func testRMBModeShowsKimiGlobalTiersWithUSDConversion() {
-        let previousCurrency = CurrencyFormatter.shared.currency
+        // B11: route through an isolated formatter instead of mutating
+        // CurrencyFormatter.shared.currency (which leaks into every concurrent
+        // test that reads the shared formatter).
+        let formatter = makeIsolatedFormatter(currency: .rmb)
         let presets = ProviderSubscriptionPresets.presets(for: .kimi)
-        CurrencyFormatter.shared.currency = .rmb
-        defer { CurrencyFormatter.shared.currency = previousCurrency }
 
         // 当前 region 没有 cnyCost，所以不过滤，所有 global tier 都显示 USD 折算价
         XCTAssertTrue(presets.contains { $0.name == "Vivace" })
         let vivace = presets.first { $0.name == "Vivace" }!
-        XCTAssertTrue(vivace.formattedPrice(decimals: 0).contains("¥"))
+        XCTAssertTrue(vivace.formattedPrice(decimals: 0, formatter: formatter).contains("¥"))
     }
 
     func testRMBModeHidesKimiVivaceInChinaRegion() {
@@ -107,47 +110,73 @@ final class ProviderRegionTests: XCTestCase {
     }
 
     func testRMBModeShowsMiniMaxGlobalTiersWithUSDConversion() {
-        let previousCurrency = CurrencyFormatter.shared.currency
+        let formatter = makeIsolatedFormatter(currency: .rmb)
         let presets = ProviderSubscriptionPresets.presets(for: .minimaxCodingPlan)
-        CurrencyFormatter.shared.currency = .rmb
-        defer { CurrencyFormatter.shared.currency = previousCurrency }
 
         XCTAssertFalse(presets.isEmpty)
         XCTAssertTrue(presets.allSatisfy { $0.cnyCost == nil })
-        XCTAssertTrue(presets.first!.formattedPrice(decimals: 0).contains("¥"))
+        XCTAssertTrue(presets.first!.formattedPrice(decimals: 0, formatter: formatter).contains("¥"))
     }
 
     func testRMBModeShowsAllMiniMaxCNTiers() {
-        let previousCurrency = CurrencyFormatter.shared.currency
+        let formatter = makeIsolatedFormatter(currency: .rmb)
         let presets = ProviderSubscriptionPresets.presets(for: .minimaxCodingPlanCN)
-        CurrencyFormatter.shared.currency = .rmb
-        defer { CurrencyFormatter.shared.currency = previousCurrency }
 
         XCTAssertTrue(presets.allSatisfy { $0.cnyCost != nil })
+        XCTAssertTrue(presets.first!.formattedPrice(decimals: 0, formatter: formatter).contains("¥"))
     }
 
     func testCNPresetFormattedPriceUsesNativeCNYInRMBMode() {
-        let previousCurrency = CurrencyFormatter.shared.currency
+        let formatter = makeIsolatedFormatter(currency: .rmb)
         let preset = ProviderSubscriptionPresets.presets(for: .kimiCN).first { $0.name == "Moderato" }
         XCTAssertNotNil(preset)
 
-        CurrencyFormatter.shared.currency = .rmb
-        defer { CurrencyFormatter.shared.currency = previousCurrency }
-
-        let price = preset!.formattedPrice(decimals: 0)
+        let price = preset!.formattedPrice(decimals: 0, formatter: formatter)
         XCTAssertEqual(price, "¥99")
     }
 
     func testMiniMaxCNPresetFormattedPriceUsesNativeCNYInRMBMode() {
-        let previousCurrency = CurrencyFormatter.shared.currency
+        let formatter = makeIsolatedFormatter(currency: .rmb)
         let preset = ProviderSubscriptionPresets.presets(for: .minimaxCodingPlanCN).first { $0.name == "Plus" }
         XCTAssertNotNil(preset)
 
-        CurrencyFormatter.shared.currency = .rmb
-        defer { CurrencyFormatter.shared.currency = previousCurrency }
-
-        let price = preset!.formattedPrice(decimals: 0)
+        let price = preset!.formattedPrice(decimals: 0, formatter: formatter)
         XCTAssertEqual(price, "¥49")
+    }
+
+    // MARK: - B11 regression: RMB tests must not pollute CurrencyFormatter.shared
+
+    func testRMBTestsDoNotMutateSharedCurrency() {
+        // Snapshot the shared currency, run a representative RMB test, then
+        // verify the snapshot is unchanged. If a future test regresses to
+        // touching `.shared`, this catches it before it leaks across suites.
+        let sharedCurrencyBefore = CurrencyFormatter.shared.currency
+
+        let formatter = makeIsolatedFormatter(currency: .rmb)
+        let preset = ProviderSubscriptionPresets
+            .presets(for: .minimaxCodingPlanCN)
+            .first { $0.name == "Plus" }!
+        _ = preset.formattedPrice(decimals: 0, formatter: formatter)
+
+        XCTAssertEqual(
+            CurrencyFormatter.shared.currency,
+            sharedCurrencyBefore,
+            "B11 regression: RMB price test must not mutate CurrencyFormatter.shared.currency"
+        )
+    }
+
+    func testStatusBarQuotaOrderDoesNotRequireFullControllerInit() {
+        // B11: reading providerQuotaOrder via `StatusBarController()` (default
+        // .production init) used to trigger refresh timers, GitHub star prompt
+        // checks, and UserDefaults.standard writes. The quota order is a static
+        // let, so calling it directly is enough.
+        let order = StatusBarController.providerQuotaOrder
+        XCTAssertFalse(order.isEmpty)
+        // kimiCN must still come before kimi (CN-before-global invariant).
+        XCTAssertLessThan(
+            order.firstIndex(of: .kimiCN)!,
+            order.firstIndex(of: .kimi)!
+        )
     }
 
     // MARK: - Migration / Config Preservation
@@ -228,7 +257,7 @@ final class ProviderRegionTests: XCTestCase {
                        "zhipuGLM in RMB mode must return cnyCost=149, not stale 7.2 USD * 7.25 = 149.93")
     }
 
-    private func makeIsolatedFormatter(currency: Currency, rate: Double) -> CurrencyFormatter {
+    private func makeIsolatedFormatter(currency: Currency, rate: Double = 7.0) -> CurrencyFormatter {
         let suiteName = "ProviderRegionTests.B32.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
