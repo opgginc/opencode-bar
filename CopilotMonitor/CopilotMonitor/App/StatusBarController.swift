@@ -1971,31 +1971,54 @@ final class StatusBarController: NSObject {
          insertIndex += 1
 
          // Surface likely-duplicate subscriptions (e.g. Kimi Global + Kimi CN
-         // keys for the same accountId). One delete action per duplicate key.
-         let duplicateKeys = SubscriptionSettingsManager.shared.findLikelyDuplicateSubscriptionKeys()
-         if !duplicateKeys.isEmpty {
+         // keys for the same accountId). One delete action per duplicate key —
+         // every key in the duplicate group is shown with its own row, so the
+         // user picks which side to drop. Use monthlyCost(forKey:) for the
+         // label so CN keys show their native CNY price (via cnyCost), not
+         // USD × exchange rate.
+         let duplicateGroups = SubscriptionSettingsManager.shared.findLikelyDuplicateSubscriptionGroups()
+         if !duplicateGroups.isEmpty {
              let warningItem = NSMenuItem()
              warningItem.view = createDisabledLabelView(
-                 text: "⚠︎ 检测到 \(duplicateKeys.count) 组重复订阅（Key 列表见下，单击删除）"
+                 text: "⚠︎ 检测到 \(duplicateGroups.count) 组重复订阅（Key 列表见下，单击删除）"
              )
              warningItem.tag = MenuItemTag.dynamic
              menu.insertItem(warningItem, at: insertIndex)
              insertIndex += 1
 
-             for key in duplicateKeys {
-                 let planTitle = SubscriptionSettingsManager.shared.getPlan(forKey: key).displayTitle(
-                     formatter: CurrencyFormatter.shared
-                 )
-                 let item = NSMenuItem(
-                     title: "🗑 删除 \(planTitle)（Key: \(key)）",
-                     action: #selector(removeDuplicateSubscription(_:)),
-                     keyEquivalent: ""
-                 )
-                 item.target = self
-                 item.representedObject = key
-                 item.tag = MenuItemTag.dynamic
-                 menu.insertItem(item, at: insertIndex)
-                 insertIndex += 1
+             for group in duplicateGroups {
+                 for key in group {
+                     let plan = SubscriptionSettingsManager.shared.getPlan(forKey: key)
+                     let priceText: String
+                     switch plan {
+                     case .none:
+                         priceText = "无"
+                     case .preset(let name, _):
+                         let cost = SubscriptionSettingsManager.shared.monthlyCost(
+                             forKey: key,
+                             inCurrency: .rmb,
+                             formatter: CurrencyFormatter.shared
+                         )
+                         priceText = "\(name) (\(CurrencyFormatter.shared.format(amount: cost, as: .rmb, decimals: 0))/月)"
+                     case .custom(let amount):
+                         let cost = SubscriptionSettingsManager.shared.monthlyCost(
+                             forKey: key,
+                             inCurrency: .rmb,
+                             formatter: CurrencyFormatter.shared
+                         )
+                         priceText = "自定义 (\(CurrencyFormatter.shared.format(amount: cost, as: .rmb, decimals: 0))/月)"
+                     }
+                     let item = NSMenuItem(
+                         title: "🗑 删除 \(priceText)（Key: \(key)）",
+                         action: #selector(removeDuplicateSubscription(_:)),
+                         keyEquivalent: ""
+                     )
+                     item.target = self
+                     item.representedObject = key
+                     item.tag = MenuItemTag.dynamic
+                     menu.insertItem(item, at: insertIndex)
+                     insertIndex += 1
+                 }
              }
              let separatorX = NSMenuItem.separator()
              separatorX.tag = MenuItemTag.dynamic

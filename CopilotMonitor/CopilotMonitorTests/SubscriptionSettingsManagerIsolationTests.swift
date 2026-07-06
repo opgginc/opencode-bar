@@ -125,4 +125,65 @@ final class SubscriptionSettingsManagerIsolationTests: XCTestCase {
         XCTAssertEqual(migrated, .preset("Plus", 20),
                        "B06 migration should fire through the injected suite the same as .shared")
     }
+
+    // MARK: - B44 follow-up: cross-provider duplicates must list ALL keys, not pick one
+
+    func testCrossProviderDuplicatesListAllKeysNotJustOne() {
+        // Simulate the user-reported scenario: same physical account has both
+        // `kimi.<id>` and `kimi_cn.<id>` set, each with an Allegretto plan.
+        // The pre-fix code did `sorted().dropFirst()` and returned only the
+        // alphabetically-last key — silently picking the wrong side.
+        let (_, suite) = freshSuite()
+        let manager = SubscriptionSettingsManager(defaults: suite)
+        let accountId = "b44-followup@example.com"
+        let globalKey = "kimi.\(accountId)"
+        let cnKey = "kimi_cn.\(accountId)"
+        defer {
+            manager.removePlan(forKey: globalKey)
+            manager.removePlan(forKey: cnKey)
+        }
+
+        manager.setPlan(.preset("Allegretto", 39), forKey: globalKey)
+        manager.setPlan(.preset("Allegretto", 39), forKey: cnKey)
+
+        let groups = manager.findLikelyDuplicateSubscriptionGroups()
+        XCTAssertEqual(groups.count, 1, "kimi + kimi_cn for the same accountId must be one duplicate group")
+        XCTAssertEqual(Set(groups[0]), Set([globalKey, cnKey]),
+                       "Both keys must appear in the duplicate group — UI needs both rows so the user can pick")
+    }
+
+    func testCrossProviderDuplicateLabelUsesCNYForCNKey() {
+        // The pre-fix delete label used `displayTitle(formatter:)` without
+        // passing `presets:`, so for a CN key the cost was treated as USD and
+        // multiplied by the exchange rate (e.g. 39 USD × 6.795 = ¥265) —
+        // misleading the user into deleting the wrong row.
+        let (_, suite) = freshSuite()
+        let manager = SubscriptionSettingsManager(defaults: suite)
+        let accountId = "b44-cny-cost@example.com"
+        let cnKey = "kimi_cn.\(accountId)"
+        defer { manager.removePlan(forKey: cnKey) }
+
+        manager.setPlan(.preset("Allegretto", 39), forKey: cnKey)
+
+        // monthlyCost(..., inCurrency: .rmb) walks the cnyCost table for the
+        // provider and returns the native CNY price when the preset has one.
+        let formatter = CurrencyFormatter.shared
+        let cost = manager.monthlyCost(forKey: cnKey, inCurrency: .rmb, formatter: formatter)
+        XCTAssertEqual(cost, 199, accuracy: 0.01,
+                       "CN Kimi Allegretto must surface native CNY 199, not 39 USD × 6.795 = ¥265")
+    }
+
+    func testSameProviderSingleKeyNotFlaggedAsDuplicate() {
+        // Sanity check: a single key for one (provider, accountId) should not
+        // appear in the duplicate list at all.
+        let (_, suite) = freshSuite()
+        let manager = SubscriptionSettingsManager(defaults: suite)
+        let key = "kimi_cn.b44-solo@example.com"
+        defer { manager.removePlan(forKey: key) }
+
+        manager.setPlan(.preset("Allegretto", 39), forKey: key)
+
+        XCTAssertTrue(manager.findLikelyDuplicateSubscriptionKeys().isEmpty,
+                      "Single key with no counterpart must not be flagged as duplicate")
+    }
 }

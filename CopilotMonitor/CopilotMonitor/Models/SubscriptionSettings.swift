@@ -441,13 +441,25 @@ final class SubscriptionSettingsManager {
             .sorted()
     }
 
-    /// Return subscription keys that look like duplicates of the same physical account.
+    /// Return groups of subscription keys that look like duplicates of the same physical account.
+    /// Each inner array contains 2+ keys sharing the same `accountId` suffix
+    /// but with different provider prefixes (e.g. `kimi.d7k…` + `kimi_cn.d7k…`).
     ///
-    /// Heuristics:
-    /// - `.kimi.<id>` and `.kimi_cn.<id>` both present for the same `id` (most common case:
-    ///   user switched between Global and CN provider but kept both selections).
-    /// - Two keys with identical `.accountId` suffix whose plans match by name+amount.
+    /// Heuristic: keys are grouped by their trailing `accountId` portion; a group
+    /// with 2+ keys (and a non-default accountId) is treated as a duplicate set.
+    /// All keys in the duplicate group are returned so the caller can render a
+    /// delete affordance per key and let the user pick which to remove.
+    ///
+    /// Pre-fix bug: this used to call `keys.sorted().dropFirst()` and return only
+    /// the alphabetically-last key, which silently picked the wrong side of a
+    /// kimi-vs-kimi_cn pair (see B44 follow-up).
     func findLikelyDuplicateSubscriptionKeys() -> [String] {
+        findLikelyDuplicateSubscriptionGroups().flatMap { $0 }.sorted()
+    }
+
+    /// Same as `findLikelyDuplicateSubscriptionKeys()` but preserves group structure
+    /// so the UI can render a per-group warning count and a per-key delete row.
+    func findLikelyDuplicateSubscriptionGroups() -> [[String]] {
         let allKeys = getAllSubscriptionKeys()
         let groups = Dictionary(grouping: allKeys) { key -> String in
             // ".kimi.d7k…" → suffix "d7k…"; drop the ".kimi." portion
@@ -464,15 +476,13 @@ final class SubscriptionSettingsManager {
             }
             return key
         }
-        var duplicateKeys: [String] = []
+        var duplicateGroups: [[String]] = []
         for (accountId, keys) in groups where keys.count > 1 && accountId != Self.defaultAccountId {
-            // Multiple keys for the same account id → flag all but the first
-            let sortedKeys = keys.sorted()
-            for k in sortedKeys.dropFirst() {
-                duplicateKeys.append(k)
-            }
+            duplicateGroups.append(keys.sorted())
         }
-        return duplicateKeys.sorted()
+        return duplicateGroups.sorted { lhs, rhs in
+            (lhs.first ?? "") < (rhs.first ?? "")
+        }
     }
 
     func getTotalMonthlySubscriptionCost() -> Double {
