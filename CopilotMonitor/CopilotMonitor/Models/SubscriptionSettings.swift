@@ -358,12 +358,15 @@ struct ProviderSubscriptionPresets {
 }
 
 final class SubscriptionSettingsManager {
-    static let shared = SubscriptionSettingsManager()
+    static let shared = SubscriptionSettingsManager(defaults: .standard)
     static let defaultAccountId = "_default_"
 
     private let userDefaultsKeyPrefix = "subscription_v2."
+    private let defaults: UserDefaults
 
-    private init() {}
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
 
     func subscriptionKey(for provider: ProviderIdentifier, accountId: String? = nil) -> String {
         "\(provider.rawValue).\(normalizedAccountId(accountId))"
@@ -375,7 +378,7 @@ final class SubscriptionSettingsManager {
         }
 
         let fullKey = "\(userDefaultsKeyPrefix)\(key)"
-        guard let data = UserDefaults.standard.data(forKey: fullKey),
+        guard let data = defaults.data(forKey: fullKey),
               let plan = try? JSONDecoder().decode(SubscriptionPlan.self, from: data) else {
             return .none
         }
@@ -407,7 +410,7 @@ final class SubscriptionSettingsManager {
         let fullKey = "\(userDefaultsKeyPrefix)\(key)"
         do {
             let data = try JSONEncoder().encode(plan)
-            UserDefaults.standard.set(data, forKey: fullKey)
+            defaults.set(data, forKey: fullKey)
             NSLog("Saved subscription plan for account-scoped key")
         } catch {
             NSLog("Failed to encode SubscriptionPlan for key '%@': %@", fullKey, String(describing: error))
@@ -421,7 +424,7 @@ final class SubscriptionSettingsManager {
 
     func removePlan(forKey key: String) {
         let fullKey = "\(userDefaultsKeyPrefix)\(key)"
-        UserDefaults.standard.removeObject(forKey: fullKey)
+        defaults.removeObject(forKey: fullKey)
     }
 
     func removePlans(forKeys keys: [String]) {
@@ -431,7 +434,7 @@ final class SubscriptionSettingsManager {
     }
 
     func getAllSubscriptionKeys() -> [String] {
-        let allKeys = UserDefaults.standard.dictionaryRepresentation().keys
+        let allKeys = defaults.dictionaryRepresentation().keys
         return allKeys.filter { $0.hasPrefix(userDefaultsKeyPrefix) }
             .map { String($0.dropFirst(userDefaultsKeyPrefix.count)) }
             .filter { isCurrentSubscriptionKey($0) }
