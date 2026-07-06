@@ -994,6 +994,60 @@ extension StatusBarController {
             addSubscriptionItems(to: submenu, provider: .kiro, accountId: subscriptionAccountId)
             debugLog("createDetailSubmenu: added subscription items for Kiro")
 
+        case .openCode:
+            if let used = details.monthlyUsage, let total = details.limit, total > 0 {
+                submenu.addItem(createLimitRow(label: "Credits", used: used, total: total))
+            }
+            if let percent = details.mcpUsagePercent {
+                let items = createUsageWindowRow(
+                    label: "Used",
+                    usagePercent: percent,
+                    resetDate: nil,
+                    windowHours: nil
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if details.monthlyUsage == nil && details.limit == nil && details.mcpUsagePercent == nil {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(
+                    text: "OpenCode pay-as-you-go — usage unavailable",
+                    textColor: .secondaryLabelColor
+                )
+                submenu.addItem(item)
+            }
+            addSubscriptionItems(to: submenu, provider: identifier, accountId: subscriptionAccountId)
+
+        case .tavilySearch, .braveSearch:
+            if let percent = details.mcpUsagePercent {
+                let items = createUsageWindowRow(
+                    label: "Monthly",
+                    usagePercent: percent,
+                    resetDate: nil,
+                    windowHours: nil
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if let used = details.monthlyUsage, let total = details.limit, total > 0 {
+                submenu.addItem(createLimitRow(label: "Quota", used: used, total: total))
+            }
+            if let remaining = details.limitRemaining {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(
+                    text: "剩余额度：\(CurrencyFormatter.shared.format(usd: remaining, decimals: 0))",
+                    textColor: .secondaryLabelColor
+                )
+                submenu.addItem(item)
+            }
+            if details.mcpUsagePercent == nil && details.monthlyUsage == nil {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(
+                    text: "Usage data unavailable",
+                    textColor: .secondaryLabelColor
+                )
+                submenu.addItem(item)
+            }
+            addSubscriptionItems(to: submenu, provider: identifier, accountId: subscriptionAccountId)
+
         default:
             break
         }

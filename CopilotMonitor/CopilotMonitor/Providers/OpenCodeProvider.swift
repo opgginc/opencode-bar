@@ -84,9 +84,16 @@ final class OpenCodeProvider: ProviderProtocol {
 
         logger.info("Successfully fetched OpenCode usage: \(String(format: "%.2f", utilization))% utilized (used: \(decoded.data.used_credits), total: \(decoded.data.total_credits))")
 
+        let details = DetailedUsage(
+            monthlyUsage: decoded.data.used_credits,
+            limit: decoded.data.total_credits,
+            limitRemaining: decoded.data.remaining_credits,
+            mcpUsagePercent: utilization
+        )
+
         return ProviderResult(
             usage: .payAsYouGo(utilization: utilization, cost: nil, resetsAt: nil),
-            details: nil  // API not available yet
+            details: details
         )
     }
 }
