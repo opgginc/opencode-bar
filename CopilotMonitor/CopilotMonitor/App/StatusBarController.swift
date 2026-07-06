@@ -11,7 +11,7 @@ private enum StatusBarMetricKind {
     case usage
 }
 
-private enum UsageDisplayWindowPriority: Int, CaseIterable {
+enum UsageDisplayWindowPriority: Int, CaseIterable {
     case weekly = 0
     case monthly = 1
     case daily = 2
@@ -19,7 +19,7 @@ private enum UsageDisplayWindowPriority: Int, CaseIterable {
     case fallback = 4
 }
 
-private struct UsagePercentCandidate {
+struct UsagePercentCandidate {
     let percent: Double
     let priority: UsageDisplayWindowPriority
 }
@@ -1104,7 +1104,7 @@ final class StatusBarController: NSObject {
         return details.chutesMonthlyValueUsedPercent
     }
 
-    private func usagePercentCandidates(
+    func usagePercentCandidates(
         identifier: ProviderIdentifier,
         usage: ProviderUsage,
         details: DetailedUsage?
@@ -1134,11 +1134,9 @@ final class StatusBarController: NSObject {
         case .minimaxCodingPlanCN:
             add(details?.sevenDayUsage, priority: .weekly)
             add(details?.fiveHourUsage, priority: .hourly)
-        case .volcanoArk:
+        case .volcanoArk, .mimo, .hunyuan, .zhipuGLM:
             add(details?.sevenDayUsage, priority: .weekly)
             add(details?.fiveHourUsage, priority: .hourly)
-        case .mimo, .hunyuan, .zhipuGLM:
-            add(usage.usagePercentage, priority: .fallback)
         case .openCodeGo:
             add(details?.openCodeGoMonthlyUsage, priority: .monthly)
             add(details?.sevenDayUsage, priority: .weekly)

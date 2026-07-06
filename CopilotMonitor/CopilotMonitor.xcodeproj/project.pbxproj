@@ -98,6 +98,8 @@
 		KIMITESTBF11111111111 /* KimiProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = KIMITESTFR11111111111 /* KimiProviderTests.swift */; };
 		KIMIPLANMAPTESTBF111111111 /* KimiPlanMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = KIMIPLANMAPTESTFR111111111 /* KimiPlanMapperTests.swift */; };
 		PROVREGIONTESTBF1111111111 /* ProviderRegionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROVREGIONTESTFR1111111111 /* ProviderRegionTests.swift */; };
+		USAGEPCTBF1111111111 /* UsagePercentCandidatesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = USAGEPCTFR1111111111 /* UsagePercentCandidatesTests.swift */; };
+		DETAILSUBOCBF1111111111 /* DetailSubmenuOpenCodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DETAILSUBOCFR1111111111 /* DetailSubmenuOpenCodeTests.swift */; };
 		MINIMAXCNAPP11111111111111 /* MiniMaxCNProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXCNFILE2222222222222 /* MiniMaxCNProvider.swift */; };
 		MINIMAXCNCLI11111111111111 /* MiniMaxCNProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXCNFILE2222222222222 /* MiniMaxCNProvider.swift */; };
 		MINIMAXGLOBALAPP1111111111 /* MiniMaxGlobalProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXGLOBALFILE2222222222 /* MiniMaxGlobalProvider.swift */; };
@@ -267,6 +269,8 @@
 		KIMITESTFR11111111111 /* KimiProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiProviderTests.swift; sourceTree = "<group>"; };
 		KIMIPLANMAPTESTFR111111111 /* KimiPlanMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiPlanMapperTests.swift; sourceTree = "<group>"; };
 		PROVREGIONTESTFR1111111111 /* ProviderRegionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderRegionTests.swift; sourceTree = "<group>"; };
+		USAGEPCTFR1111111111 /* UsagePercentCandidatesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePercentCandidatesTests.swift; sourceTree = "<group>"; };
+		DETAILSUBOCFR1111111111 /* DetailSubmenuOpenCodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailSubmenuOpenCodeTests.swift; sourceTree = "<group>"; };
 		KIMICNFILE2222222222222 /* KimiCNProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiCNProvider.swift; sourceTree = "<group>"; };
 		KIMIGLOBALFILE222222222 /* KimiGlobalProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiGlobalProvider.swift; sourceTree = "<group>"; };
 		KIMIUSAGEFILE2222222222 /* KimiUsageTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiUsageTypes.swift; sourceTree = "<group>"; };
@@ -552,6 +556,8 @@
 				KIMITESTFR11111111111 /* KimiProviderTests.swift */,
 				KIMIPLANMAPTESTFR111111111 /* KimiPlanMapperTests.swift */,
 				PROVREGIONTESTFR1111111111 /* ProviderRegionTests.swift */,
+				USAGEPCTFR1111111111 /* UsagePercentCandidatesTests.swift */,
+				DETAILSUBOCFR1111111111 /* DetailSubmenuOpenCodeTests.swift */,
 				CURSORTSTFR11111111111 /* CursorProviderTests.swift */,
 				TOKENTESTFR1111111111111 /* TokenManagerTests.swift */,
 				CODEXTESTFR111111111111 /* CodexProviderTests.swift */,
@@ -864,6 +870,8 @@
 				KIMITESTBF11111111111 /* KimiProviderTests.swift in Sources */,
 				KIMIPLANMAPTESTBF111111111 /* KimiPlanMapperTests.swift in Sources */,
 				PROVREGIONTESTBF1111111111 /* ProviderRegionTests.swift in Sources */,
+				USAGEPCTBF1111111111 /* UsagePercentCandidatesTests.swift in Sources */,
+				DETAILSUBOCBF1111111111 /* DetailSubmenuOpenCodeTests.swift in Sources */,
 				CURSORTSTBF11111111111 /* CursorProviderTests.swift in Sources */,
 				TOKENTESTBF1111111111111 /* TokenManagerTests.swift in Sources */,
 				VOLCANOTESTBF111111111111 /* VolcanoArkProviderTests.swift in Sources */,
