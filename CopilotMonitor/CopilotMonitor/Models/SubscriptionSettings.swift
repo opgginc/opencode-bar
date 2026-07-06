@@ -242,7 +242,8 @@ struct ProviderSubscriptionPresets {
     static let tavily: [SubscriptionPreset] = []
     static let brave: [SubscriptionPreset] = []
 
-    // 新增：MiMo（仅海外 Token Plan）
+    // MiMo is a CN provider (region defaults to .china in ProviderProtocol.region);
+    // cnyCost reflects CNY pricing tiers and is surfaced directly in RMB mode.
     static let mimo: [SubscriptionPreset] = [
         SubscriptionPreset(name: "Lite",     cost: 6,   cnyCost: 39),
         SubscriptionPreset(name: "Standard", cost: 16,  cnyCost: 99),
