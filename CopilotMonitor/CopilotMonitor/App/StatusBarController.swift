@@ -885,12 +885,12 @@ final class StatusBarController: NSObject {
         }
 
         debugLog("fetchUsage: creating Task")
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
             debugLog("fetchUsage Task: calling fetchMultiProviderData")
-            await fetchMultiProviderData()
+            await self?.fetchMultiProviderData()
             debugLog("fetchUsage Task: fetchMultiProviderData completed")
             debugLog("fetchUsage Task: all done, setting isFetching=false")
-            self.isFetching = false
+            self?.isFetching = false
         }
         debugLog("fetchUsage: Task created")
     }
