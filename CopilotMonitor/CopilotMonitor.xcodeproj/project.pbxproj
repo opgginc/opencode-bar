@@ -100,6 +100,7 @@
 		PROVREGIONTESTBF1111111111 /* ProviderRegionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROVREGIONTESTFR1111111111 /* ProviderRegionTests.swift */; };
 		USAGEPCTBF1111111111 /* UsagePercentCandidatesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = USAGEPCTFR1111111111 /* UsagePercentCandidatesTests.swift */; };
 		CONFIGINFOTESTBF11111111 /* ConfigInfoProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CONFIGINFOTESTFR11111111 /* ConfigInfoProviderTests.swift */; };
+		MIGRATIONPSTESTBF1111111111 /* MigrationPresetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = MIGRATIONPSTESTFR1111111111 /* MigrationPresetTests.swift */; };
 		DETAILSUBOCBF1111111111 /* DetailSubmenuOpenCodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DETAILSUBOCFR1111111111 /* DetailSubmenuOpenCodeTests.swift */; };
 		MINIMAXCNAPP11111111111111 /* MiniMaxCNProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXCNFILE2222222222222 /* MiniMaxCNProvider.swift */; };
 		MINIMAXCNCLI11111111111111 /* MiniMaxCNProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXCNFILE2222222222222 /* MiniMaxCNProvider.swift */; };
@@ -272,6 +273,7 @@
 		PROVREGIONTESTFR1111111111 /* ProviderRegionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderRegionTests.swift; sourceTree = "<group>"; };
 		USAGEPCTFR1111111111 /* UsagePercentCandidatesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePercentCandidatesTests.swift; sourceTree = "<group>"; };
 		CONFIGINFOTESTFR11111111 /* ConfigInfoProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigInfoProviderTests.swift; sourceTree = "<group>"; };
+		MIGRATIONPSTESTFR1111111111 /* MigrationPresetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationPresetTests.swift; sourceTree = "<group>"; };
 		DETAILSUBOCFR1111111111 /* DetailSubmenuOpenCodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailSubmenuOpenCodeTests.swift; sourceTree = "<group>"; };
 		KIMICNFILE2222222222222 /* KimiCNProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiCNProvider.swift; sourceTree = "<group>"; };
 		KIMIGLOBALFILE222222222 /* KimiGlobalProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiGlobalProvider.swift; sourceTree = "<group>"; };
@@ -560,6 +562,7 @@
 				PROVREGIONTESTFR1111111111 /* ProviderRegionTests.swift */,
 				USAGEPCTFR1111111111 /* UsagePercentCandidatesTests.swift */,
 				CONFIGINFOTESTFR11111111 /* ConfigInfoProviderTests.swift */,
+				MIGRATIONPSTESTFR1111111111 /* MigrationPresetTests.swift */,
 				DETAILSUBOCFR1111111111 /* DetailSubmenuOpenCodeTests.swift */,
 				CURSORTSTFR11111111111 /* CursorProviderTests.swift */,
 				TOKENTESTFR1111111111111 /* TokenManagerTests.swift */,
@@ -875,6 +878,7 @@
 				PROVREGIONTESTBF1111111111 /* ProviderRegionTests.swift in Sources */,
 				USAGEPCTBF1111111111 /* UsagePercentCandidatesTests.swift in Sources */,
 				CONFIGINFOTESTBF11111111 /* ConfigInfoProviderTests.swift in Sources */,
+				MIGRATIONPSTESTBF1111111111 /* MigrationPresetTests.swift in Sources */,
 				DETAILSUBOCBF1111111111 /* DetailSubmenuOpenCodeTests.swift in Sources */,
 				CURSORTSTBF11111111111 /* CursorProviderTests.swift in Sources */,
 				TOKENTESTBF1111111111111 /* TokenManagerTests.swift in Sources */,

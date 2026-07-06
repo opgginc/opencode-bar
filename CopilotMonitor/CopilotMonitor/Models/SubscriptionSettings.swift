@@ -314,6 +314,47 @@ struct ProviderSubscriptionPresets {
         case (.zhipuGLM, _): return zhipuGLM
         }
     }
+
+    /// Legacy preset names whose current-catalog equivalent is different (B06).
+    ///
+    /// Older MiniMax catalog tiered as **Starter / Plus HS / Max HS / Ultra HS** (4 tiers).
+    /// Current catalog is **Plus / Max / Ultra** (3 tiers, "Starter" dropped; "HS" suffix
+    /// dropped because the new pricing model uses a single window per tier).
+    /// Users who selected a legacy name before the rename ended up with stored
+    /// `SubscriptionPlan.preset("Plus HS", cost)` whose name no longer exists in the
+    /// catalog — `addSubscriptionItems` only highlights when `selectedName == preset.name`,
+    /// so the menu rendered with **no row checked**, and `cnyCost(for:)` looked up cnyCost
+    /// by name and returned nil (so RMB-mode cost summary silently dropped the entry).
+    ///
+    /// Migration policy: when a stored preset name matches a legacy entry on read,
+    /// rewrite it to the new equivalent with the **current catalog's cost + cnyCost**.
+    /// Pricing may have shifted between releases, so we deliberately overwrite the cost
+    /// rather than preserve the legacy number — the displayed menu price is sourced from
+    /// the catalog anyway, and a stored cost that no longer matches any preset prevents
+    /// the highlight from firing (see B22 cost-aware selection check).
+    ///
+    /// If a future catalog change removes a name that is currently active, add it here
+    /// so existing user selections keep highlight visibility.
+    static func migratedPlan(_ plan: SubscriptionPlan, for provider: ProviderIdentifier) -> SubscriptionPlan {
+        guard case let .preset(name, _) = plan else { return plan }
+        switch provider.family {
+        case .minimax:
+            guard let newName = legacyMiniMaxNameMap[name],
+                  let newPreset = presets(family: .minimax, region: provider.region)
+                    .first(where: { $0.name == newName })
+            else { return plan }
+            return .preset(newPreset.name, newPreset.cost)
+        default:
+            return plan
+        }
+    }
+
+    private static let legacyMiniMaxNameMap: [String: String] = [
+        "Starter":  "Plus",
+        "Plus HS":  "Plus",
+        "Max HS":   "Max",
+        "Ultra HS": "Ultra"
+    ]
 }
 
 final class SubscriptionSettingsManager {
@@ -337,6 +378,17 @@ final class SubscriptionSettingsManager {
         guard let data = UserDefaults.standard.data(forKey: fullKey),
               let plan = try? JSONDecoder().decode(SubscriptionPlan.self, from: data) else {
             return .none
+        }
+
+        // B06: apply preset-name migration on read so legacy MiniMax names
+        // ("Starter" / "Plus HS" / "Max HS" / "Ultra HS") map to the current
+        // catalog names ("Plus" / "Max" / "Ultra"). Migration is one-way and
+        // persisting on first read keeps subsequent reads cheap.
+        guard let provider = providerForKey(key) else { return plan }
+        let migrated = ProviderSubscriptionPresets.migratedPlan(plan, for: provider)
+        if migrated != plan {
+            setPlan(migrated, forKey: key)
+            return migrated
         }
         return plan
     }
@@ -492,5 +544,14 @@ final class SubscriptionSettingsManager {
 
         let accountId = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
         return !accountId.isEmpty
+    }
+
+    /// Inverse of `isCurrentSubscriptionKey`: returns the ProviderIdentifier encoded
+    /// at the start of the key, or nil if the prefix is not a known identifier.
+    /// Used by `getPlan(forKey:)` to look up the provider for legacy-preset migration.
+    private func providerForKey(_ key: String) -> ProviderIdentifier? {
+        let parts = key.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return nil }
+        return ProviderIdentifier(rawValue: String(parts[0]))
     }
 }
