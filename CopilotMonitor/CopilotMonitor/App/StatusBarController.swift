@@ -1978,6 +1978,20 @@ final class StatusBarController: NSObject {
          // USD × exchange rate.
          let duplicateGroups = SubscriptionSettingsManager.shared.findLikelyDuplicateSubscriptionGroups()
          if !duplicateGroups.isEmpty {
+             // B44-followup observability: log the detection + per-key label
+             // breakdown so the user/dev can verify the menu state from
+             // `cat /tmp/provider_debug.log` without clicking through.
+             debugLog("[B44-followup] duplicate detection: \(duplicateGroups.count) group(s)")
+             for (i, group) in duplicateGroups.enumerated() {
+                 for key in group {
+                     let rmbCost = SubscriptionSettingsManager.shared.monthlyCost(
+                         forKey: key,
+                         inCurrency: .rmb,
+                         formatter: CurrencyFormatter.shared
+                     )
+                     debugLog("[B44-followup]   group[\(i)]: key=\(key) rmb=\(CurrencyFormatter.shared.format(amount: rmbCost, as: .rmb, decimals: 0))")
+                 }
+             }
              let warningItem = NSMenuItem()
              warningItem.view = createDisabledLabelView(
                  text: "⚠︎ 检测到 \(duplicateGroups.count) 组重复订阅（Key 列表见下，单击删除）"
@@ -2000,7 +2014,7 @@ final class StatusBarController: NSObject {
                              formatter: CurrencyFormatter.shared
                          )
                          priceText = "\(name) (\(CurrencyFormatter.shared.format(amount: cost, as: .rmb, decimals: 0))/月)"
-                     case .custom(let amount):
+                     case .custom:
                          let cost = SubscriptionSettingsManager.shared.monthlyCost(
                              forKey: key,
                              inCurrency: .rmb,
@@ -3565,22 +3579,40 @@ final class StatusBarController: NSObject {
          }
      }
 
-     /// Remove a likely-duplicate subscription surfaced via the quota header.
-     /// Mirrors the same refresh-and-rebuild pattern as `customSubscriptionSelected`.
-     @objc func removeDuplicateSubscription(_ sender: NSMenuItem) {
-         guard let key = sender.representedObject as? String else { return }
-         let alert = NSAlert()
-         alert.messageText = "删除订阅"
-         alert.informativeText = "确定要删除这笔订阅吗？\nKey: \(key)"
-         alert.addButton(withTitle: "删除")
-         alert.addButton(withTitle: "取消")
-         NSApp.activate(ignoringOtherApps: true)
-         guard alert.runModal() == .alertFirstButtonReturn else { return }
-         SubscriptionSettingsManager.shared.removePlan(forKey: key)
-         debugLog("Removed duplicate subscription key=\(key)")
-         menu.cancelTracking()
-         updateMultiProviderMenu()
-     }
+    /// Remove a likely-duplicate subscription surfaced via the quota header.
+    /// Mirrors the same refresh-and-rebuild pattern as `customSubscriptionSelected`.
+    @objc func removeDuplicateSubscription(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        let alert = NSAlert()
+        alert.messageText = "删除订阅"
+        alert.informativeText = "确定要删除这笔订阅吗？\nKey: \(key)"
+        alert.addButton(withTitle: "删除")
+        alert.addButton(withTitle: "取消")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        // B44-followup observability: snapshot the total before the delete so
+        // the user can verify from /tmp/provider_debug.log that the new
+        // total correctly drops the deleted key's RMB amount.
+        let beforeTotal = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
+            currency: CurrencyFormatter.shared.currency,
+            formatter: CurrencyFormatter.shared
+        )
+        let beforeGroups = SubscriptionSettingsManager.shared.findLikelyDuplicateSubscriptionGroups()
+        debugLog("[B44-followup] removeDuplicate: deleting key=\(key) total_before=\(beforeTotal) groups_before=\(beforeGroups.count)")
+
+        SubscriptionSettingsManager.shared.removePlan(forKey: key)
+        menu.cancelTracking()
+        updateMultiProviderMenu()
+
+        let afterTotal = SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(
+            currency: CurrencyFormatter.shared.currency,
+            formatter: CurrencyFormatter.shared
+        )
+        let afterGroups = SubscriptionSettingsManager.shared.findLikelyDuplicateSubscriptionGroups()
+        debugLog("[B44-followup] removeDuplicate: deleted key=\(key) total_after=\(afterTotal) groups_after=\(afterGroups.count)")
+        debugLog("Removed duplicate subscription key=\(key)")
+    }
 
      // MARK: - Custom Menu Item Views
 

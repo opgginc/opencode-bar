@@ -186,4 +186,71 @@ final class SubscriptionSettingsManagerIsolationTests: XCTestCase {
         XCTAssertTrue(manager.findLikelyDuplicateSubscriptionKeys().isEmpty,
                       "Single key with no counterpart must not be flagged as duplicate")
     }
+
+    // MARK: - B44 follow-up end-to-end: simulate the full user flow observed on 2026-07-06
+    //
+    // Setup: same physical account has both `kimi.<id>` and `kimi_cn.<id>` set.
+    // Verify: (1) duplicate detection lists BOTH keys; (2) per-key RMB price uses
+    // cnyCost for CN; (3) total before delete = 199 (CN cnyCost) + USD×rate
+    // (global); (4) after deleting the global key, total = 199 (only CN
+    // remains); (5) duplicate warning goes away.
+    //
+    // This is the exact scenario the user reported in the 2026-07-06 screenshot:
+    // picking CN Allegretto ¥199, app flagged the CN key (not the global one)
+    // as the "duplicate to delete", and the label said "¥265/月" (which is
+    // the global key's value, not the CN key's value).
+
+    func testB44FollowUpEndToEndFlow() {
+        let (_, suite) = freshSuite()
+        let manager = SubscriptionSettingsManager(defaults: suite)
+        let accountId = "b44-e2e@example.com"
+        let globalKey = "kimi.\(accountId)"
+        let cnKey = "kimi_cn.\(accountId)"
+        defer {
+            manager.removePlan(forKey: globalKey)
+            manager.removePlan(forKey: cnKey)
+        }
+
+        // Both keys have Allegretto at the same USD cost (39). The CN
+        // preset carries a separate cnyCost (199) used for display in
+        // RMB mode; the global preset does not.
+        manager.setPlan(.preset("Allegretto", 39), forKey: globalKey)
+        manager.setPlan(.preset("Allegretto", 39), forKey: cnKey)
+
+        let formatter = CurrencyFormatter.shared
+
+        // (1) Duplicate detection lists BOTH keys (pre-fix bug: only listed
+        // the alphabetically-last key, which happened to be the CN one).
+        let groups = manager.findLikelyDuplicateSubscriptionGroups()
+        XCTAssertEqual(groups.count, 1, "kimi + kimi_cn for the same accountId must be one duplicate group")
+        XCTAssertEqual(Set(groups[0]), Set([globalKey, cnKey]),
+                       "Both keys must appear — user needs both rows to pick which to delete")
+
+        // (2) Per-key RMB price (pre-fix bug: CN key showed 39 USD × 6.795 ≈ ¥265).
+        let cnRMB = manager.monthlyCost(forKey: cnKey, inCurrency: .rmb, formatter: formatter)
+        let globalRMB = manager.monthlyCost(forKey: globalKey, inCurrency: .rmb, formatter: formatter)
+        XCTAssertEqual(cnRMB, 199, accuracy: 0.01,
+                       "CN Kimi Allegretto must surface native CNY 199, not USD×rate")
+        XCTAssertEqual(globalRMB, 39 * formatter.currentRate, accuracy: 0.5,
+                       "Global Kimi Allegretto has no cnyCost — falls back to USD × current rate")
+
+        // (3) Total before delete = CN (cnyCost 199) + Global (USD × rate).
+        let beforeTotal = manager.totalMonthlyCost(inCurrency: .rmb, formatter: formatter)
+        XCTAssertEqual(beforeTotal, 199 + 39 * formatter.currentRate, accuracy: 0.5,
+                       "Before delete: total must include both keys' RMB amounts")
+
+        // (4) Simulate the user clicking delete on the global (¥265) row —
+        // the post-fix UI lists both keys with their own delete action.
+        manager.removePlan(forKey: globalKey)
+
+        // (5) Total after delete = only the CN key remains.
+        let afterTotal = manager.totalMonthlyCost(inCurrency: .rmb, formatter: formatter)
+        XCTAssertEqual(afterTotal, 199, accuracy: 0.01,
+                       "After deleting the global key, total must drop to the CN-only ¥199")
+
+        // (6) Duplicate warning should now be empty.
+        XCTAssertTrue(manager.findLikelyDuplicateSubscriptionKeys().isEmpty,
+                      "With only one key left, duplicate warning must disappear")
+        XCTAssertTrue(manager.findLikelyDuplicateSubscriptionGroups().isEmpty)
+    }
 }
