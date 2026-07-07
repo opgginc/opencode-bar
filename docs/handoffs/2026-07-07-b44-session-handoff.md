@@ -3,6 +3,19 @@
 > Source session input: 2026-07-06 user-reported screenshot ("only 1 delete row, click delete → app stuck at loading").
 > Reads ~700 lines of test-isolation commits + B44 follow-up commits + B52 fix + anchor investigation.
 
+## Working-Tree State Note
+
+Two files show as uncommitted at session end (by user convention, not committed):
+
+- `.gitignore` — added `.swarm/` and `*.pbxproj.bak*` rules. These are local dev tooling; this is a Token King *fork* not upstream, so the upstream-acceptable set differs.
+- `CopilotMonitor/CopilotMonitor/Info.plist` — `GitCommitHash` was bumped by Xcode builds during the session. Resetting this is a non-event (next build will re-bump) and avoids carrying session-specific metadata.
+
+Both are intentionally P3-stale per the project's pre-session rule: "Don't commit .gitignore or Info.plist changes." Don't treat the dirty `git status` as an outstanding action — it's the project's steady state.
+
+## Branch Policy Note (intentional divergence)
+
+This fork is intentionally **left behind `upstream/main`** (4+ commits at session end). Per project convention set at session start ("Don't merge upstream/main — would mix Token King's fork history with upstream's release commits"). We push only to `origin/main` (`smy126988-ai/token-king`). When the working tree needs to be clean from `upstream/main`'s perspective, run `git status -sb` and read the `[ahead N, behind M]` summary — both are correct for the fork's design.
+
 ## TL;DR
 
 Two user-reported bugs:
