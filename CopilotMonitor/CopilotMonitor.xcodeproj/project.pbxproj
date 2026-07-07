@@ -623,6 +623,7 @@
 				TE00100000000000000000FR2 /* TokenEventTests.swift */,
 				TN00000000000000000000FR2 /* TokenNormalizerTests.swift */,
 				TUS00000000000000000000FR2 /* TokenUsageStoreTests.swift */,
+				MCST000000000000000000FR2 /* MonthCostCalculatorTests.swift */,
 			);
 			path = Helpers;
 			sourceTree = "<group>";
@@ -844,6 +845,7 @@
 				TE00100000000000000000BF1 /* TokenEvent.swift in Sources */,
 				TN00000000000000000000BF1 /* TokenNormalizer.swift in Sources */,
 				TUS00000000000000000000BF1 /* TokenUsageStore.swift in Sources */,
+				MCST000000000000000000BF1 /* MonthCostCalculator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -945,6 +947,7 @@
 				TE00100000000000000000BF2 /* TokenEventTests.swift in Sources */,
 				TN00000000000000000000BF2 /* TokenNormalizerTests.swift in Sources */,
 				TUS00000000000000000000BF2 /* TokenUsageStoreTests.swift in Sources */,
+				MCST000000000000000000BF2 /* MonthCostCalculatorTests.swift in Sources */,
 				PRRESULTTESTBUILD11111111 /* ProviderResultTests.swift in Sources */,
 				SBCCTRLTESTBF111111111 /* StatusBarControllerTests.swift in Sources */,
 				SBCCTRLMODETMBF1111 /* StatusBarControllerTestingModeTests.swift in Sources */,
