@@ -49,6 +49,8 @@
 		TUS00000000000000000000BF2 /* TokenUsageStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TUS00000000000000000000FR2 /* TokenUsageStoreTests.swift */; };
 		MCST000000000000000000BF1 /* MonthCostCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = MCST000000000000000000FR1 /* MonthCostCalculator.swift */; };
 		MCST000000000000000000BF2 /* MonthCostCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = MCST000000000000000000FR2 /* MonthCostCalculatorTests.swift */; };
+		RA00100000000000000000BF1 /* RefreshActor.swift in Sources */ = {isa = PBXBuildFile; fileRef = RA00100000000000000000FR1 /* RefreshActor.swift */; };
+		RA00100000000000000000BF2 /* RefreshActorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = RA00100000000000000000FR2 /* RefreshActorTests.swift */; };
 		87297CDD8B65F7EF0BC5D650 /* ProviderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18F40F1AC76A49A9B9DF74B0 /* ProviderManager.swift */; };
 		8EA90F9E26F29FC7938D2924 /* ProviderViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BDA856BBC854D3FF310EA51 /* ProviderViewModel.swift */; };
 		A14AF9AC6A646726B7C94978 /* MenuResultBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F6CE62C58ECA852F25FEF30 /* MenuResultBuilder.swift */; };
@@ -268,6 +270,8 @@
 		TUS00000000000000000000FR2 /* TokenUsageStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TokenUsageStoreTests.swift; sourceTree = "<group>"; };
 		MCST000000000000000000FR1 /* MonthCostCalculator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MonthCostCalculator.swift; sourceTree = "<group>"; };
 		MCST000000000000000000FR2 /* MonthCostCalculatorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MonthCostCalculatorTests.swift; sourceTree = "<group>"; };
+		RA00100000000000000000FR1 /* RefreshActor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RefreshActor.swift; sourceTree = "<group>"; };
+		RA00100000000000000000FR2 /* RefreshActorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RefreshActorTests.swift; sourceTree = "<group>"; };
 		A44444444444444444444444 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		APPMAIN22222222222222222222 /* EntryDocumentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryDocumentation.swift; sourceTree = "<group>"; };
 		A454D8C32F30548900E355E3 /* ZaiCodingPlanProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZaiCodingPlanProvider.swift; sourceTree = "<group>"; };
@@ -582,6 +586,7 @@
 				TN00000000000000000000FR1 /* TokenNormalizer.swift */,
 				TUS00000000000000000000FR1 /* TokenUsageStore.swift */,
 				MCST000000000000000000FR1 /* MonthCostCalculator.swift */,
+				RA00100000000000000000FR1 /* RefreshActor.swift */,
 				TE0000000000000000000GRP /* TokenExtractor */,
 			);
 			path = Helpers;
@@ -670,6 +675,7 @@
 				TN00000000000000000000FR2 /* TokenNormalizerTests.swift */,
 				TUS00000000000000000000FR2 /* TokenUsageStoreTests.swift */,
 				MCST000000000000000000FR2 /* MonthCostCalculatorTests.swift */,
+				RA00100000000000000000FR2 /* RefreshActorTests.swift */,
 				TE0000000000000000000TGP /* TokenExtractor */,
 			);
 			path = Helpers;
@@ -915,6 +921,7 @@
 				NG0000000000000000000EBF /* NanoGPTExtractor.swift in Sources */,
 				TUS00000000000000000000BF1 /* TokenUsageStore.swift in Sources */,
 				MCST000000000000000000BF1 /* MonthCostCalculator.swift in Sources */,
+				RA00100000000000000000BF1 /* RefreshActor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1024,6 +1031,7 @@
 				NG0000000000000000000TBF /* NanoGPTExtractorTests.swift in Sources */,
 				TUS00000000000000000000BF2 /* TokenUsageStoreTests.swift in Sources */,
 				MCST000000000000000000BF2 /* MonthCostCalculatorTests.swift in Sources */,
+				RA00100000000000000000BF2 /* RefreshActorTests.swift in Sources */,
 				PRRESULTTESTBUILD11111111 /* ProviderResultTests.swift in Sources */,
 				SBCCTRLTESTBF111111111 /* StatusBarControllerTests.swift in Sources */,
 				SBCCTRLMODETMBF1111 /* StatusBarControllerTestingModeTests.swift in Sources */,
