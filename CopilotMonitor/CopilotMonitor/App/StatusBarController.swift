@@ -152,7 +152,7 @@ final class StatusBarController: NSObject {
     private var userDefaults: UserDefaults { initOptions.userDefaults }
 
     /// B09: CurrencyFormatter facade routing through the injected formatter.
-    private var currencyFormatter: CurrencyFormatter { initOptions.currencyFormatter }
+    var currencyFormatter: CurrencyFormatter { initOptions.currencyFormatter }
 
     private(set) var statusItem: NSStatusItem?
     private var statusBarIconView: StatusBarIconView?
@@ -1082,6 +1082,13 @@ final class StatusBarController: NSObject {
         return totals.reduce(0) { $0 + $1.totalCostRMB }
     }
 
+    /// F2b: synchronous read of the cached monthly total (RMB). Used by the
+    /// share snapshot so it can append the F2b line without an `async` hop.
+    private var monthTotalPayAsYouGoRMBSync: Double? {
+        guard !cachedMonthlyTotals.isEmpty else { return nil }
+        return cachedMonthlyTotals.reduce(0) { $0 + $1.totalCostRMB }
+    }
+
     /// F2b: pass-through to `RefreshActor.fetchMonthlyTotals()`. Returns `nil`
     /// when no actor is wired up so call sites can early-exit without actor
     /// isolation noise.
@@ -1117,11 +1124,6 @@ final class StatusBarController: NSObject {
         if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
         if n >= 1_000 { return String(format: "%.1fk", Double(n) / 1_000) }
         return "\(n)"
-    }
-
-    /// F2b: render an RMB amount with two decimals (e.g. "12.34").
-    private func formatRMB(_ amount: Double) -> String {
-        String(format: "%.2f", amount)
     }
 
     /// F2b: bridge from F2a `ProviderIdentifier` (which carries regional
@@ -4136,6 +4138,10 @@ final class StatusBarController: NSObject {
             lines.append("- \(topQuota)")
         }
 
+        if let f2bTotal = monthTotalPayAsYouGoRMBSync, f2bTotal > 0 {
+            lines.append("- 本月 API 折算：\(currencyFormatter.format(amount: f2bTotal, as: .rmb))")
+        }
+
         lines.append("")
         lines.append("在一个菜单栏 app 中追踪你的 AI 服务商用量：")
         lines.append("https://github.com/smy126988-ai/token-king")
@@ -4649,12 +4655,16 @@ final class StatusBarController: NSObject {
         for total in sortedTotals where total.totalCostRMB > 0 {
             let providerLabel = providerDisplayName(forRaw: total.provider)
             let tokenLabel = formatTokenCount(total.totalTokens.total)
-            let costLabel = formatRMB(total.totalCostRMB)
+            let costLabel = currencyFormatter.format(amount: total.totalCostRMB, as: .rmb)
             let item = NSMenuItem(
-                title: "  \(providerLabel)  \(tokenLabel) token  ¥\(costLabel)",
+                title: "  \(providerLabel)  \(tokenLabel) token  \(costLabel)",
                 action: nil, keyEquivalent: ""
             )
             item.tag = MenuItemTag.dynamic
+            if total.hasUnknownPricing {
+                item.title += " *"
+                item.toolTip = "部分模型无公开定价，总额可能偏低"
+            }
             menu.insertItem(item, at: insertIndex)
             insertIndex += 1
         }
@@ -4886,6 +4896,17 @@ extension StatusBarController {
         self.loadingProviders = loading
         self.currentUsage = currentUsage
         updateMultiProviderMenu()
+    }
+
+    /// Injects the F2b monthly-total cache and rebuilds the menu.
+    func injectMonthlyTotalsForTesting(_ totals: [MonthlyTotal]) {
+        self.cachedMonthlyTotals = totals
+        updateMultiProviderMenu()
+    }
+
+    /// Exposes the private share snapshot builder to unit tests.
+    func buildUsageShareSnapshotTextForTesting() -> String? {
+        buildUsageShareSnapshotText()
     }
 }
 #endif

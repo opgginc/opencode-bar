@@ -1057,9 +1057,9 @@ extension StatusBarController {
         // produced a positive number for this provider.
         if let monthlyCostRMB, monthlyCostRMB > 0 {
             let item = NSMenuItem()
-            let formatted = String(format: "%.2f", monthlyCostRMB)
+            let formatted = currencyFormatter.format(amount: monthlyCostRMB, as: .rmb)
             item.view = createDisabledLabelView(
-                text: "按量折算：¥\(formatted) / 月",
+                text: "按量折算：\(formatted) / 月",
                 icon: NSImage(systemSymbolName: "sum", accessibilityDescription: "Monthly equivalent cost")
             )
             submenu.addItem(item)
