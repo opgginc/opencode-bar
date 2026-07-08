@@ -37,6 +37,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     // attach the status item ourselves by scanning `NSApp.windows` directly.
     private var bridgeHasFired = false
 
+    /// B39: testability hook counting how many times the progressive post-launch
+    /// resync scheduler has been entered.
+    private(set) var resyncAfterLaunchCallCount = 0
+
     @objc func checkForUpdates() {
         logger.info("⌨️ [Keyboard] ⌘U Check for Updates triggered")
         NSApp.activate(ignoringOtherApps: true)
@@ -68,14 +72,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     /// `valueForUndefinedKey:` (which raises NSException on macOS 26.x).
     /// Windows that don't have a statusItem ivar are simply skipped.
     @MainActor
-    private func syncMenuToAllStatusWindows() {
+    @discardableResult
+    func syncMenuToAllStatusWindows() -> (barWindows: Int, attached: Int, skipped: Int) {
         guard let controller = statusBarController,
               let primaryMenu = controller.menu,
               let primaryItem = controller.statusItem
-        else { return }
+        else {
+            logger.info("🌉 [Bridge] syncMenuToAllStatusWindows: deferred — controller/menu/primaryItem not ready")
+            return (0, 0, 0)
+        }
         var attachedCount = 0
         var skippedWithNoItem = 0
         let barWindows = NSApp.windows.filter { $0.className.contains("NSStatusBarWindow") }
+        controller.debugLog("syncMenuToAllStatusWindows: \(barWindows.count) NSStatusBarWindow(s); primary=\(primaryItem)")
         if barWindows.count > 1 {
             logger.info("🌉 [Bridge] syncMenuToAllStatusWindows: \(barWindows.count) NSStatusBarWindow(s); primary=\(primaryItem)")
         }
@@ -89,8 +98,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             guard let item = safeItem, item !== primaryItem else { continue }
             item.menu = primaryMenu
             item.length = NSStatusItem.variableLength
+            controller.attachToSecondaryItem(item)
             attachedCount += 1
-            logger.info("🌉 [Bridge] sync: attached to item @ \(String(describing: window.frame)) (count=\(attachedCount))")
+            logger.info("🌉 [Bridge] sync: attached menu + icon to item @ \(String(describing: window.frame)) (count=\(attachedCount))")
         }
         if attachedCount > 0 {
             logger.info("🌉 [Bridge] syncMenuToAllStatusWindows: attached menu to \(attachedCount) secondary item(s)")
@@ -98,6 +108,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         if skippedWithNoItem > 0 && attachedCount == 0 {
             logger.warning("🌉 [Bridge] syncMenuToAllStatusWindows: \(skippedWithNoItem) secondary window(s) had no Mirror.statusItem")
         }
+        controller.debugLog("syncMenuToAllStatusWindows: finished barWindows=\(barWindows.count) attached=\(attachedCount) skipped=\(skippedWithNoItem)")
+        return (barWindows.count, attachedCount, skippedWithNoItem)
     }
 
     /// Read `statusItem` from an `NSStatusBarWindow` via Swift reflection,
@@ -106,7 +118,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     /// find the ivar (e.g., the replicant window on a secondary display
     /// has a differently-named ivar), fall back to KVC and tolerate nil.
     @MainActor
-    private func _safeStatusItem(from window: NSWindow) -> NSStatusItem? {
+    func _safeStatusItem(from window: NSWindow) -> NSStatusItem? {
         if let viaMirror = Mirror(reflecting: window).descendant("statusItem") as? NSStatusItem {
             return viaMirror
         }
@@ -253,6 +265,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             object: nil
         )
 
+        // B39: also re-sync when a window moves to a different screen or the
+        // machine wakes from sleep, both of which can introduce/remove
+        // secondary NSSceneStatusItems.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reSyncMenu),
+            name: NSWindow.didChangeScreenNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(reSyncMenu),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+
         // F2b: kick off the 30s RefreshActor tick + the UI snapshot loop that
         // pushes the latest month aggregates into the menu. Done after the
         // controller + status item are wired so the first snapshot can render
@@ -271,7 +299,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         // Hand the actor to the controller so `monthlyCostRMB(for:)` and the
         // "本月 API 折算" menu section read the same instance we are ticking.
         statusBarController?.refreshActor = actor
-        Task { await actor.start() }
+        // F1 / F4: hand the same `TokenUsageStore` to the controller so its
+        // "本月 Token" header and "全局统计" submenu read from the store the
+        // actor is ticking.
+        statusBarController?.tokenUsageStore = store
+
+        if actor.initError == nil {
+            Task { await actor.start() }
+        } else {
+            logger.error("🔄 [F2b] RefreshActor store failed to initialize: \(String(describing: actor.initError), privacy: .public); tick will not start")
+        }
 
         // Periodic snapshot loop: pulls the latest month aggregates into the
         // controller's cache (populated by `refreshMonthlyTotalsCache`) so the
@@ -280,9 +317,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         monthlyTotalsRefreshTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 await self?.statusBarController?.refreshMonthlyTotalsCache()
+                await self?.statusBarController?.refreshTokenStatsCache()
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
             }
         }
+        // Prime the cache immediately so a store init error is reflected in the
+        // menu without waiting for the first 5 s loop iteration.
+        Task { await statusBarController?.refreshMonthlyTotalsCache() }
+        Task { await statusBarController?.refreshTokenStatsCache() }
         logger.info("🔄 [F2b] RefreshActor started; monthly totals refresh loop scheduled")
     }
 
@@ -303,17 +345,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         dumpStatusBarLandscape("reSyncMenu exit")
     }
 
-    /// B39 timing: schedule a one-shot 1.0s resync after launch in case
-    /// SwiftUI lazily created the secondary NSSceneStatusItem after our
+    /// B39 timing: schedule progressive resyncs at 1s, 3s and 10s after launch
+    /// in case SwiftUI lazily creates secondary NSSceneStatusItems after our
     /// initial pass.
     @MainActor
-    private func scheduleResyncAfterLaunch() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self else { return }
-            // Only do work if the menu has actually been built (avoids
-            // calling syncMenu while the controller is still warming up).
-            guard self.statusBarController?.menu != nil else { return }
-            self.syncMenuToAllStatusWindows()
+    func scheduleResyncAfterLaunch() {
+        resyncAfterLaunchCallCount += 1
+        let delays: [TimeInterval] = [1.0, 3.0, 10.0]
+        for delay in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                // Only do work if the menu has actually been built (avoids
+                // calling syncMenu while the controller is still warming up).
+                guard self.statusBarController?.menu != nil else { return }
+                logger.info("🌉 [Bridge] scheduleResyncAfterLaunch: firing progressive retry at +\(delay)s")
+                self.syncMenuToAllStatusWindows()
+            }
         }
     }
 

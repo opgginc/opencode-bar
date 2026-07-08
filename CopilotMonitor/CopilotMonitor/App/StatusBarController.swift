@@ -205,12 +205,25 @@ final class StatusBarController: NSObject {
     /// F2b: RefreshActor driving the 30s tick (extract → store → recompute month aggregates).
     /// Optional so legacy code paths (tests, MenuBarExtra handoff) keep working without it.
     var refreshActor: RefreshActor?
+    /// F1 / F4: TokenUsageStore for the cross-provider token header and the
+    /// "全局统计" submenu. Injected by AppDelegate after wiring the RefreshActor.
+    /// When `nil`, F1 / F4 sections are hidden (legacy paths).
+    var tokenUsageStore: TokenUsageStore?
     /// F2b: Latest snapshot of per-provider monthly totals. Populated by the
     /// periodic Task kicked off from AppDelegate after `startRefreshActor()`.
     /// Read synchronously by `updateMultiProviderMenu` (main-actor) so the
     /// menu builder does not need to be async itself.
     private var cachedMonthlyTotals: [MonthlyTotal] = []
     private var lastMonthlyTotalsFetchAt: Date?
+    /// F2b: when the `RefreshActor`'s store fails to initialize, surface the
+    /// error in the "本月 API 折算" section instead of leaving it blank.
+    private var refreshActorInitError: SQLiteError?
+    /// F1 / F4: latest token snapshot for the "本月 Token" header and the
+    /// "全局统计" submenu. Populated by `refreshTokenStatsCache` on the same
+    /// periodic loop as `refreshMonthlyTotalsCache`. Read synchronously by
+    /// `updateMultiProviderMenu` (main-actor).
+    private var cachedTokenStats: TokenStatsAggregator.Snapshot?
+    private var lastTokenStatsFetchAt: Date?
 
     private var usagePredictor: UsagePredictor {
         UsagePredictor(weights: predictionPeriod.weights)
@@ -536,6 +549,51 @@ final class StatusBarController: NSObject {
         } else {
             debugLog("attachTo: iconView is nil!")
         }
+    }
+
+    /// B40: attach a visible icon to a secondary `NSSceneStatusItem` replicant.
+    /// The same `StatusBarIconView` instance cannot live in two buttons, so we
+    /// render a bitmap snapshot of the current primary icon and set it on the
+    /// secondary button. If the secondary item has no button, fall back to a
+    /// non-gauge SF Symbol on the item itself.
+    @MainActor
+    func attachToSecondaryItem(_ item: NSStatusItem) {
+        guard statusBarIconView != nil else {
+            debugLog("attachToSecondaryItem: statusBarIconView nil")
+            return
+        }
+        let fallbackImage = NSImage(
+            systemSymbolName: "gauge.with.dots.needle.bottom.50percent",
+            accessibilityDescription: "Usage"
+        )
+        if let button = item.button {
+            button.title = ""
+            if let snapshot = renderedStatusBarIconSnapshot() {
+                snapshot.isTemplate = false
+                button.image = snapshot
+                debugLog("attachToSecondaryItem: set snapshot button image")
+            } else {
+                button.image = fallbackImage
+                debugLog("attachToSecondaryItem: set fallback button image")
+            }
+        } else {
+            item.image = fallbackImage
+            debugLog("attachToSecondaryItem: button nil, set item.image fallback")
+        }
+    }
+
+    /// Render the current primary `StatusBarIconView` into an `NSImage` that
+    /// can be handed to a secondary status-item button.
+    @MainActor
+    private func renderedStatusBarIconSnapshot() -> NSImage? {
+        guard let iconView = statusBarIconView, !iconView.bounds.isEmpty,
+              let bitmap = iconView.bitmapImageRepForCachingDisplay(in: iconView.bounds)
+        else { return nil }
+        iconView.cacheDisplay(in: iconView.bounds, to: bitmap)
+        let image = NSImage(size: iconView.bounds.size)
+        image.addRepresentation(bitmap)
+        image.isTemplate = false
+        return image
     }
 
     private func setupMenu() {
@@ -1102,13 +1160,18 @@ final class StatusBarController: NSObject {
     /// Scheduled by AppDelegate as a periodic task after `startRefreshActor()`.
     func refreshMonthlyTotalsCache() async {
         guard let actor = refreshActor else { return }
-        let totals = await actor.fetchMonthlyTotals()
-        await MainActor.run {
-            self.cachedMonthlyTotals = totals
-            self.lastMonthlyTotalsFetchAt = Date()
-            debugLog("refreshMonthlyTotalsCache: \(totals.count) provider(s)")
+        if let initError = actor.initError {
+            self.refreshActorInitError = initError
+            self.cachedMonthlyTotals = []
             self.updateMultiProviderMenu()
+            return
         }
+        self.refreshActorInitError = nil
+        let totals = await actor.fetchMonthlyTotals()
+        self.cachedMonthlyTotals = totals
+        self.lastMonthlyTotalsFetchAt = Date()
+        debugLog("refreshMonthlyTotalsCache: \(totals.count) provider(s)")
+        self.updateMultiProviderMenu()
     }
 
     /// F2b: lookup helper for `ProviderMenuBuilder`. Resolves the per-provider
@@ -1117,6 +1180,44 @@ final class StatusBarController: NSObject {
     func monthlyCostRMB(for providerRaw: String) -> Double? {
         guard !cachedMonthlyTotals.isEmpty else { return nil }
         return cachedMonthlyTotals.first(where: { $0.provider == providerRaw })?.totalCostRMB
+    }
+
+    /// F1 / F4: fetch the latest `day_aggregates` from the store and recompute
+    /// today / week / month totals into the sync cache. Scheduled by
+    /// `AppDelegate` on the same periodic loop as `refreshMonthlyTotalsCache`.
+    /// Returns silently when no `tokenUsageStore` is wired up.
+    func refreshTokenStatsCache() async {
+        guard let store = tokenUsageStore else {
+            self.cachedTokenStats = nil
+            return
+        }
+        let month = await store.currentYearMonth()
+        let dayAggregates = await store.fetchDayAggregates(yearMonth: month)
+        let todayString = TokenUsageFormatter.todayUTCString()
+        let (weekStart, weekEnd) = TokenUsageFormatter.currentISOWeekRange()
+        self.cachedTokenStats = TokenStatsAggregator.snapshot(
+            dayAggregates: dayAggregates,
+            todayString: todayString,
+            weekStart: weekStart,
+            weekEnd: weekEnd,
+            monthPrefix: month
+        )
+        self.lastTokenStatsFetchAt = Date()
+        self.updateMultiProviderMenu()
+    }
+
+    /// F1 / F4: synchronous accessor for the latest token snapshot. Returns
+    /// `nil` when the cache has not been populated yet (e.g. before the first
+    /// periodic tick) or no store is wired up.
+    func tokenStatsSnapshot() -> TokenStatsAggregator.Snapshot? {
+        cachedTokenStats
+    }
+
+    /// F1: synchronous accessor for the current month's total token count.
+    /// Returns 0 when the cache is empty (so the caller can decide whether
+    /// to render the header — the F1 section is hidden at 0 by the menu builder).
+    func currentMonthTotalTokens() -> TokenBreakdown {
+        cachedTokenStats?.monthTotal ?? TokenBreakdown.zero
     }
 
     /// F2b: render a token count as a compact "1.2k" / "3.4M" string.
@@ -1929,7 +2030,30 @@ final class StatusBarController: NSObject {
          menu.insertItem(separator1, at: insertIndex)
          insertIndex += 1
 
-          let payAsYouGoTotal = calculatePayAsYouGoTotal(providerResults: providerResults, copilotUsage: currentUsage)
+           // F1 top header: this month's total tokens (cross-provider)
+           let monthTotal = currentMonthTotalTokens()
+           if monthTotal.total > 0 {
+               let f1Header = NSMenuItem()
+               f1Header.view = createHeaderView(title: "本月 Token：\(TokenUsageFormatter.format(tokens: monthTotal.total))")
+               f1Header.tag = MenuItemTag.dynamic
+               f1Header.identifier = NSUserInterfaceItemIdentifier("f1-month-total-header")
+               menu.insertItem(f1Header, at: insertIndex)
+               insertIndex += 1
+           }
+
+           // F4: "全局统计" submenu (above pay-as-you-go segment)
+           if let snapshot = tokenStatsSnapshot() {
+               let f4Item = NSMenuItem()
+               f4Item.title = "全局统计"
+               f4Item.image = NSImage(systemSymbolName: "chart.bar.xaxis", accessibilityDescription: "Global Statistics")
+               f4Item.tag = MenuItemTag.dynamic
+               f4Item.identifier = NSUserInterfaceItemIdentifier("f4-global-stats")
+               f4Item.submenu = StatusBarController.createGlobalStatsSubmenu(snapshot: snapshot)
+               menu.insertItem(f4Item, at: insertIndex)
+               insertIndex += 1
+           }
+
+           let payAsYouGoTotal = calculatePayAsYouGoTotal(providerResults: providerResults, copilotUsage: currentUsage)
 
           let payAsYouGoHeader = NSMenuItem()
           payAsYouGoHeader.view = createHeaderView(title: "按量付费：\(currencyFormatter.format(usd: payAsYouGoTotal))")
@@ -1965,7 +2089,7 @@ final class StatusBarController: NSObject {
                         item.tag = MenuItemTag.dynamic
 
                         if let details = result.details, details.hasAnyValue {
-                            item.submenu = createDetailSubmenu(details, identifier: identifier)
+                            item.submenu = createDetailSubmenu(details, identifier: identifier, tokenUsageStore: tokenUsageStore)
                         }
 
                        menu.insertItem(item, at: insertIndex)
@@ -2217,7 +2341,7 @@ final class StatusBarController: NSObject {
                     if quotaItem.isEnabled,
                        let details = account.details,
                        details.hasAnyValue {
-                        quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot, accountId: account.subscriptionId)
+                        quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot, accountId: account.subscriptionId, tokenUsageStore: tokenUsageStore)
                     }
 
                     menu.insertItem(quotaItem, at: insertIndex)
@@ -2237,7 +2361,7 @@ final class StatusBarController: NSObject {
                 quotaItem.tag = MenuItemTag.dynamic
 
                 if let details = providerResults[.copilot]?.details, details.hasAnyValue {
-                    quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot)
+                    quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot, tokenUsageStore: tokenUsageStore)
                 } else {
                     let submenu = NSMenu()
                     let filledBlocks = Int((Double(used) / Double(max(limit, 1))) * 10)
@@ -2255,7 +2379,7 @@ final class StatusBarController: NSObject {
                     if let resetDate = copilotUsage.quotaResetDateUTC {
                         let formatter = DateFormatter()
                         formatter.dateFormat = "yyyy-MM-dd HH:mm"
-                        formatter.timeZone = TimeZone(identifier: "UTC") ?? TimeZone(secondsFromGMT: 0)!
+                        formatter.timeZone = .utc
                         let paceInfo = calculateMonthlyPace(usagePercent: usagePercent, resetDate: resetDate)
                         let paceItem = NSMenuItem()
                         paceItem.view = createPaceView(paceInfo: paceInfo)
@@ -2531,7 +2655,7 @@ final class StatusBarController: NSObject {
                             let monthlyCostRMB: Double? = f2bProviderRaw(for: identifier).flatMap { raw in
                                 self.monthlyCostRMB(for: raw)
                             }
-                            item.submenu = createDetailSubmenu(details, identifier: identifier, accountId: account.subscriptionId, monthlyCostRMB: monthlyCostRMB)
+                            item.submenu = createDetailSubmenu(details, identifier: identifier, accountId: account.subscriptionId, monthlyCostRMB: monthlyCostRMB, tokenUsageStore: tokenUsageStore)
                         }
 
                         menu.insertItem(item, at: insertIndex)
@@ -2610,7 +2734,7 @@ final class StatusBarController: NSObject {
                         let monthlyCostRMB: Double? = f2bProviderRaw(for: identifier).flatMap { raw in
                             self.monthlyCostRMB(for: raw)
                         }
-                        item.submenu = createDetailSubmenu(details, identifier: identifier, monthlyCostRMB: monthlyCostRMB)
+                        item.submenu = createDetailSubmenu(details, identifier: identifier, monthlyCostRMB: monthlyCostRMB, tokenUsageStore: tokenUsageStore)
                     }
 
                     menu.insertItem(item, at: insertIndex)
@@ -3359,7 +3483,7 @@ final class StatusBarController: NSObject {
             let monthlyCostRMB: Double? = f2bProviderRaw(for: identifier).flatMap { raw in
                 self.monthlyCostRMB(for: raw)
             }
-            cachedItem.submenu = createDetailSubmenu(details, identifier: identifier, monthlyCostRMB: monthlyCostRMB)
+            cachedItem.submenu = createDetailSubmenu(details, identifier: identifier, monthlyCostRMB: monthlyCostRMB, tokenUsageStore: tokenUsageStore)
             submenu.addItem(cachedItem)
         }
 
@@ -4539,7 +4663,7 @@ final class StatusBarController: NSObject {
         dateFormatter.dateFormat = "MMM d (EEE)"
 
         var utcCalendar = Calendar(identifier: .gregorian)
-        utcCalendar.timeZone = TimeZone(identifier: "UTC")!
+        utcCalendar.timeZone = .utc
         let todayStart = utcCalendar.startOfDay(for: today)
 
         // Sort dailyTotals by date descending
@@ -4638,6 +4762,14 @@ final class StatusBarController: NSObject {
     /// re-convert via `format(usd:)` (that path multiplies by FX rate again).
     private func insertMonthlyAggregatesSection(at index: Int) -> Int {
         var insertIndex = index
+        if let refreshActorInitError {
+            let monthHeader = NSMenuItem()
+            monthHeader.view = createHeaderView(title: "用量数据不可用")
+            monthHeader.tag = MenuItemTag.dynamic
+            menu.insertItem(monthHeader, at: insertIndex)
+            insertIndex += 1
+            return insertIndex
+        }
         guard !cachedMonthlyTotals.isEmpty else { return insertIndex }
 
         let totalRMB = cachedMonthlyTotals.reduce(0) { $0 + $1.totalCostRMB }
@@ -4944,4 +5076,105 @@ extension StatusBarController {
         .chutes,
         .synthetic
     ]
+}
+
+extension StatusBarController {
+    /// F4: build the "全局统计" submenu from a precomputed snapshot.
+    /// Live data path (in production) calls `TokenUsageStore.fetchDayAggregates`
+    /// + `TokenStatsAggregator.snapshot` then passes the result here. Static so
+    /// the rendering can be unit-tested without constructing a controller.
+    static func createGlobalStatsSubmenu(snapshot: TokenStatsAggregator.Snapshot) -> NSMenu {
+        let menu = NSMenu()
+        let formatter = CurrencyFormatter.shared
+
+        let tokenHeader = NSMenuItem()
+        tokenHeader.view = f4HeaderView(title: "Token 用量汇总")
+        tokenHeader.identifier = NSUserInterfaceItemIdentifier("f4-token-header")
+        menu.addItem(tokenHeader)
+
+        let todayItem = NSMenuItem()
+        todayItem.view = f4RowView(
+            text: "  今日：\(TokenUsageFormatter.format(tokens: snapshot.todayTotal.total))",
+            icon: NSImage(systemSymbolName: "sun.max", accessibilityDescription: "Today")
+        )
+        todayItem.identifier = NSUserInterfaceItemIdentifier("f4-today")
+        menu.addItem(todayItem)
+
+        let weekItem = NSMenuItem()
+        weekItem.view = f4RowView(
+            text: "  本周：\(TokenUsageFormatter.format(tokens: snapshot.weekTotal.total))",
+            icon: NSImage(systemSymbolName: "calendar", accessibilityDescription: "This week")
+        )
+        weekItem.identifier = NSUserInterfaceItemIdentifier("f4-week")
+        menu.addItem(weekItem)
+
+        let monthItem = NSMenuItem()
+        monthItem.view = f4RowView(
+            text: "  本月：\(TokenUsageFormatter.format(tokens: snapshot.monthTotal.total))",
+            icon: NSImage(systemSymbolName: "calendar.badge.checkmark", accessibilityDescription: "This month")
+        )
+        monthItem.identifier = NSUserInterfaceItemIdentifier("f4-month")
+        menu.addItem(monthItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let quotaHeader = NSMenuItem()
+        quotaHeader.view = f4HeaderView(title: "额度状态")
+        quotaHeader.identifier = NSUserInterfaceItemIdentifier("f4-quota-header")
+        menu.addItem(quotaHeader)
+
+        let total = SubscriptionSettingsManager.shared.totalMonthlyCost(
+            inCurrency: formatter.currency, formatter: formatter
+        )
+        let displayText = total > 0
+            ? "  订阅参考：\(SubscriptionSettingsManager.shared.totalMonthlyCostDisplayText(currency: formatter.currency, formatter: formatter))/月"
+            : "  订阅参考：—/月"
+        let quotaItem = NSMenuItem()
+        quotaItem.view = f4RowView(text: displayText)
+        quotaItem.identifier = NSUserInterfaceItemIdentifier("f4-quota")
+        menu.addItem(quotaItem)
+
+        return menu
+    }
+
+    /// F4 helper: bold secondary-label header view used inside the submenu.
+    private static func f4HeaderView(title: String) -> NSView {
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: MenuDesignToken.Dimension.menuWidth, height: 23))
+        let label = NSTextField(labelWithString: title)
+        label.font = NSFont.systemFont(ofSize: 11, weight: .bold)
+        label.textColor = NSColor.secondaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: MenuDesignToken.Spacing.leadingOffset),
+            label.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+        return view
+    }
+
+    /// F4 helper: disabled-label row view (optionally with a leading icon).
+    private static func f4RowView(text: String, icon: NSImage? = nil) -> NSView {
+        let menuWidth: CGFloat = MenuDesignToken.Dimension.menuWidth
+        let hasIcon = icon != nil
+        let leadingOffset: CGFloat = (hasIcon ? MenuDesignToken.Spacing.leadingWithIcon : MenuDesignToken.Spacing.leadingOffset)
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: menuWidth, height: MenuDesignToken.Dimension.itemHeight))
+
+        if let icon = icon {
+            let imageView = NSImageView(frame: NSRect(x: 14, y: 3, width: 16, height: 16))
+            imageView.image = icon
+            imageView.imageScaling = .scaleProportionallyUpOrDown
+            view.addSubview(imageView)
+        }
+
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.systemFont(ofSize: MenuDesignToken.Dimension.fontSize)
+        label.textColor = NSColor.secondaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: leadingOffset),
+            label.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+        return view
+    }
 }
