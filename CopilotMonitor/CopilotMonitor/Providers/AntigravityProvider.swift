@@ -274,12 +274,12 @@ final class AntigravityProvider: ProviderProtocol {
             return nil
         }
 
-        let primaryProjectId = account.projectId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let fallbackProjectId = account.managedProjectId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let projectId = primaryProjectId.isEmpty ? fallbackProjectId : primaryProjectId
-        guard !projectId.isEmpty else {
-            logger.warning("Antigravity fallback unavailable: selected account is missing project ID")
-            return nil
+        let projectId = GeminiProjectPolicy.resolve(
+            primary: account.projectId,
+            fallback: account.managedProjectId
+        )
+        if projectId == GeminiProjectPolicy.fallbackProjectId {
+            logger.info("Antigravity fallback account has no project ID; using default project fallback")
         }
 
         return AntigravityFallbackAccount(

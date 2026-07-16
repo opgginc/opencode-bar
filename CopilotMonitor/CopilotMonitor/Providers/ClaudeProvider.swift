@@ -8,38 +8,107 @@ enum ClaudeOAuthRequestPolicy {
     static let betaHeader = "oauth-2025-04-20"
     static let defaultClaudeCodeVersion = "2.1.80"
 
-    static func codeVersion(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+    static func codeVersion(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        installedVersion: String? = nil
+    ) -> String {
         let rawVersion = environment["ANTHROPIC_CLI_VERSION"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let rawVersion, !rawVersion.isEmpty {
             return rawVersion
         }
+
+        if let installedVersion = normalizedVersion(installedVersion) {
+            return installedVersion
+        }
+
         return defaultClaudeCodeVersion
     }
 
-    static func usageUserAgent(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+    static func usageUserAgent(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        installedVersion: String? = nil
+    ) -> String {
         let rawUserAgent = environment["ANTHROPIC_CODE_USER_AGENT"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let rawUserAgent, !rawUserAgent.isEmpty {
             return rawUserAgent
         }
-        return "claude-code/\(codeVersion(environment: environment))"
+        return "claude-code/\(codeVersion(environment: environment, installedVersion: installedVersion))"
+    }
+
+    static func installedClaudeCodeVersion(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> String? {
+        let homeDirectory = fileManager.homeDirectoryForCurrentUser
+        var candidatePaths: [String] = []
+
+        if let configuredPath = environment["CLAUDE_CODE_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !configuredPath.isEmpty {
+            candidatePaths.append(configuredPath)
+        }
+
+        if let path = environment["PATH"] {
+            candidatePaths.append(contentsOf: path.split(separator: ":").map { directory in
+                URL(fileURLWithPath: String(directory)).appendingPathComponent("claude").path
+            })
+        }
+
+        candidatePaths.append(contentsOf: [
+            homeDirectory.appendingPathComponent(".local/bin/claude").path,
+            "/opt/homebrew/bin/claude",
+            "/usr/local/bin/claude"
+        ])
+
+        var visitedPaths = Set<String>()
+        for path in candidatePaths where visitedPaths.insert(path).inserted {
+            guard fileManager.isExecutableFile(atPath: path) else { continue }
+            let resolvedPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            if let version = versionFromExecutablePath(resolvedPath) {
+                return version
+            }
+        }
+
+        return nil
+    }
+
+    static func versionFromExecutablePath(_ path: String) -> String? {
+        for component in URL(fileURLWithPath: path).pathComponents.reversed() {
+            if let version = normalizedVersion(component) {
+                return version
+            }
+        }
+        return nil
+    }
+
+    private static func normalizedVersion(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = trimmed.split(separator: ".", omittingEmptySubsequences: false)
+        guard components.count == 3,
+              components.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) else {
+            return nil
+        }
+        return trimmed
     }
 
     static func applyHeaders(
         to request: inout URLRequest,
         accessToken: String,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        installedVersion: String? = nil
     ) {
+        let userAgent = usageUserAgent(environment: environment, installedVersion: installedVersion)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(usageUserAgent(environment: environment), forHTTPHeaderField: "User-Agent")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
         request.setValue(nil, forHTTPHeaderField: "Cookie")
         request.httpShouldHandleCookies = false
         request.timeoutInterval = 10
 
         logger.debug(
-            "Prepared Claude OAuth request headers: userAgent=\(usageUserAgent(environment: environment), privacy: .public), cookies=disabled"
+            "Prepared Claude OAuth request headers: userAgent=\(userAgent, privacy: .public), cookies=disabled"
         )
     }
 }
@@ -409,7 +478,11 @@ final class ClaudeProvider: ProviderProtocol {
 
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
-            ClaudeOAuthRequestPolicy.applyHeaders(to: &request, accessToken: accessToken)
+            ClaudeOAuthRequestPolicy.applyHeaders(
+                to: &request,
+                accessToken: accessToken,
+                installedVersion: ClaudeOAuthRequestPolicy.installedClaudeCodeVersion()
+            )
 
             do {
                 let (data, response) = try await session.data(for: request)
@@ -547,7 +620,11 @@ final class ClaudeProvider: ProviderProtocol {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        ClaudeOAuthRequestPolicy.applyHeaders(to: &request, accessToken: accessToken)
+        ClaudeOAuthRequestPolicy.applyHeaders(
+            to: &request,
+            accessToken: accessToken,
+            installedVersion: ClaudeOAuthRequestPolicy.installedClaudeCodeVersion()
+        )
 
         let (data, response) = try await session.data(for: request)
 

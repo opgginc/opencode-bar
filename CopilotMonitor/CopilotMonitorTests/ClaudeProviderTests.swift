@@ -136,6 +136,20 @@ final class ClaudeProviderTests: XCTestCase {
 
         XCTAssertEqual(userAgent, "claude-code/3.0.0")
     }
+
+    func testClaudeOAuthRequestPolicyUsesInstalledVersionForUserAgent() {
+        let userAgent = ClaudeOAuthRequestPolicy.usageUserAgent(
+            environment: [:],
+            installedVersion: "2.1.199"
+        )
+
+        XCTAssertEqual(userAgent, "claude-code/2.1.199")
+    }
+
+    func testClaudeOAuthRequestPolicyExtractsVersionFromOfficialInstallPath() {
+        let path = "/Users/example/.local/share/claude/versions/2.1.199"
+        XCTAssertEqual(ClaudeOAuthRequestPolicy.versionFromExecutablePath(path), "2.1.199")
+    }
     
     private func loadFixture(named: String) -> Data {
         let bundle = Bundle(for: type(of: self))

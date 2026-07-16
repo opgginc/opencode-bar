@@ -614,6 +614,24 @@ struct GeminiAuthAccount {
     let source: GeminiAuthSource
 }
 
+enum GeminiProjectPolicy {
+    static let fallbackProjectId = "default"
+
+    static func resolve(primary: String?, fallback: String? = nil) -> String {
+        let primaryProjectId = primary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !primaryProjectId.isEmpty {
+            return primaryProjectId
+        }
+
+        let fallbackProjectId = fallback?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !fallbackProjectId.isEmpty {
+            return fallbackProjectId
+        }
+
+        return Self.fallbackProjectId
+    }
+}
+
 /// Minimal OpenCode auth payload for jenslys/opencode-gemini-auth stored under "google"
 struct OpenCodeGeminiAuthContainer: Decodable {
     let google: GeminiOAuthAuth?
@@ -4342,12 +4360,12 @@ final class TokenManager: @unchecked Sendable {
                     return nil
                 }
 
-                let primaryProjectId = account.projectId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                let fallbackProjectId = account.managedProjectId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                let projectId = primaryProjectId.isEmpty ? fallbackProjectId : primaryProjectId
-                if projectId.isEmpty {
-                    logger.warning("Skipping Antigravity account at index \(index): missing project ID")
-                    return nil
+                let projectId = GeminiProjectPolicy.resolve(
+                    primary: account.projectId,
+                    fallback: account.managedProjectId
+                )
+                if projectId == GeminiProjectPolicy.fallbackProjectId {
+                    logger.info("Antigravity account at index \(index) has no project ID; using default project fallback")
                 }
 
                 let normalizedEmail = normalizedNonEmpty(account.email)
