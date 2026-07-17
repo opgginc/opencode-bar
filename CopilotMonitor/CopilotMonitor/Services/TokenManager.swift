@@ -618,17 +618,22 @@ enum GeminiProjectPolicy {
     static let fallbackProjectId = "default"
 
     static func resolve(primary: String?, fallback: String? = nil) -> String {
-        let primaryProjectId = primary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !primaryProjectId.isEmpty {
-            return primaryProjectId
-        }
+        firstNonEmpty([primary, fallback]) ?? fallbackProjectId
+    }
 
-        let fallbackProjectId = fallback?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !fallbackProjectId.isEmpty {
-            return fallbackProjectId
-        }
+    static func resolveStandalone(
+        projectId: String?,
+        quotaProjectId: String?,
+        environmentProjectId: String?
+    ) -> String {
+        firstNonEmpty([projectId, quotaProjectId, environmentProjectId]) ?? fallbackProjectId
+    }
 
-        return Self.fallbackProjectId
+    private static func firstNonEmpty(_ candidates: [String?]) -> String? {
+        candidates.lazy.compactMap { candidate in
+            let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }.first
     }
 }
 
@@ -654,12 +659,20 @@ enum GeminiOAuthRefreshError: LocalizedError, Equatable {
 
     var isClientMismatch: Bool {
         guard case .rejected(let statusCode, let code, _) = self,
-              statusCode == 401,
               let normalizedCode = code?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
             return false
         }
 
-        return ["invalid_client", "unauthorized", "unauthorized_client"].contains(normalizedCode)
+        switch (statusCode, normalizedCode) {
+        case (400, "invalid_client"),
+             (400, "unauthorized_client"),
+             (401, "invalid_client"),
+             (401, "unauthorized_client"),
+             (401, "unauthorized"):
+            return true
+        default:
+            return false
+        }
     }
 }
 
@@ -4343,6 +4356,35 @@ final class TokenManager: @unchecked Sendable {
         return getAllGeminiAccounts().first?.email
     }
 
+    func standaloneGeminiAccount(
+        from oauthCreds: GeminiOAuthCreds,
+        authSource: String,
+        environmentProjectId: String?
+    ) -> GeminiAuthAccount? {
+        guard let refreshToken = normalizedNonEmpty(oauthCreds.refreshToken) else {
+            return nil
+        }
+
+        let identity = decodeGeminiIDTokenPayload(oauthCreds.idToken)
+        let client = geminiOAuthClientCredentials(for: normalizedNonEmpty(identity?.audience))
+        return GeminiAuthAccount(
+            index: 0,
+            accountId: normalizedNonEmpty(identity?.sub),
+            email: normalizedNonEmpty(identity?.email),
+            refreshToken: refreshToken,
+            projectId: GeminiProjectPolicy.resolveStandalone(
+                projectId: oauthCreds.projectId,
+                quotaProjectId: oauthCreds.quotaProjectId,
+                environmentProjectId: environmentProjectId
+            ),
+            authSource: authSource,
+            sourceLabels: [geminiSourceLabel(for: .oauthCreds)],
+            clientId: client.clientId,
+            clientSecret: client.clientSecret,
+            source: .oauthCreds
+        )
+    }
+
     /// Gets all Gemini accounts (NoeFabris/opencode-antigravity-auth + jenslys/opencode-gemini-auth)
     /// and enriches account identity metadata from ~/.gemini/oauth_creds.json when available.
     func getAllGeminiAccounts() -> [GeminiAuthAccount] {
@@ -4353,7 +4395,6 @@ final class TokenManager: @unchecked Sendable {
         let oauthCredsEmail = normalizedNonEmpty(oauthCredsPayload?.email)
         let oauthCredsRefreshToken = normalizedNonEmpty(oauthCreds?.refreshToken)
         let oauthCredsAudience = normalizedNonEmpty(oauthCredsPayload?.audience)
-        let oauthCredsClient = geminiOAuthClientCredentials(for: oauthCredsAudience)
         let geminiOAuthCredsSource = lastFoundGeminiOAuthCredsPath?.path ?? geminiOAuthCredsPath().path
 
         if oauthCreds != nil {
@@ -4458,30 +4499,17 @@ final class TokenManager: @unchecked Sendable {
         }
 
         if accounts.isEmpty,
-           let refreshToken = oauthCredsRefreshToken {
-            let standaloneProjectId = normalizedNonEmpty(oauthCreds?.projectId)
-                ?? normalizedNonEmpty(oauthCreds?.quotaProjectId)
-                ?? normalizedNonEmpty(ProcessInfo.processInfo.environment["GEMINI_PROJECT_ID"])
-
-            if let projectId = standaloneProjectId {
-                accounts.append(
-                    GeminiAuthAccount(
-                        index: 0,
-                        accountId: oauthCredsAccountId,
-                        email: oauthCredsEmail,
-                        refreshToken: refreshToken,
-                        projectId: projectId,
-                        authSource: geminiOAuthCredsSource,
-                        sourceLabels: [geminiSourceLabel(for: .oauthCreds)],
-                        clientId: oauthCredsClient.clientId,
-                        clientSecret: oauthCredsClient.clientSecret,
-                        source: .oauthCreds
-                    )
-                )
-                logger.info("Gemini oauth_creds.json used as standalone account source")
-            } else {
-                logger.info("Gemini oauth_creds.json found but project ID is missing; skipping standalone account source")
+           let oauthCreds,
+           let standaloneAccount = standaloneGeminiAccount(
+               from: oauthCreds,
+               authSource: geminiOAuthCredsSource,
+               environmentProjectId: ProcessInfo.processInfo.environment["GEMINI_PROJECT_ID"]
+           ) {
+            accounts.append(standaloneAccount)
+            if standaloneAccount.projectId == GeminiProjectPolicy.fallbackProjectId {
+                logger.info("Gemini oauth_creds.json has no project ID; using default project fallback")
             }
+            logger.info("Gemini oauth_creds.json used as standalone account source")
         }
 
         if accounts.isEmpty {

@@ -20,6 +20,28 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertEqual(GeminiProjectPolicy.resolve(primary: nil), "default")
     }
 
+    func testGeminiStandaloneProjectPolicyUsesDefaultWhenMetadataIsMissing() {
+        XCTAssertEqual(
+            GeminiProjectPolicy.resolveStandalone(
+                projectId: nil,
+                quotaProjectId: nil,
+                environmentProjectId: nil
+            ),
+            "default"
+        )
+    }
+
+    func testGeminiStandaloneProjectPolicyPrefersEnvironmentBeforeDefault() {
+        XCTAssertEqual(
+            GeminiProjectPolicy.resolveStandalone(
+                projectId: nil,
+                quotaProjectId: nil,
+                environmentProjectId: "environment-project"
+            ),
+            "environment-project"
+        )
+    }
+
     private func makeTestJWT(payload: String) -> String {
         func encode(_ string: String) -> String {
             Data(string.utf8)

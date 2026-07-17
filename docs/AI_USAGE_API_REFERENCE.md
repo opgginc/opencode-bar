@@ -20,11 +20,12 @@
 
 **Endpoint:** `GET https://api.anthropic.com/api/oauth/usage`
 
-Latest Claude Code-compatible usage requests use Bearer OAuth with `anthropic-beta: oauth-2025-04-20`, a Claude Code `User-Agent` (`claude-code/<version>`), and no browser cookies.
+Latest Claude Code-compatible usage requests use Bearer OAuth with `anthropic-beta: oauth-2025-04-20`, a Claude Code `User-Agent` (`claude-code/<version>`), and no browser cookies. OpenCode Bar locates the Claude executable through `CLAUDE_CODE_PATH`, `PATH`, or common installation paths and executes `claude --version`. Only exact `X.Y.Z` or `X.Y.Z (Claude Code)` output is accepted. `ANTHROPIC_CLI_VERSION` can provide a validated `X.Y.Z` override; otherwise invalid or unavailable version output falls back to `2.1.80`.
 
 ```bash
 ACCESS=$(jq -r '.anthropic.access' ~/.local/share/opencode/auth.json)
-CLAUDE_CODE_VERSION="${ANTHROPIC_CLI_VERSION:-2.1.80}"
+source ./scripts/claude-version.sh
+CLAUDE_CODE_VERSION="$(resolve_claude_code_version)"
 
 curl -s "https://api.anthropic.com/api/oauth/usage" \
   -H "Authorization: Bearer $ACCESS" \
@@ -34,7 +35,7 @@ curl -s "https://api.anthropic.com/api/oauth/usage" \
   -H "anthropic-beta: oauth-2025-04-20"
 ```
 
-The bundled [`scripts/query-claude.sh`](/Users/kargnas/projects/opencode-bar/scripts/query-claude.sh) now resolves Claude auth in this order:
+The bundled [`scripts/query-claude.sh`](../scripts/query-claude.sh) uses the same version policy and resolves Claude auth in this order:
 
 1. `opencode-anthropic-auth/accounts.json`
 2. OpenCode `auth.json`

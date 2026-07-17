@@ -142,7 +142,11 @@ enum ClaudeOAuthRequestPolicy {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         let components = trimmed.split(separator: ".", omittingEmptySubsequences: false)
         guard components.count == 3,
-              components.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) else {
+              components.allSatisfy({ component in
+                  !component.isEmpty && component.utf8.allSatisfy { byte in
+                      byte >= 48 && byte <= 57
+                  }
+              }) else {
             return nil
         }
         return trimmed

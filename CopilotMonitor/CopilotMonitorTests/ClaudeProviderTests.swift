@@ -173,6 +173,10 @@ final class ClaudeProviderTests: XCTestCase {
     func testClaudeOAuthRequestPolicyRejectsPrereleaseVersionOutput() {
         XCTAssertNil(ClaudeOAuthRequestPolicy.versionFromCommandOutput("2.1.199-beta"))
     }
+
+    func testClaudeOAuthRequestPolicyRejectsUnicodeDigits() {
+        XCTAssertNil(ClaudeOAuthRequestPolicy.versionFromCommandOutput("٢.١.١٩٩"))
+    }
     
     private func loadFixture(named: String) -> Data {
         let bundle = Bundle(for: type(of: self))

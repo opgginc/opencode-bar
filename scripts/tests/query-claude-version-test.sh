@@ -43,6 +43,9 @@ assert_version "$CLAUDE_DEFAULT_CODE_VERSION" "multiline output fallback"
 write_fake_claude 'printf "%s\n" "2.1.199-beta"'
 assert_version "$CLAUDE_DEFAULT_CODE_VERSION" "prerelease output fallback"
 
+write_fake_claude 'printf "%s\n" "٢.١.١٩٩"'
+assert_version "$CLAUDE_DEFAULT_CODE_VERSION" "Unicode digit output fallback"
+
 write_fake_claude 'exit 1'
 assert_version "$CLAUDE_DEFAULT_CODE_VERSION" "command failure fallback"
 

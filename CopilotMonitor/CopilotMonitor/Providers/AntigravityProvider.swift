@@ -218,36 +218,12 @@ final class AntigravityProvider: ProviderProtocol {
             return nil
         }
 
-        let preferredIndexes: [Int?] = [
-            antigravityAccounts.activeIndexByFamily?["gemini"],
-            antigravityAccounts.activeIndex
-        ]
-
-        func accountAtPreferredIndex() -> AntigravityAccounts.Account? {
-            for preferredIndex in preferredIndexes {
-                guard let index = preferredIndex,
-                      antigravityAccounts.accounts.indices.contains(index) else {
-                    continue
-                }
-
-                let account = antigravityAccounts.accounts[index]
-                if account.enabled == false {
-                    continue
-                }
-
-                return account
-            }
-
-            return antigravityAccounts.accounts.first(where: { $0.enabled != false })
-        }
-
-        guard let account = accountAtPreferredIndex() else {
-            logger.warning("Antigravity fallback unavailable: no enabled account found")
+        guard let account = Self.selectFallbackAccount(from: antigravityAccounts) else {
+            logger.warning("Antigravity fallback unavailable: no enabled account with a refresh token found")
             return nil
         }
 
-        let refreshToken = account.refreshToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !refreshToken.isEmpty else {
+        guard let refreshToken = nonEmptyTrimmed(account.refreshToken) else {
             logger.warning("Antigravity fallback unavailable: selected account is missing refresh token")
             return nil
         }
@@ -270,6 +246,31 @@ final class AntigravityProvider: ProviderProtocol {
                 .appendingPathComponent("antigravity-accounts.json")
                 .path
         )
+    }
+
+    static func selectFallbackAccount(from accounts: AntigravityAccounts) -> AntigravityAccounts.Account? {
+        let preferredIndexes: [Int?] = [
+            accounts.activeIndexByFamily?["gemini"],
+            accounts.activeIndex
+        ]
+        var orderedIndexes = preferredIndexes.compactMap { $0 }
+        orderedIndexes.append(contentsOf: accounts.accounts.indices)
+        var visitedIndexes = Set<Int>()
+
+        for index in orderedIndexes {
+            guard visitedIndexes.insert(index).inserted,
+                  accounts.accounts.indices.contains(index) else {
+                continue
+            }
+
+            let account = accounts.accounts[index]
+            let refreshToken = account.refreshToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if account.enabled != false, !refreshToken.isEmpty {
+                return account
+            }
+        }
+
+        return nil
     }
 
     private func parseQuotaBuckets(_ buckets: [GeminiQuotaResponse.Bucket]) -> AntigravityParsedCacheUsage {

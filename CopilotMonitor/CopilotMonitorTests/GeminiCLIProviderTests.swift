@@ -122,17 +122,33 @@ final class GeminiCLIProviderTests: XCTestCase {
         XCTAssertNotNil(earliestReset)
     }
 
-    func testQuotaRequestUsesDefaultProjectAndDecodesSuccessfulResponse() async throws {
+    func testStandaloneOAuthCredentialsWithoutProjectReachDefaultQuotaRequest() async throws {
         let session = makeSession()
         defer { session.invalidateAndCancel() }
         let fixture = try loadFixture(named: "gemini_response")
         let responseData = try JSONSerialization.data(withJSONObject: fixture)
+        let credentials = try JSONDecoder().decode(
+            GeminiOAuthCreds.self,
+            from: Data(#"{"refresh_token":"standalone-refresh-token"}"#.utf8)
+        )
+        let account = try XCTUnwrap(
+            TokenManager.shared.standaloneGeminiAccount(
+                from: credentials,
+                authSource: "/tmp/oauth_creds.json",
+                environmentProjectId: nil
+            )
+        )
+
+        XCTAssertEqual(account.refreshToken, "standalone-refresh-token")
+        XCTAssertEqual(account.projectId, "default")
+        XCTAssertEqual(account.source, .oauthCreds)
 
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.url?.absoluteString, "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-access-token")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(request.timeoutInterval, 10, accuracy: 0.001)
 
             let requestData = try XCTUnwrap(Self.requestBodyData(from: request))
             let payload = try XCTUnwrap(
@@ -149,7 +165,7 @@ final class GeminiCLIProviderTests: XCTestCase {
 
         let response = try await GeminiQuotaAPI.fetchQuota(
             accessToken: "test-access-token",
-            projectId: GeminiProjectPolicy.resolve(primary: nil),
+            projectId: account.projectId,
             session: session
         )
 
@@ -204,6 +220,39 @@ final class GeminiCLIProviderTests: XCTestCase {
                 HTTPURLResponse(url: url, statusCode: 401, httpVersion: nil, headerFields: nil)
             )
             return (response, Data(#"{"error":"Unauthorized"}"#.utf8))
+        }
+
+        do {
+            _ = try await TokenManager.shared.requestGeminiAccessToken(
+                refreshToken: "test-refresh-token",
+                clientId: "opencode-plugin-client",
+                clientSecret: "opencode-plugin-secret",
+                session: session
+            )
+            XCTFail("Expected typed OAuth rejection")
+        } catch let error as GeminiOAuthRefreshError {
+            XCTAssertTrue(error.isClientMismatch)
+            XCTAssertTrue(
+                GeminiOAuthRetryPolicy.shouldRetryWithGeminiCLIClient(
+                    source: .opencodeAuth,
+                    error: error
+                )
+            )
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testOAuthRefreshClassifiesHTTP400ClientMismatchForRetry() async throws {
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+
+        MockURLProtocol.requestHandler = { request in
+            let url = try XCTUnwrap(request.url)
+            let response = try XCTUnwrap(
+                HTTPURLResponse(url: url, statusCode: 400, httpVersion: nil, headerFields: nil)
+            )
+            return (response, Data(#"{"error":"invalid_client"}"#.utf8))
         }
 
         do {
