@@ -146,9 +146,32 @@ final class ClaudeProviderTests: XCTestCase {
         XCTAssertEqual(userAgent, "claude-code/2.1.199")
     }
 
-    func testClaudeOAuthRequestPolicyExtractsVersionFromOfficialInstallPath() {
-        let path = "/Users/example/.local/share/claude/versions/2.1.199"
-        XCTAssertEqual(ClaudeOAuthRequestPolicy.versionFromExecutablePath(path), "2.1.199")
+    func testClaudeOAuthRequestPolicyRejectsInvalidVersionOverride() {
+        let userAgent = ClaudeOAuthRequestPolicy.usageUserAgent(
+            environment: ["ANTHROPIC_CLI_VERSION": "invalid"],
+            installedVersion: "2.1.199"
+        )
+
+        XCTAssertEqual(userAgent, "claude-code/2.1.199")
+    }
+
+    func testClaudeOAuthRequestPolicyParsesOfficialVersionOutput() {
+        XCTAssertEqual(
+            ClaudeOAuthRequestPolicy.versionFromCommandOutput("2.1.199 (Claude Code)\n"),
+            "2.1.199"
+        )
+    }
+
+    func testClaudeOAuthRequestPolicyRejectsPrefixedVersionOutput() {
+        XCTAssertNil(ClaudeOAuthRequestPolicy.versionFromCommandOutput("Claude Code 2.1.199"))
+    }
+
+    func testClaudeOAuthRequestPolicyRejectsMultilineVersionOutput() {
+        XCTAssertNil(ClaudeOAuthRequestPolicy.versionFromCommandOutput("2.1.199\nunexpected"))
+    }
+
+    func testClaudeOAuthRequestPolicyRejectsPrereleaseVersionOutput() {
+        XCTAssertNil(ClaudeOAuthRequestPolicy.versionFromCommandOutput("2.1.199-beta"))
     }
     
     private func loadFixture(named: String) -> Data {

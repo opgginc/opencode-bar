@@ -166,7 +166,7 @@ final class AntigravityProvider: ProviderProtocol {
     private func fetchFromAccountsFallback(cacheError: Error) async throws -> ProviderResult {
         guard let account = resolveFallbackAccount() else {
             throw ProviderError.providerError(
-                "Antigravity cache unavailable and no enabled antigravity-accounts.json account with project ID was found"
+                "Antigravity cache unavailable and no enabled antigravity-accounts.json account with a refresh token was found"
             )
         }
 
@@ -174,33 +174,11 @@ final class AntigravityProvider: ProviderProtocol {
             throw ProviderError.authenticationFailed("Unable to refresh Antigravity fallback token")
         }
 
-        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else {
-            throw ProviderError.networkError("Invalid API endpoint")
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = "{\"project\":\"\(account.projectId)\"}".data(using: .utf8)
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ProviderError.networkError("Invalid response type")
-        }
-
-        if httpResponse.statusCode == 401 {
-            throw ProviderError.authenticationFailed("Antigravity fallback token expired")
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
-        }
-
-        let quotaResponse = try JSONDecoder().decode(GeminiQuotaResponse.self, from: data)
-        guard !quotaResponse.buckets.isEmpty else {
-            throw ProviderError.decodingError("Empty buckets array")
-        }
+        let quotaResponse = try await GeminiQuotaAPI.fetchQuota(
+            accessToken: accessToken,
+            projectId: account.projectId,
+            session: session
+        )
 
         let parsed = parseQuotaBuckets(quotaResponse.buckets)
         let minRemaining = parsed.modelBreakdown.values.min() ?? 0.0

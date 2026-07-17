@@ -591,7 +591,7 @@ struct AntigravityAccounts: Codable {
 }
 
 /// Auth source types for Gemini CLI token discovery
-enum GeminiAuthSource {
+enum GeminiAuthSource: Equatable {
     /// NoeFabris/opencode-antigravity-auth (~/.config/opencode/antigravity-accounts.json)
     case antigravity
     /// jenslys/opencode-gemini-auth (OpenCode auth.json google.oauth)
@@ -629,6 +629,46 @@ enum GeminiProjectPolicy {
         }
 
         return Self.fallbackProjectId
+    }
+}
+
+enum GeminiOAuthRefreshError: LocalizedError, Equatable {
+    case invalidResponse
+    case rejected(statusCode: Int, code: String?, message: String?)
+    case invalidTokenResponse
+    case transport(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "Invalid OAuth response"
+        case .rejected(let statusCode, let code, let message):
+            let detail = message ?? code ?? "Unknown OAuth error"
+            return "OAuth token refresh returned HTTP \(statusCode): \(detail)"
+        case .invalidTokenResponse:
+            return "OAuth token response did not contain a valid access token"
+        case .transport(let message):
+            return "OAuth token refresh failed: \(message)"
+        }
+    }
+
+    var isClientMismatch: Bool {
+        guard case .rejected(let statusCode, let code, _) = self,
+              statusCode == 401,
+              let normalizedCode = code?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return false
+        }
+
+        return ["invalid_client", "unauthorized", "unauthorized_client"].contains(normalizedCode)
+    }
+}
+
+enum GeminiOAuthRetryPolicy {
+    static func shouldRetryWithGeminiCLIClient(
+        source: GeminiAuthSource,
+        error: GeminiOAuthRefreshError
+    ) -> Bool {
+        source == .opencodeAuth && error.isClientMismatch
     }
 }
 
@@ -769,6 +809,16 @@ struct GeminiTokenResponse: Codable {
     let access_token: String
     let expires_in: Int
     let token_type: String?
+}
+
+private struct GeminiOAuthErrorResponse: Decodable {
+    let error: String?
+    let errorDescription: String?
+
+    enum CodingKeys: String, CodingKey {
+        case error
+        case errorDescription = "error_description"
+    }
 }
 
 private extension String {
@@ -4471,22 +4521,23 @@ final class TokenManager: @unchecked Sendable {
     private static let geminiAuthPluginClientId = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
     private static let geminiAuthPluginClientSecret = "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"
 
-    /// Refreshes Gemini OAuth access token using refresh token
+    /// Requests a Gemini OAuth access token and preserves typed OAuth failures.
     /// - Parameters:
     ///   - refreshToken: The refresh token from Antigravity accounts
     ///   - clientId: Google OAuth client ID (default: public CLI client ID)
     ///   - clientSecret: Google OAuth client secret (default: public CLI client secret)
-    /// - Returns: New access token if successful, nil otherwise
-    func refreshGeminiAccessToken(
+    ///   - session: URL session used for the token request
+    /// - Returns: New access token if successful
+    func requestGeminiAccessToken(
         refreshToken: String,
         clientId: String = TokenManager.geminiClientId,
-        clientSecret: String = TokenManager.geminiClientSecret
-    ) async -> String? {
+        clientSecret: String = TokenManager.geminiClientSecret,
+        session: URLSession = .shared
+    ) async throws -> String {
         let endpoint = "https://oauth2.googleapis.com/token"
 
         guard let url = URL(string: endpoint) else {
-            logger.error("Invalid OAuth endpoint URL")
-            return nil
+            throw GeminiOAuthRefreshError.invalidResponse
         }
 
         // Build request body
@@ -4499,8 +4550,7 @@ final class TokenManager: @unchecked Sendable {
         ]
 
         guard let bodyString = components.query else {
-            logger.error("Failed to build request body")
-            return nil
+            throw GeminiOAuthRefreshError.invalidResponse
         }
 
         var request = URLRequest(url: url)
@@ -4509,21 +4559,49 @@ final class TokenManager: @unchecked Sendable {
         request.httpBody = bodyString.data(using: .utf8)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                logger.error("Invalid response type")
-                return nil
+                throw GeminiOAuthRefreshError.invalidResponse
             }
 
             guard httpResponse.statusCode == 200 else {
-                logger.error("OAuth token refresh failed with status: \(httpResponse.statusCode)")
-                return nil
+                let payload = try? JSONDecoder().decode(GeminiOAuthErrorResponse.self, from: data)
+                throw GeminiOAuthRefreshError.rejected(
+                    statusCode: httpResponse.statusCode,
+                    code: payload?.error,
+                    message: payload?.errorDescription
+                )
             }
 
-            let tokenResponse = try JSONDecoder().decode(GeminiTokenResponse.self, from: data)
-            logger.info("Successfully refreshed Gemini access token")
+            guard let tokenResponse = try? JSONDecoder().decode(GeminiTokenResponse.self, from: data),
+                  !tokenResponse.access_token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw GeminiOAuthRefreshError.invalidTokenResponse
+            }
+
             return tokenResponse.access_token
+        } catch let error as GeminiOAuthRefreshError {
+            throw error
+        } catch {
+            throw GeminiOAuthRefreshError.transport(error.localizedDescription)
+        }
+    }
+
+    /// Refreshes Gemini OAuth access token using refresh token.
+    /// - Returns: New access token if successful, nil otherwise
+    func refreshGeminiAccessToken(
+        refreshToken: String,
+        clientId: String = TokenManager.geminiClientId,
+        clientSecret: String = TokenManager.geminiClientSecret
+    ) async -> String? {
+        do {
+            let accessToken = try await requestGeminiAccessToken(
+                refreshToken: refreshToken,
+                clientId: clientId,
+                clientSecret: clientSecret
+            )
+            logger.info("Successfully refreshed Gemini access token")
+            return accessToken
         } catch {
             logger.error("Failed to refresh Gemini token: \(error.localizedDescription)")
             return nil

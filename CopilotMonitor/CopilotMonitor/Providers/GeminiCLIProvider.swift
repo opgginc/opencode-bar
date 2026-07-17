@@ -20,6 +20,45 @@ struct GeminiUserInfoResponse: Codable {
     let email: String?
 }
 
+enum GeminiQuotaAPI {
+    private static let endpoint = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota")
+
+    static func fetchQuota(
+        accessToken: String,
+        projectId: String,
+        session: URLSession
+    ) async throws -> GeminiQuotaResponse {
+        guard let endpoint else {
+            throw ProviderError.networkError("Invalid API endpoint")
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["project": projectId])
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ProviderError.networkError("Invalid response type")
+        }
+
+        if httpResponse.statusCode == 401 {
+            throw ProviderError.authenticationFailed("Gemini quota token expired")
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
+        }
+
+        let quotaResponse = try JSONDecoder().decode(GeminiQuotaResponse.self, from: data)
+        guard !quotaResponse.buckets.isEmpty else {
+            throw ProviderError.decodingError("Empty buckets array")
+        }
+        return quotaResponse
+    }
+}
+
 // MARK: - GeminiCLIProvider Implementation
 
 /// Provider for Google Gemini CLI quota tracking via cloudcode-pa.googleapis.com
@@ -247,26 +286,46 @@ final class GeminiCLIProvider: ProviderProtocol {
 
     // MARK: - Private Helpers
 
+    private func refreshAccessToken(for account: GeminiAuthAccount) async throws -> String {
+        do {
+            return try await tokenManager.requestGeminiAccessToken(
+                refreshToken: account.refreshToken,
+                clientId: account.clientId,
+                clientSecret: account.clientSecret,
+                session: session
+            )
+        } catch let primaryError as GeminiOAuthRefreshError {
+            guard GeminiOAuthRetryPolicy.shouldRetryWithGeminiCLIClient(
+                source: account.source,
+                error: primaryError
+            ) else {
+                throw primaryError
+            }
+
+            logger.info(
+                "Gemini CLI: OAuth client mismatch for account #\(account.index + 1); trying Gemini CLI client"
+            )
+
+            do {
+                return try await tokenManager.requestGeminiAccessToken(
+                    refreshToken: account.refreshToken,
+                    session: session
+                )
+            } catch {
+                throw ProviderError.authenticationFailed(
+                    "OAuth client fallback failed for account #\(account.index + 1). "
+                        + "Primary: \(primaryError.localizedDescription). Fallback: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
     private func fetchQuotaForAccount(account: GeminiAuthAccount) async throws -> GeminiAccountQuota {
         let accountIndex = account.index
         let configuredProjectId = account.projectId.trimmingCharacters(in: .whitespacesAndNewlines)
         let projectId = GeminiProjectPolicy.resolve(primary: configuredProjectId)
 
-        var refreshedAccessToken = await tokenManager.refreshGeminiAccessToken(
-            refreshToken: account.refreshToken,
-            clientId: account.clientId,
-            clientSecret: account.clientSecret
-        )
-        if refreshedAccessToken == nil {
-            logger.info(
-                "Gemini CLI: Primary OAuth client failed for account #\(accountIndex + 1); trying Gemini CLI OAuth client fallback"
-            )
-            refreshedAccessToken = await tokenManager.refreshGeminiAccessToken(refreshToken: account.refreshToken)
-        }
-
-        guard let accessToken = refreshedAccessToken else {
-            throw ProviderError.authenticationFailed("Unable to refresh token for account #\(accountIndex + 1)")
-        }
+        let accessToken = try await refreshAccessToken(for: account)
 
         if configuredProjectId.isEmpty {
             logger.info("Gemini CLI: Missing project ID for account #\(accountIndex + 1); using default project fallback")
@@ -277,36 +336,11 @@ final class GeminiCLIProvider: ProviderProtocol {
             logger.warning("Gemini CLI: Email lookup failed for account #\(accountIndex + 1)")
         }
 
-        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else {
-            throw ProviderError.networkError("Invalid API endpoint")
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // The API accepts "default" when OAuth storage does not include a project ID.
-        request.httpBody = "{\"project\":\"\(projectId)\"}".data(using: .utf8)
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ProviderError.networkError("Invalid response type")
-        }
-
-        if httpResponse.statusCode == 401 {
-            throw ProviderError.authenticationFailed("Token expired for account #\(accountIndex + 1)")
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            throw ProviderError.networkError("HTTP \(httpResponse.statusCode)")
-        }
-
-        let quotaResponse = try JSONDecoder().decode(GeminiQuotaResponse.self, from: data)
-
-        guard !quotaResponse.buckets.isEmpty else {
-            throw ProviderError.decodingError("Empty buckets array")
-        }
+        let quotaResponse = try await GeminiQuotaAPI.fetchQuota(
+            accessToken: accessToken,
+            projectId: projectId,
+            session: session
+        )
 
         var modelBreakdown: [String: Double] = [:]
         var modelResetTimes: [String: Date] = [:]

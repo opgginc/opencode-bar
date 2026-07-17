@@ -3,18 +3,12 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/claude-version.sh"
+
 CLAUDE_USAGE_URL="https://api.anthropic.com/api/oauth/usage"
 CLAUDE_BETA_HEADER="${ANTHROPIC_OAUTH_BETA:-oauth-2025-04-20}"
-
-detect_claude_code_version() {
-    local claude_bin=""
-    claude_bin="$(command -v claude 2>/dev/null || true)"
-    [[ -n "$claude_bin" ]] || return 1
-    "$claude_bin" --version 2>/dev/null | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/'
-}
-
-DETECTED_CLAUDE_CODE_VERSION="$(detect_claude_code_version || true)"
-CLAUDE_CODE_VERSION="${ANTHROPIC_CLI_VERSION:-${DETECTED_CLAUDE_CODE_VERSION:-2.1.80}}"
+CLAUDE_CODE_VERSION="$(resolve_claude_code_version)"
 CLAUDE_USER_AGENT="${ANTHROPIC_CODE_USER_AGENT:-claude-code/${CLAUDE_CODE_VERSION}}"
 
 AUTH_SOURCE=""
