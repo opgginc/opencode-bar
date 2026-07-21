@@ -303,7 +303,9 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
                 }
 
                 logger.warning("Z.AI Coding Plan request failed with transient error on attempt \(attempt)/\(maxAttempts): \(error.localizedDescription)")
-                try await Task.sleep(nanoseconds: UInt64(attempt) * 500_000_000)
+                let retryDelay = Self.retryDelayNanoseconds(for: attempt)
+                logger.debug("Z.AI Coding Plan retry \(attempt)/\(maxAttempts) scheduled after \(retryDelay)ns")
+                try await Task.sleep(nanoseconds: retryDelay)
             }
         }
 
@@ -333,7 +335,15 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
         return data
     }
 
+    static func retryDelayNanoseconds(for attempt: Int, jitter: UInt64 = UInt64.random(in: 0...250_000_000)) -> UInt64 {
+        UInt64(attempt) * 500_000_000 + jitter
+    }
+
     static func isTransientNetworkError(_ error: Error) -> Bool {
+        if isTransientURLError(error as NSError) {
+            return true
+        }
+
         if let providerError = error as? ProviderError {
             switch providerError {
             case .networkError(let message):
@@ -343,12 +353,31 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
             }
         }
 
-        let nsError = error as NSError
-        guard nsError.domain == NSURLErrorDomain else { return false }
+        return false
+    }
 
-        switch nsError.code {
+    private static func isTransientURLError(_ error: NSError) -> Bool {
+        var currentError: NSError? = error
+
+        for _ in 0..<8 {
+            guard let current = currentError else { return false }
+
+            if current.domain == NSURLErrorDomain,
+               isTransientURLErrorCode(current.code) {
+                return true
+            }
+
+            currentError = current.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+
+        return false
+    }
+
+    private static func isTransientURLErrorCode(_ code: Int) -> Bool {
+        switch code {
         case NSURLErrorNetworkConnectionLost,
              NSURLErrorTimedOut,
+             NSURLErrorNotConnectedToInternet,
              NSURLErrorCannotConnectToHost,
              NSURLErrorCannotFindHost,
              NSURLErrorDNSLookupFailed,

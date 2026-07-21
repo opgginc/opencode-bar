@@ -221,6 +221,9 @@ final class CodexProvider: ProviderProtocol {
 
         private static func deduplicate(_ limits: [SelfServiceLimit]) -> [SelfServiceLimit] {
             var seen = Set<LimitKey>()
+            // The selected source is either the canonical account-level upstream list
+            // or the local fallback list. Preserve its JSON order so the first entry
+            // remains the service-provided primary value for a duplicate window.
             return limits.filter { limit in
                 seen.insert(LimitKey(limit: limit)).inserted
             }
