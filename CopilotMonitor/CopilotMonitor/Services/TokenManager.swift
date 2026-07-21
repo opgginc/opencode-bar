@@ -4473,7 +4473,7 @@ final class TokenManager: @unchecked Sendable {
     /// Public Google OAuth client credentials for CLI/installed apps
     /// These are NOT secrets - they are public client IDs/secrets for installed applications
     /// See: https://developers.google.com/identity/protocols/oauth2/native-app
-    private static let geminiClientId = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+    static let geminiClientId = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
     private static let geminiClientSecret = "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"
     
     /// OAuth client used by jenslys/opencode-gemini-auth plugin

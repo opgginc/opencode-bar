@@ -250,24 +250,24 @@ final class GeminiCLIProvider: ProviderProtocol {
     private func fetchQuotaForAccount(account: GeminiAuthAccount) async throws -> GeminiAccountQuota {
         let accountIndex = account.index
         let configuredProjectId = account.projectId.trimmingCharacters(in: .whitespacesAndNewlines)
-        let projectId = configuredProjectId.isEmpty ? "default" : configuredProjectId
+        guard !configuredProjectId.isEmpty else {
+            logger.error("Gemini CLI: Missing project ID for account #\(accountIndex + 1); quota fetch rejected")
+            throw ProviderError.authenticationFailed("Missing project ID for account #\(accountIndex + 1)")
+        }
 
         var refreshedAccessToken = await tokenManager.refreshGeminiAccessToken(
             refreshToken: account.refreshToken,
             clientId: account.clientId,
             clientSecret: account.clientSecret
         )
-        if refreshedAccessToken == nil {
+        if refreshedAccessToken == nil,
+           Self.shouldRetryWithGeminiCLIClient(primaryClientID: account.clientId) {
             logger.info("Gemini CLI: Primary OAuth client failed for account #\(accountIndex + 1); trying Gemini CLI OAuth client fallback")
             refreshedAccessToken = await tokenManager.refreshGeminiAccessToken(refreshToken: account.refreshToken)
         }
 
         guard let accessToken = refreshedAccessToken else {
             throw ProviderError.authenticationFailed("Unable to refresh token for account #\(accountIndex + 1)")
-        }
-
-        if configuredProjectId.isEmpty {
-            logger.info("Gemini CLI: Missing project ID for account #\(accountIndex + 1); using default project fallback")
         }
 
         let resolvedEmail = await resolveGeminiAccountEmail(primaryEmail: account.email, accessToken: accessToken)
@@ -283,8 +283,8 @@ final class GeminiCLIProvider: ProviderProtocol {
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // project parameter improves model coverage; use a default fallback when auth storage omits it.
-        request.httpBody = "{\"project\":\"\(projectId)\"}".data(using: .utf8)
+        // project parameter is required to get all models including gemini-3 variants.
+        request.httpBody = "{\"project\":\"\(configuredProjectId)\"}".data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
 
@@ -349,6 +349,10 @@ final class GeminiCLIProvider: ProviderProtocol {
             earliestReset: earliestReset,
             modelResetTimes: modelResetTimes
         )
+    }
+
+    static func shouldRetryWithGeminiCLIClient(primaryClientID: String) -> Bool {
+        primaryClientID != TokenManager.geminiClientId
     }
 
     private func resolveGeminiAccountEmail(primaryEmail: String?, accessToken: String) async -> String {

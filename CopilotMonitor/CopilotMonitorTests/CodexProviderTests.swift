@@ -22,6 +22,57 @@ final class CodexProviderTests: XCTestCase {
     func testProviderType() {
         XCTAssertEqual(provider.type, .quotaBased)
     }
+
+    func testSelfServiceUsagePrefersAndDeduplicatesUpstreamLimits() throws {
+        let json = #"""
+        {
+          "limits": [
+            {
+              "limit_type": "requests",
+              "limit_window": "168h",
+              "max_value": 100,
+              "current_value": 90
+            }
+          ],
+          "upstream_limits": [
+            {
+              "limit_type": "requests",
+              "limit_window": "5h",
+              "max_value": 100,
+              "current_value": 10
+            },
+            {
+              "limit_type": "requests",
+              "limit_window": "5h",
+              "max_value": 100,
+              "current_value": 20
+            },
+            {
+              "limit_type": "requests",
+              "limit_window": "168h",
+              "max_value": 100,
+              "current_value": 30
+            }
+          ]
+        }
+        """#
+
+        let response = try JSONDecoder().decode(
+            CodexProvider.SelfServiceUsageResponse.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertEqual(response.limits.count, 2)
+        XCTAssertEqual(response.limits.map(\.limitWindow), ["5h", "168h"])
+        XCTAssertEqual(response.limits.map(\.currentValue), [10, 30])
+    }
+
+    func testConfigAPIKeySourceLabelDoesNotUseUnknownFallback() {
+        XCTAssertEqual(
+            provider.sourceSummary(["OpenCode Config (API Key)"], fallback: "Unknown"),
+            "OpenCode Config (API Key)"
+        )
+    }
     
     func testCodexFixtureDecoding() throws {
         let fixture = try loadFixture(named: "codex_response")

@@ -133,15 +133,21 @@ final class OpenCodeZenProviderTests: XCTestCase {
     }
 
     func testParseETimeSecondsParsesMinutesHoursAndDaysFormats() {
-        XCTAssertEqual(OpenCodeZenProvider.parseETimeSeconds("05:23"), 323)
-        XCTAssertEqual(OpenCodeZenProvider.parseETimeSeconds("01:02:03"), 3_723)
-        XCTAssertEqual(OpenCodeZenProvider.parseETimeSeconds("2-03:04:05"), 183_845)
+        let cases: [(String, Int?)] = [
+            ("03:14", 194),
+            ("01:02:03", 3_723),
+            ("2-01:05:30", 176_730)
+        ]
+
+        for (value, expected) in cases {
+            XCTAssertEqual(OpenCodeZenProvider.parseETimeSeconds(value), expected, "value: \(value)")
+        }
     }
 
     func testParseETimeSecondsReturnsNilForMalformedInput() {
-        XCTAssertNil(OpenCodeZenProvider.parseETimeSeconds("03"))
-        XCTAssertNil(OpenCodeZenProvider.parseETimeSeconds("garbage"))
-        XCTAssertNil(OpenCodeZenProvider.parseETimeSeconds(""))
+        for value in ["03", "garbage", ""] {
+            XCTAssertNil(OpenCodeZenProvider.parseETimeSeconds(value), "value: \(value)")
+        }
     }
 
     func testStaleOpenCodeStatsPIDsIncludesOnlyStaleOpenCodeStatsLines() {

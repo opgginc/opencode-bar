@@ -186,7 +186,7 @@ final class CodexProvider: ProviderProtocol {
         let credits: CreditsInfo?
     }
 
-    private struct SelfServiceUsageResponse: Decodable {
+    struct SelfServiceUsageResponse: Decodable {
         let requestCount: Int?
         let totalTokens: Int?
         let cachedInputTokens: Int?
@@ -210,11 +210,36 @@ final class CodexProvider: ProviderProtocol {
             totalCostUSD = try container.decodeIfPresent(Double.self, forKey: .totalCostUSD)
             let localLimits = (try? container.decodeIfPresent([SelfServiceLimit].self, forKey: .limits)) ?? []
             let upstreamLimits = (try? container.decodeIfPresent([SelfServiceLimit].self, forKey: .upstreamLimits)) ?? []
-            limits = localLimits + upstreamLimits
+            let selectedLimits = upstreamLimits.isEmpty ? localLimits : upstreamLimits
+            let uniqueLimits = Self.deduplicate(selectedLimits)
+            limits = uniqueLimits
+
+            logger.debug(
+                "Codex self-service selected \(upstreamLimits.isEmpty ? "local" : "upstream") limits: \(selectedLimits.count) input, \(uniqueLimits.count) unique"
+            )
+        }
+
+        private static func deduplicate(_ limits: [SelfServiceLimit]) -> [SelfServiceLimit] {
+            var seen = Set<LimitKey>()
+            return limits.filter { limit in
+                seen.insert(LimitKey(limit: limit)).inserted
+            }
+        }
+
+        private struct LimitKey: Hashable {
+            let limitWindow: String?
+            let modelFilter: String?
+            let limitType: String?
+
+            init(limit: SelfServiceLimit) {
+                limitWindow = limit.limitWindow
+                modelFilter = limit.modelFilter
+                limitType = limit.limitType
+            }
         }
     }
 
-    private struct SelfServiceLimit: Decodable {
+    struct SelfServiceLimit: Decodable {
         let limitType: String?
         let limitWindow: String?
         let maxValue: Double?
@@ -403,7 +428,7 @@ final class CodexProvider: ProviderProtocol {
         return merged
     }
 
-    private func sourceSummary(_ labels: [String], fallback: String) -> String {
+    func sourceSummary(_ labels: [String], fallback: String) -> String {
         let merged = mergeSourceLabels(labels, [])
         if merged.isEmpty {
             return fallback

@@ -1,5 +1,4 @@
 import Foundation
-import Foundation
 import os.log
 
 private let logger = Logger(subsystem: "com.opencodeproviders", category: "ZaiCodingPlanProvider")
@@ -299,7 +298,7 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
             } catch {
                 lastError = error
 
-                guard attempt < maxAttempts, isTransientNetworkError(error) else {
+                guard attempt < maxAttempts, Self.isTransientNetworkError(error) else {
                     throw error
                 }
 
@@ -334,7 +333,7 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
         return data
     }
 
-    private func isTransientNetworkError(_ error: Error) -> Bool {
+    static func isTransientNetworkError(_ error: Error) -> Bool {
         if let providerError = error as? ProviderError {
             switch providerError {
             case .networkError(let message):
