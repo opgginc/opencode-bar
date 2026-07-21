@@ -7,6 +7,40 @@ private let logger = Logger(subsystem: "com.opencodeproviders", category: "Claud
 enum ClaudeOAuthRequestPolicy {
     static let betaHeader = "oauth-2025-04-20"
     static let defaultClaudeCodeVersion = "2.1.80"
+    private static let installedVersionCache = InstalledVersionCache()
+
+    private actor InstalledVersionCache {
+        private enum Value {
+            case resolved(String?)
+        }
+
+        private var cachedValue: Value?
+        private var discoveryTask: Task<String?, Never>?
+
+        func value(discover: @escaping @Sendable () async -> String?) async -> String? {
+            if case let .resolved(version)? = cachedValue {
+                logger.debug("Using cached Claude CLI version discovery result")
+                return version
+            }
+
+            if let discoveryTask {
+                return await discoveryTask.value
+            }
+
+            let discoveryTask = Task { await discover() }
+            self.discoveryTask = discoveryTask
+            let version = await discoveryTask.value
+            cachedValue = .resolved(version)
+            self.discoveryTask = nil
+            logger.debug("Cached Claude CLI version discovery result: found=\(version != nil)")
+            return version
+        }
+
+        func reset() {
+            cachedValue = nil
+            discoveryTask = nil
+        }
+    }
 
     static func codeVersion(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -39,11 +73,19 @@ enum ClaudeOAuthRequestPolicy {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
     ) async -> String? {
-        guard let executableURL = findClaudeExecutable(environment: environment, fileManager: fileManager) else {
-            return nil
-        }
+        await installedVersionCache.value {
+            guard let executableURL = findClaudeExecutable(environment: environment, fileManager: fileManager) else {
+                logger.debug("Claude CLI version discovery found no executable")
+                return nil
+            }
 
-        return await runVersionCommand(executableURL: executableURL)
+            logger.debug("Claude CLI version discovery running discovered executable")
+            return await runVersionCommand(executableURL: executableURL)
+        }
+    }
+
+    static func resetInstalledClaudeCodeVersionCacheForTesting() async {
+        await installedVersionCache.reset()
     }
 
     private static func findClaudeExecutable(
@@ -94,8 +136,13 @@ enum ClaudeOAuthRequestPolicy {
         return version
     }
 
+    private struct VersionCommandResult {
+        let output: String
+        let terminationStatus: Int32
+    }
+
     private static func runVersionCommand(executableURL: URL) async -> String? {
-        await withTaskGroup(of: String?.self) { group in
+        await withTaskGroup(of: VersionCommandResult?.self) { group in
             let process = Process()
             let pipe = Pipe()
             process.executableURL = executableURL
@@ -107,7 +154,10 @@ enum ClaudeOAuthRequestPolicy {
                 await withCheckedContinuation { continuation in
                     process.terminationHandler = { _ in
                         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                        continuation.resume(returning: String(data: data, encoding: .utf8))
+                        continuation.resume(returning: VersionCommandResult(
+                            output: String(data: data, encoding: .utf8) ?? "",
+                            terminationStatus: process.terminationStatus
+                        ))
                     }
 
                     do {
@@ -123,17 +173,23 @@ enum ClaudeOAuthRequestPolicy {
                 return nil
             }
 
-            let output: String?
+            let result: VersionCommandResult?
             if let firstResult = await group.next() {
-                output = firstResult
+                result = firstResult
             } else {
-                output = nil
+                result = nil
             }
             group.cancelAll()
             if process.isRunning {
                 process.terminate()
             }
-            return output.flatMap(versionFromCommandOutput)
+
+            guard let result else { return nil }
+            guard result.terminationStatus == 0 else {
+                logger.debug("Claude CLI version command failed with status \(result.terminationStatus)")
+                return nil
+            }
+            return versionFromCommandOutput(result.output)
         }
     }
 

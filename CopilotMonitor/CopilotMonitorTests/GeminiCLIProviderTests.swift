@@ -173,6 +173,30 @@ final class GeminiCLIProviderTests: XCTestCase {
         XCTAssertEqual(response.buckets.last?.modelId, "gemini-3-pro-preview")
     }
 
+    func testOAuthRefreshUsesTenSecondRequestTimeout() async throws {
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.timeoutInterval, 10, accuracy: 0.001)
+            let url = try XCTUnwrap(request.url)
+            let response = try XCTUnwrap(
+                HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            )
+            return (response, Data(#"{"access_token":"test-access-token","expires_in":3600}"#.utf8))
+        }
+
+        let accessToken = try await TokenManager.shared.requestGeminiAccessToken(
+            refreshToken: "test-refresh-token",
+            clientId: "account-client",
+            clientSecret: "account-secret",
+            session: session
+        )
+
+        XCTAssertEqual(accessToken, "test-access-token")
+    }
+
     func testOAuthRefreshPreservesInvalidGrantWithoutRetry() async throws {
         let session = makeSession()
         defer { session.invalidateAndCancel() }

@@ -22,7 +22,35 @@ normalize_claude_code_version() {
 detect_claude_code_version() {
     local claude_bin=""
     local output=""
-    claude_bin="$(command -v claude 2>/dev/null || true)"
+
+    if [[ -n "${CLAUDE_CODE_PATH:-}" && -x "$CLAUDE_CODE_PATH" ]]; then
+        claude_bin="$CLAUDE_CODE_PATH"
+    else
+        local path_entry=""
+        local candidate=""
+        local -a path_entries=()
+        IFS=':' read -r -a path_entries <<< "${PATH:-}"
+        for path_entry in "${path_entries[@]}"; do
+            candidate="$path_entry/claude"
+            if [[ -x "$candidate" ]]; then
+                claude_bin="$candidate"
+                break
+            fi
+        done
+
+        if [[ -z "$claude_bin" ]]; then
+            for candidate in \
+                "$HOME/.local/bin/claude" \
+                "/opt/homebrew/bin/claude" \
+                "/usr/local/bin/claude"; do
+                if [[ -x "$candidate" ]]; then
+                    claude_bin="$candidate"
+                    break
+                fi
+            done
+        fi
+    fi
+
     [[ -n "$claude_bin" ]] || return 1
 
     output="$("$claude_bin" --version 2>/dev/null)" || return 1

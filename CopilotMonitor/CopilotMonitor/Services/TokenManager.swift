@@ -4583,6 +4583,7 @@ final class TokenManager: @unchecked Sendable {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 10
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = bodyString.data(using: .utf8)
 

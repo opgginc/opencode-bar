@@ -34,6 +34,15 @@ unset ANTHROPIC_CLI_VERSION
 write_fake_claude 'printf "%s\n" "2.1.199 (Claude Code)"'
 assert_version "2.1.199" "official Claude Code output"
 
+CONFIGURED_BIN="$TEMP_DIR/configured-claude"
+printf '%s\n%s\n' '#!/bin/bash' 'printf "%s\n" "3.0.0 (Claude Code)"' > "$CONFIGURED_BIN"
+chmod +x "$CONFIGURED_BIN"
+configured_version="$(CLAUDE_CODE_PATH="$CONFIGURED_BIN" PATH="$FAKE_BIN:/usr/bin:/bin" resolve_claude_code_version)"
+if [[ "$configured_version" != "3.0.0" ]]; then
+    echo "FAIL: CLAUDE_CODE_PATH must take precedence over PATH (got $configured_version)" >&2
+    exit 1
+fi
+
 write_fake_claude 'printf "%s\n" "Claude Code 2.1.199"'
 assert_version "$CLAUDE_DEFAULT_CODE_VERSION" "prefixed output fallback"
 

@@ -177,6 +177,97 @@ final class ClaudeProviderTests: XCTestCase {
     func testClaudeOAuthRequestPolicyRejectsUnicodeDigits() {
         XCTAssertNil(ClaudeOAuthRequestPolicy.versionFromCommandOutput("٢.١.١٩٩"))
     }
+
+    func testClaudeOAuthRequestPolicyRejectsVersionOutputFromFailedCommand() async throws {
+        let executableURL = try makeClaudeExecutable(
+            script: "#!/bin/sh\nprintf '%s\\n' '2.1.199 (Claude Code)'\nexit 1\n"
+        )
+        defer { try? FileManager.default.removeItem(at: executableURL.deletingLastPathComponent()) }
+
+        await ClaudeOAuthRequestPolicy.resetInstalledClaudeCodeVersionCacheForTesting()
+        let version = await ClaudeOAuthRequestPolicy.installedClaudeCodeVersion(
+            environment: ["CLAUDE_CODE_PATH": executableURL.path]
+        )
+        await ClaudeOAuthRequestPolicy.resetInstalledClaudeCodeVersionCacheForTesting()
+
+        XCTAssertNil(version)
+    }
+
+    func testClaudeOAuthRequestPolicyCachesUnavailableDiscoveryResult() async throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let executableURL = temporaryDirectory.appendingPathComponent("claude")
+        let fileManager = ClaudeExecutableFileManager()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        await ClaudeOAuthRequestPolicy.resetInstalledClaudeCodeVersionCacheForTesting()
+        let firstVersion = await ClaudeOAuthRequestPolicy.installedClaudeCodeVersion(
+            environment: ["CLAUDE_CODE_PATH": executableURL.path],
+            fileManager: fileManager
+        )
+
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        try "#!/bin/sh\nprintf '%s\\n' '2.1.199 (Claude Code)'\n"
+            .write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
+        fileManager.executablePaths = [executableURL.path]
+
+        let secondVersion = await ClaudeOAuthRequestPolicy.installedClaudeCodeVersion(
+            environment: ["CLAUDE_CODE_PATH": executableURL.path],
+            fileManager: fileManager
+        )
+        await ClaudeOAuthRequestPolicy.resetInstalledClaudeCodeVersionCacheForTesting()
+
+        XCTAssertNil(firstVersion)
+        XCTAssertNil(secondVersion)
+    }
+
+    func testClaudeOAuthRequestPolicyCachesDiscoveredVersion() async throws {
+        let executableURL = try makeClaudeExecutable(
+            script: "#!/bin/sh\nprintf '%s\\n' '2.1.199 (Claude Code)'\n"
+        )
+        let fileManager = ClaudeExecutableFileManager(executablePaths: [executableURL.path])
+        defer { try? FileManager.default.removeItem(at: executableURL.deletingLastPathComponent()) }
+
+        await ClaudeOAuthRequestPolicy.resetInstalledClaudeCodeVersionCacheForTesting()
+        let firstVersion = await ClaudeOAuthRequestPolicy.installedClaudeCodeVersion(
+            environment: ["CLAUDE_CODE_PATH": executableURL.path],
+            fileManager: fileManager
+        )
+        fileManager.executablePaths = []
+        let secondVersion = await ClaudeOAuthRequestPolicy.installedClaudeCodeVersion(
+            environment: ["CLAUDE_CODE_PATH": executableURL.path],
+            fileManager: fileManager
+        )
+        await ClaudeOAuthRequestPolicy.resetInstalledClaudeCodeVersionCacheForTesting()
+
+        XCTAssertEqual(firstVersion, "2.1.199")
+        XCTAssertEqual(secondVersion, "2.1.199")
+    }
+
+    private final class ClaudeExecutableFileManager: FileManager, @unchecked Sendable {
+        var executablePaths: Set<String>
+
+        init(executablePaths: Set<String> = []) {
+            self.executablePaths = executablePaths
+            super.init()
+        }
+
+        override func isExecutableFile(atPath path: String) -> Bool {
+            executablePaths.contains(path)
+        }
+    }
+
+    private func makeClaudeExecutable(script: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let executableURL = directory.appendingPathComponent("claude")
+
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try script.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
+        return executableURL
+    }
     
     private func loadFixture(named: String) -> Data {
         let bundle = Bundle(for: type(of: self))
