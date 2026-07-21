@@ -1,5 +1,5 @@
 import XCTest
-@testable import CopilotMonitor
+@testable import OpenCode_Bar
 
 final class AntigravityProviderVarintTests: XCTestCase {
     private let provider = AntigravityProvider()
@@ -63,6 +63,33 @@ final class AntigravityProviderVarintTests: XCTestCase {
     func testParseProtobufMessageThrowsOnMalformedLengthDelimitedField() {
         let payload = Data([0x12, 0x05, 0x61])
         XCTAssertThrowsError(try provider.parseProtobufMessage(payload))
+    }
+
+    func testFallbackAccountSelectionSkipsStalePreferredAccount() throws {
+        let staleAccount = AntigravityAccounts.Account(
+            email: "stale@example.com",
+            refreshToken: " ",
+            projectId: nil,
+            managedProjectId: nil,
+            enabled: true
+        )
+        let validAccount = AntigravityAccounts.Account(
+            email: "valid@example.com",
+            refreshToken: "valid-refresh-token",
+            projectId: nil,
+            managedProjectId: nil,
+            enabled: true
+        )
+        let accounts = AntigravityAccounts(
+            version: 4,
+            accounts: [staleAccount, validAccount],
+            activeIndex: 0,
+            activeIndexByFamily: ["gemini": 0]
+        )
+
+        let selected = try XCTUnwrap(AntigravityProvider.selectFallbackAccount(from: accounts))
+        XCTAssertEqual(selected.email, "valid@example.com")
+        XCTAssertEqual(selected.refreshToken, "valid-refresh-token")
     }
 
     private func assertVarintRoundTrip(_ expected: UInt64) throws {

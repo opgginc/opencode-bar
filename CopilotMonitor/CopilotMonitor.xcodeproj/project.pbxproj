@@ -10,6 +10,7 @@
 		0B6CF8BEB936A2055F19AA8C /* CodexProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76783C44AA2329AE3FA7E981 /* CodexProvider.swift */; };
 		0EA5E7A5BCD47582D6C2175B /* TokenManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF0C48368166F3AD0C79F92 /* TokenManager.swift */; };
 		23AA5FD37F2062EACCA79F50 /* GeminiCLIProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B63B85E0F2A8C591D7E26AE2 /* GeminiCLIProviderTests.swift */; };
+		ANTIGRAVITYTESTBF11111 /* AntigravityProviderVarintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANTIGRAVITYTESTFR11111 /* AntigravityProviderVarintTests.swift */; };
 		27A0B56ADAC5B75A3270F90D /* CopilotProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4AE672516E564CC52739BD9 /* CopilotProvider.swift */; };
 		283348F92F313096004DADE1 /* ProviderResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = PR2222222222222222222222 /* ProviderResult.swift */; };
 		283348FA2F313096004DADE1 /* UsageHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E44444444444444444444444 /* UsageHistory.swift */; };
@@ -186,6 +187,7 @@
 		AD0CA52627AF05BD67B56E /* StatusBarIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarIconView.swift; sourceTree = "<group>"; };
 		AM2222222222222222222222 /* AppMigrationHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMigrationHelper.swift; sourceTree = "<group>"; };
 		B63B85E0F2A8C591D7E26AE2 /* GeminiCLIProviderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GeminiCLIProviderTests.swift; sourceTree = "<group>"; };
+		ANTIGRAVITYTESTFR11111 /* AntigravityProviderVarintTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityProviderVarintTests.swift; sourceTree = "<group>"; };
 		BE39D5663A7ABADC7E54B91D /* ProviderProtocol.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProviderProtocol.swift; sourceTree = "<group>"; };
 		C1C7C9FDB4600114F02B2915 /* MenuDesignToken.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuDesignToken.swift; sourceTree = "<group>"; };
 		C8493409A9188CFF5B73D5B3 /* MenuDesignTokenTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuDesignTokenTests.swift; sourceTree = "<group>"; };
@@ -445,6 +447,7 @@
 				T22222222222222222222222 /* ProviderUsageTests.swift */,
 				TOOOOOOOOOOOOOOOOOOOOOOO /* Fixtures */,
 				B63B85E0F2A8C591D7E26AE2 /* GeminiCLIProviderTests.swift */,
+				ANTIGRAVITYTESTFR11111 /* AntigravityProviderVarintTests.swift */,
 				ED35D8BD06A436306085737D /* CopilotProviderTests.swift */,
 				OR3333333333333333333333 /* OpenRouterProviderTests.swift */,
 				2D2B4000E33060BA5E00351B /* DependencyTests.swift */,
@@ -704,6 +707,7 @@
 			files = (
 				T11111111111111111111111 /* ProviderUsageTests.swift in Sources */,
 				23AA5FD37F2062EACCA79F50 /* GeminiCLIProviderTests.swift in Sources */,
+				ANTIGRAVITYTESTBF11111 /* AntigravityProviderVarintTests.swift in Sources */,
 				632E52F6050FAD5CAF928E36 /* CopilotProviderTests.swift in Sources */,
 				OR4444444444444444444444 /* OpenRouterProviderTests.swift in Sources */,
 				668B6906C95903D51823808A /* DependencyTests.swift in Sources */,

@@ -591,7 +591,7 @@ struct AntigravityAccounts: Codable {
 }
 
 /// Auth source types for Gemini CLI token discovery
-enum GeminiAuthSource {
+enum GeminiAuthSource: Equatable {
     /// NoeFabris/opencode-antigravity-auth (~/.config/opencode/antigravity-accounts.json)
     case antigravity
     /// jenslys/opencode-gemini-auth (OpenCode auth.json google.oauth)
@@ -612,6 +612,77 @@ struct GeminiAuthAccount {
     let clientId: String
     let clientSecret: String
     let source: GeminiAuthSource
+}
+
+enum GeminiProjectPolicy {
+    static let fallbackProjectId = "default"
+
+    static func resolve(primary: String?, fallback: String? = nil) -> String {
+        firstNonEmpty([primary, fallback]) ?? fallbackProjectId
+    }
+
+    static func resolveStandalone(
+        projectId: String?,
+        quotaProjectId: String?,
+        environmentProjectId: String?
+    ) -> String {
+        firstNonEmpty([projectId, quotaProjectId, environmentProjectId]) ?? fallbackProjectId
+    }
+
+    private static func firstNonEmpty(_ candidates: [String?]) -> String? {
+        candidates.lazy.compactMap { candidate in
+            let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }.first
+    }
+}
+
+enum GeminiOAuthRefreshError: LocalizedError, Equatable {
+    case invalidResponse
+    case rejected(statusCode: Int, code: String?, message: String?)
+    case invalidTokenResponse
+    case transport(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "Invalid OAuth response"
+        case .rejected(let statusCode, let code, let message):
+            let detail = message ?? code ?? "Unknown OAuth error"
+            return "OAuth token refresh returned HTTP \(statusCode): \(detail)"
+        case .invalidTokenResponse:
+            return "OAuth token response did not contain a valid access token"
+        case .transport(let message):
+            return "OAuth token refresh failed: \(message)"
+        }
+    }
+
+    var isClientMismatch: Bool {
+        guard case .rejected(let statusCode, let code, _) = self,
+              let normalizedCode = code?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return false
+        }
+
+        switch (statusCode, normalizedCode) {
+        case (400, "invalid_client"),
+             (400, "unauthorized_client"),
+             (401, "invalid_client"),
+             (401, "unauthorized_client"),
+             (401, "unauthorized"):
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+enum GeminiOAuthRetryPolicy {
+    static func shouldRetryWithGeminiCLIClient(
+        source: GeminiAuthSource,
+        error: GeminiOAuthRefreshError
+    ) -> Bool {
+        source == .opencodeAuth && error.isClientMismatch
+    }
 }
 
 /// Minimal OpenCode auth payload for jenslys/opencode-gemini-auth stored under "google"
@@ -751,6 +822,16 @@ struct GeminiTokenResponse: Codable {
     let access_token: String
     let expires_in: Int
     let token_type: String?
+}
+
+private struct GeminiOAuthErrorResponse: Decodable {
+    let error: String?
+    let errorDescription: String?
+
+    enum CodingKeys: String, CodingKey {
+        case error
+        case errorDescription = "error_description"
+    }
 }
 
 private extension String {
@@ -4275,6 +4356,35 @@ final class TokenManager: @unchecked Sendable {
         return getAllGeminiAccounts().first?.email
     }
 
+    func standaloneGeminiAccount(
+        from oauthCreds: GeminiOAuthCreds,
+        authSource: String,
+        environmentProjectId: String?
+    ) -> GeminiAuthAccount? {
+        guard let refreshToken = normalizedNonEmpty(oauthCreds.refreshToken) else {
+            return nil
+        }
+
+        let identity = decodeGeminiIDTokenPayload(oauthCreds.idToken)
+        let client = geminiOAuthClientCredentials(for: normalizedNonEmpty(identity?.audience))
+        return GeminiAuthAccount(
+            index: 0,
+            accountId: normalizedNonEmpty(identity?.sub),
+            email: normalizedNonEmpty(identity?.email),
+            refreshToken: refreshToken,
+            projectId: GeminiProjectPolicy.resolveStandalone(
+                projectId: oauthCreds.projectId,
+                quotaProjectId: oauthCreds.quotaProjectId,
+                environmentProjectId: environmentProjectId
+            ),
+            authSource: authSource,
+            sourceLabels: [geminiSourceLabel(for: .oauthCreds)],
+            clientId: client.clientId,
+            clientSecret: client.clientSecret,
+            source: .oauthCreds
+        )
+    }
+
     /// Gets all Gemini accounts (NoeFabris/opencode-antigravity-auth + jenslys/opencode-gemini-auth)
     /// and enriches account identity metadata from ~/.gemini/oauth_creds.json when available.
     func getAllGeminiAccounts() -> [GeminiAuthAccount] {
@@ -4285,7 +4395,6 @@ final class TokenManager: @unchecked Sendable {
         let oauthCredsEmail = normalizedNonEmpty(oauthCredsPayload?.email)
         let oauthCredsRefreshToken = normalizedNonEmpty(oauthCreds?.refreshToken)
         let oauthCredsAudience = normalizedNonEmpty(oauthCredsPayload?.audience)
-        let oauthCredsClient = geminiOAuthClientCredentials(for: oauthCredsAudience)
         let geminiOAuthCredsSource = lastFoundGeminiOAuthCredsPath?.path ?? geminiOAuthCredsPath().path
 
         if oauthCreds != nil {
@@ -4342,12 +4451,12 @@ final class TokenManager: @unchecked Sendable {
                     return nil
                 }
 
-                let primaryProjectId = account.projectId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                let fallbackProjectId = account.managedProjectId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                let projectId = primaryProjectId.isEmpty ? fallbackProjectId : primaryProjectId
-                if projectId.isEmpty {
-                    logger.warning("Skipping Antigravity account at index \(index): missing project ID")
-                    return nil
+                let projectId = GeminiProjectPolicy.resolve(
+                    primary: account.projectId,
+                    fallback: account.managedProjectId
+                )
+                if projectId == GeminiProjectPolicy.fallbackProjectId {
+                    logger.info("Antigravity account at index \(index) has no project ID; using default project fallback")
                 }
 
                 let normalizedEmail = normalizedNonEmpty(account.email)
@@ -4390,30 +4499,17 @@ final class TokenManager: @unchecked Sendable {
         }
 
         if accounts.isEmpty,
-           let refreshToken = oauthCredsRefreshToken {
-            let standaloneProjectId = normalizedNonEmpty(oauthCreds?.projectId)
-                ?? normalizedNonEmpty(oauthCreds?.quotaProjectId)
-                ?? normalizedNonEmpty(ProcessInfo.processInfo.environment["GEMINI_PROJECT_ID"])
-
-            if let projectId = standaloneProjectId {
-                accounts.append(
-                    GeminiAuthAccount(
-                        index: 0,
-                        accountId: oauthCredsAccountId,
-                        email: oauthCredsEmail,
-                        refreshToken: refreshToken,
-                        projectId: projectId,
-                        authSource: geminiOAuthCredsSource,
-                        sourceLabels: [geminiSourceLabel(for: .oauthCreds)],
-                        clientId: oauthCredsClient.clientId,
-                        clientSecret: oauthCredsClient.clientSecret,
-                        source: .oauthCreds
-                    )
-                )
-                logger.info("Gemini oauth_creds.json used as standalone account source")
-            } else {
-                logger.info("Gemini oauth_creds.json found but project ID is missing; skipping standalone account source")
+           let oauthCreds,
+           let standaloneAccount = standaloneGeminiAccount(
+               from: oauthCreds,
+               authSource: geminiOAuthCredsSource,
+               environmentProjectId: ProcessInfo.processInfo.environment["GEMINI_PROJECT_ID"]
+           ) {
+            accounts.append(standaloneAccount)
+            if standaloneAccount.projectId == GeminiProjectPolicy.fallbackProjectId {
+                logger.info("Gemini oauth_creds.json has no project ID; using default project fallback")
             }
+            logger.info("Gemini oauth_creds.json used as standalone account source")
         }
 
         if accounts.isEmpty {
@@ -4453,22 +4549,23 @@ final class TokenManager: @unchecked Sendable {
     private static let geminiAuthPluginClientId = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
     private static let geminiAuthPluginClientSecret = "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"
 
-    /// Refreshes Gemini OAuth access token using refresh token
+    /// Requests a Gemini OAuth access token and preserves typed OAuth failures.
     /// - Parameters:
     ///   - refreshToken: The refresh token from Antigravity accounts
     ///   - clientId: Google OAuth client ID (default: public CLI client ID)
     ///   - clientSecret: Google OAuth client secret (default: public CLI client secret)
-    /// - Returns: New access token if successful, nil otherwise
-    func refreshGeminiAccessToken(
+    ///   - session: URL session used for the token request
+    /// - Returns: New access token if successful
+    func requestGeminiAccessToken(
         refreshToken: String,
         clientId: String = TokenManager.geminiClientId,
-        clientSecret: String = TokenManager.geminiClientSecret
-    ) async -> String? {
+        clientSecret: String = TokenManager.geminiClientSecret,
+        session: URLSession = .shared
+    ) async throws -> String {
         let endpoint = "https://oauth2.googleapis.com/token"
 
         guard let url = URL(string: endpoint) else {
-            logger.error("Invalid OAuth endpoint URL")
-            return nil
+            throw GeminiOAuthRefreshError.invalidResponse
         }
 
         // Build request body
@@ -4481,31 +4578,59 @@ final class TokenManager: @unchecked Sendable {
         ]
 
         guard let bodyString = components.query else {
-            logger.error("Failed to build request body")
-            return nil
+            throw GeminiOAuthRefreshError.invalidResponse
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 10
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = bodyString.data(using: .utf8)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                logger.error("Invalid response type")
-                return nil
+                throw GeminiOAuthRefreshError.invalidResponse
             }
 
             guard httpResponse.statusCode == 200 else {
-                logger.error("OAuth token refresh failed with status: \(httpResponse.statusCode)")
-                return nil
+                let payload = try? JSONDecoder().decode(GeminiOAuthErrorResponse.self, from: data)
+                throw GeminiOAuthRefreshError.rejected(
+                    statusCode: httpResponse.statusCode,
+                    code: payload?.error,
+                    message: payload?.errorDescription
+                )
             }
 
-            let tokenResponse = try JSONDecoder().decode(GeminiTokenResponse.self, from: data)
-            logger.info("Successfully refreshed Gemini access token")
+            guard let tokenResponse = try? JSONDecoder().decode(GeminiTokenResponse.self, from: data),
+                  !tokenResponse.access_token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw GeminiOAuthRefreshError.invalidTokenResponse
+            }
+
             return tokenResponse.access_token
+        } catch let error as GeminiOAuthRefreshError {
+            throw error
+        } catch {
+            throw GeminiOAuthRefreshError.transport(error.localizedDescription)
+        }
+    }
+
+    /// Refreshes Gemini OAuth access token using refresh token.
+    /// - Returns: New access token if successful, nil otherwise
+    func refreshGeminiAccessToken(
+        refreshToken: String,
+        clientId: String = TokenManager.geminiClientId,
+        clientSecret: String = TokenManager.geminiClientSecret
+    ) async -> String? {
+        do {
+            let accessToken = try await requestGeminiAccessToken(
+                refreshToken: refreshToken,
+                clientId: clientId,
+                clientSecret: clientSecret
+            )
+            logger.info("Successfully refreshed Gemini access token")
+            return accessToken
         } catch {
             logger.error("Failed to refresh Gemini token: \(error.localizedDescription)")
             return nil
