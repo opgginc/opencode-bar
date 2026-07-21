@@ -1214,6 +1214,18 @@ final class TokenManager: @unchecked Sendable {
         )
     }
 
+    func getOpenAIProviderAPIKeyWithSource() -> (key: String, source: String)? {
+        let config = readOpenCodeConfigJSON()
+        guard let config,
+              let apiKey = resolveConfigValue(
+                nestedString(in: config, path: ["provider", "openai", "options", "apiKey"])
+              ) else {
+            return nil
+        }
+
+        return (apiKey, lastFoundOpenCodeConfigPath?.path ?? "provider.openai.options.apiKey")
+    }
+
     private struct SearchAPIKeyLookupSource {
         let dictionary: [String: Any]?
         let sourcePath: String?
@@ -3648,6 +3660,21 @@ final class TokenManager: @unchecked Sendable {
     func getOpenAIAccounts() -> [OpenAIAuthAccount] {
         var accounts: [OpenAIAuthAccount] = []
 
+        if let configuredAPIKey = getOpenAIProviderAPIKeyWithSource() {
+            accounts.append(
+                OpenAIAuthAccount(
+                    accessToken: configuredAPIKey.key,
+                    accountId: nil,
+                    externalUsageAccountId: nil,
+                    email: nil,
+                    authSource: configuredAPIKey.source,
+                    sourceLabels: ["OpenCode Config (API Key)"],
+                    source: .opencodeAuth,
+                    credentialType: .apiKey
+                )
+            )
+        }
+
         if let auth = readOpenCodeAuth(),
            let access = auth.openai?.access,
            !access.isEmpty {
@@ -4446,7 +4473,7 @@ final class TokenManager: @unchecked Sendable {
     /// Public Google OAuth client credentials for CLI/installed apps
     /// These are NOT secrets - they are public client IDs/secrets for installed applications
     /// See: https://developers.google.com/identity/protocols/oauth2/native-app
-    private static let geminiClientId = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+    static let geminiClientId = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
     private static let geminiClientSecret = "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"
     
     /// OAuth client used by jenslys/opencode-gemini-auth plugin

@@ -43,6 +43,15 @@ final class GeminiCLIProviderTests: XCTestCase {
         let remainingPercentage = (minFraction ?? 0.0) * 100.0
         XCTAssertEqual(remainingPercentage, 80.0)
     }
+
+    func testGeminiCLIOAuthFallbackOnlyRunsForDifferentClient() {
+        XCTAssertFalse(
+            GeminiCLIProvider.shouldRetryWithGeminiCLIClient(primaryClientID: TokenManager.geminiClientId)
+        )
+        XCTAssertTrue(
+            GeminiCLIProvider.shouldRetryWithGeminiCLIClient(primaryClientID: "plugin-client-id")
+        )
+    }
     
     func testResetTimeParsingFromISO8601() throws {
         let fixture = try loadFixture(named: "gemini_response")

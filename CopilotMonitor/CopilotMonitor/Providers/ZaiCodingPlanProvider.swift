@@ -155,6 +155,7 @@ private struct ZaiToolUsageTotals: Decodable {
 final class ZaiCodingPlanProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .zaiCodingPlan
     let type: ProviderType = .quotaBased
+    let fetchTimeout: TimeInterval = 30.0
 
     private let tokenManager: TokenManager
     private let session: URLSession
@@ -288,6 +289,30 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
     }
 
     private func fetchData(url: URL, apiKey: String) async throws -> Data {
+        let maxAttempts = 3
+        var lastError: Error?
+
+        for attempt in 1...maxAttempts {
+            do {
+                return try await fetchDataOnce(url: url, apiKey: apiKey)
+            } catch {
+                lastError = error
+
+                guard attempt < maxAttempts, Self.isTransientNetworkError(error) else {
+                    throw error
+                }
+
+                logger.warning("Z.AI Coding Plan request failed with transient error on attempt \(attempt)/\(maxAttempts): \(error.localizedDescription)")
+                let retryDelay = Self.retryDelayNanoseconds(for: attempt)
+                logger.debug("Z.AI Coding Plan retry \(attempt)/\(maxAttempts) scheduled after \(retryDelay)ns")
+                try await Task.sleep(nanoseconds: retryDelay)
+            }
+        }
+
+        throw lastError ?? ProviderError.networkError("Z.AI Coding Plan request failed")
+    }
+
+    private func fetchDataOnce(url: URL, apiKey: String) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue(apiKey, forHTTPHeaderField: "Authorization")
@@ -308,6 +333,63 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
         }
 
         return data
+    }
+
+    static func retryDelayNanoseconds(for attempt: Int, jitter: UInt64 = UInt64.random(in: 0...250_000_000)) -> UInt64 {
+        UInt64(attempt) * 500_000_000 + jitter
+    }
+
+    static func isTransientNetworkError(_ error: Error) -> Bool {
+        if isTransientURLError(error as NSError) {
+            return true
+        }
+
+        if let providerError = error as? ProviderError {
+            switch providerError {
+            case .networkError(let message):
+                return message.contains("HTTP 5") || message.localizedCaseInsensitiveContains("tls")
+            default:
+                return false
+            }
+        }
+
+        return false
+    }
+
+    private static func isTransientURLError(_ error: NSError) -> Bool {
+        var currentError: NSError? = error
+
+        for _ in 0..<8 {
+            guard let current = currentError else { return false }
+
+            if current.domain == NSURLErrorDomain,
+               isTransientURLErrorCode(current.code) {
+                return true
+            }
+
+            currentError = current.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+
+        return false
+    }
+
+    private static func isTransientURLErrorCode(_ code: Int) -> Bool {
+        switch code {
+        case NSURLErrorNetworkConnectionLost,
+             NSURLErrorTimedOut,
+             NSURLErrorNotConnectedToInternet,
+             NSURLErrorCannotConnectToHost,
+             NSURLErrorCannotFindHost,
+             NSURLErrorDNSLookupFailed,
+             NSURLErrorSecureConnectionFailed,
+             NSURLErrorServerCertificateHasBadDate,
+             NSURLErrorServerCertificateUntrusted,
+             NSURLErrorServerCertificateHasUnknownRoot,
+             NSURLErrorServerCertificateNotYetValid:
+            return true
+        default:
+            return false
+        }
     }
 
     private func decodeResponse<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
