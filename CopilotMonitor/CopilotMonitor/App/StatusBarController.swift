@@ -11,7 +11,7 @@ private enum StatusBarMetricKind {
     case usage
 }
 
-private enum UsageDisplayWindowPriority: Int, CaseIterable {
+enum UsageDisplayWindowPriority: Int, CaseIterable {
     case weekly = 0
     case monthly = 1
     case daily = 2
@@ -19,7 +19,7 @@ private enum UsageDisplayWindowPriority: Int, CaseIterable {
     case fallback = 4
 }
 
-private struct UsagePercentCandidate {
+struct UsagePercentCandidate {
     let percent: Double
     let priority: UsageDisplayWindowPriority
 }
@@ -273,19 +273,24 @@ final class StatusBarController: NSObject {
         }
     }
 
-    override init() {
+    init(startBackgroundServices: Bool) {
         super.init()
         debugLog("StatusBarController init started")
 
-        TokenManager.shared.logDebugEnvironmentInfo()
-        debugLog("Environment debug info logged")
-
-        ensureBraveRefreshModeDefault()
+        if startBackgroundServices {
+            TokenManager.shared.logDebugEnvironmentInfo()
+            ensureBraveRefreshModeDefault()
+        }
 
         setupStatusItem()
         debugLog("setupStatusItem completed")
         setupMenu()
         debugLog("setupMenu completed")
+        // Menu tests must not launch credential discovery, network refreshes, or modal prompts.
+        guard startBackgroundServices else {
+            logger.debug("Menu initialized without background services")
+            return
+        }
         setupNotificationObservers()
         debugLog("setupNotificationObservers completed")
         startRefreshTimer()
@@ -959,7 +964,20 @@ final class StatusBarController: NSObject {
         return details.chutesMonthlyValueUsedPercent
     }
 
-    private func usagePercentCandidates(
+    /// Window percentages shown on the Z.AI top-level quota/provider row.
+    /// Unlike the status-bar candidate list (priority-ordered), the top-level
+    /// row shows every active window side by side, so the Lite weekly window
+    /// must be included here too — omitting it makes the row diverge from the
+    /// usage windows (5h session, weekly, MCP monthly).
+    private static func zaiCodingPlanTopLevelPercents(details: DetailedUsage?) -> [Double] {
+        [
+            details?.tokenUsagePercent,
+            details?.weeklyUsagePercent,
+            details?.mcpUsagePercent
+        ].compactMap { $0 }
+    }
+
+    static func usagePercentCandidates(
         identifier: ProviderIdentifier,
         usage: ProviderUsage,
         details: DetailedUsage?
@@ -1024,6 +1042,7 @@ final class StatusBarController: NSObject {
         case .zaiCodingPlan:
             add(details?.mcpUsagePercent, priority: .monthly)
             add(details?.tokenUsagePercent, priority: .hourly)
+            add(details?.weeklyUsagePercent, priority: .weekly)
         case .nanoGpt:
             add(details?.sevenDayUsage, priority: .weekly)
         case .chutes:
@@ -1046,7 +1065,7 @@ final class StatusBarController: NSObject {
         usage: ProviderUsage,
         details: DetailedUsage?
     ) -> Double? {
-        let candidates = usagePercentCandidates(identifier: identifier, usage: usage, details: details)
+        let candidates = Self.usagePercentCandidates(identifier: identifier, usage: usage, details: details)
         guard let selectedPriority = candidates.map(\.priority.rawValue).min() else {
             return nil
         }
@@ -1068,7 +1087,7 @@ final class StatusBarController: NSObject {
         // Main result candidates
         if case .quotaBased = result.usage {
             allCandidates.append(contentsOf:
-                usagePercentCandidates(identifier: identifier, usage: result.usage, details: result.details)
+                Self.usagePercentCandidates(identifier: identifier, usage: result.usage, details: result.details)
             )
         }
 
@@ -1077,7 +1096,7 @@ final class StatusBarController: NSObject {
             for account in accounts {
                 guard case .quotaBased = account.usage else { continue }
                 allCandidates.append(contentsOf:
-                    usagePercentCandidates(identifier: identifier, usage: account.usage, details: account.details)
+                    Self.usagePercentCandidates(identifier: identifier, usage: account.usage, details: account.details)
                 )
             }
         }
@@ -1103,7 +1122,7 @@ final class StatusBarController: NSObject {
             .max()
     }
 
-    private func usedPercentsForChangeDetection(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
+    static func usedPercentsForChangeDetection(identifier: ProviderIdentifier, result: ProviderResult) -> [Double] {
         var usedPercents: [Double] = []
 
         func appendMetrics(usage: ProviderUsage, details: DetailedUsage?) {
@@ -1126,6 +1145,7 @@ final class StatusBarController: NSObject {
                     details.cursorApiUsage,
                     details.tokenUsagePercent,
                     details.mcpUsagePercent,
+                    details.weeklyUsagePercent,
                     details.openCodeGoMonthlyUsage
                 ]
                 for percent in extraPercents {
@@ -1163,7 +1183,7 @@ final class StatusBarController: NSObject {
                 kind: .cost
             )
         case .quotaBased:
-            let cappedPercents = usedPercentsForChangeDetection(identifier: identifier, result: result).map { min($0, 100.0) }
+            let cappedPercents = Self.usedPercentsForChangeDetection(identifier: identifier, result: result).map { min($0, 100.0) }
             // Use aggregate quota usage for change detection so non-max windows/accounts can still trigger updates.
             let aggregatePercent = cappedPercents.isEmpty
                 ? min(max(result.usage.usagePercentage, 0.0), 100.0)
@@ -2144,7 +2164,7 @@ final class StatusBarController: NSObject {
                             ].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else if identifier == .zaiCodingPlan {
-                            let percents = [account.details?.tokenUsagePercent, account.details?.mcpUsagePercent].compactMap { $0 }
+                            let percents = Self.zaiCodingPlanTopLevelPercents(details: account.details)
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else if identifier == .chutes {
                             let percents = [Self.dailyPercentFromDetails(account.details), Self.chutesMonthlyPercentFromDetails(account.details)].compactMap { $0 }
@@ -2230,7 +2250,7 @@ final class StatusBarController: NSObject {
                         ].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else if identifier == .zaiCodingPlan {
-                        let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
+                        let percents = Self.zaiCodingPlanTopLevelPercents(details: result.details)
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else if identifier == .chutes {
                         let percents = [Self.dailyPercentFromDetails(result.details), Self.chutesMonthlyPercentFromDetails(result.details)].compactMap { $0 }
@@ -4258,22 +4278,33 @@ extension StatusBarController {
                 )
             ),
             .zaiCodingPlan: ProviderResult(
-                usage: .quotaBased(remaining: 1, entitlement: 100, overagePermitted: false),
+                usage: .quotaBased(remaining: 88, entitlement: 100, overagePermitted: false),
                 details: DetailedUsage(
-                    tokenUsagePercent: 99.0,
+                    tokenUsagePercent: 12.0,
                     tokenUsageReset: oneDayFromNow,
-                    tokenUsageUsed: 990_000,
-                    tokenUsageTotal: 1_000_000,
-                    mcpUsagePercent: 45.0,
+                    mcpUsagePercent: 2.0,
                     mcpUsageReset: oneDayFromNow,
-                    mcpUsageUsed: 45,
-                    mcpUsageTotal: 100,
-                    modelUsageTokens: 500_000,
-                    modelUsageCalls: 128,
-                    toolNetworkSearchCount: 42,
-                    toolWebReadCount: 15,
-                    toolZreadCount: 8
-                )
+                    weeklyUsagePercent: 1.0,
+                    weeklyUsageReset: sevenDaysFromNow
+                ),
+                accounts: [
+                    ProviderAccountResult(
+                        accountIndex: 0,
+                        accountId: "zai-session",
+                        usage: .quotaBased(remaining: 88, entitlement: 100, overagePermitted: false),
+                        details: DetailedUsage(
+                            tokenUsagePercent: 12.0,
+                            mcpUsagePercent: 2.0,
+                            weeklyUsagePercent: 1.0
+                        )
+                    ),
+                    ProviderAccountResult(
+                        accountIndex: 1,
+                        accountId: "zai-weekly",
+                        usage: .quotaBased(remaining: 99, entitlement: 100, overagePermitted: false),
+                        details: DetailedUsage(weeklyUsagePercent: 1.0)
+                    )
+                ]
             ),
             .geminiCLI: ProviderResult(
                 usage: .quotaBased(remaining: 85, entitlement: 100, overagePermitted: false),

@@ -16,6 +16,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Hosted XCTest runs exercise their own controllers without starting the live app.
+        guard NSClassFromString("XCTestCase") == nil else {
+            logger.debug("XCTest host launch: application services are disabled")
+            return
+        }
         if AppMigrationHelper.shared.checkAndMigrateIfNeeded() {
             return
         }
@@ -29,7 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         )
         
         configureAutomaticUpdates()
-        statusBarController = StatusBarController()
+        statusBarController = StatusBarController(startBackgroundServices: true)
         closeAllWindows()
     }
     

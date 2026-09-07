@@ -223,6 +223,12 @@ struct DetailedUsage {
     let mcpUsageReset: Date?
     let mcpUsageUsed: Int?
     let mcpUsageTotal: Int?
+    /// Second CREDIT_LIMIT window (lite tier): rolling 7-day weekly quota
+    /// (unit=6). Populated when a plan only reports CREDIT_LIMIT items.
+    let weeklyUsagePercent: Double?
+    let weeklyUsageReset: Date?
+    let weeklyUsageUsed: Int?
+    let weeklyUsageTotal: Int?
     let modelUsageTokens: Int?
     let modelUsageCalls: Int?
     let toolNetworkSearchCount: Int?
@@ -314,6 +320,10 @@ struct DetailedUsage {
         mcpUsageReset: Date? = nil,
         mcpUsageUsed: Int? = nil,
         mcpUsageTotal: Int? = nil,
+        weeklyUsagePercent: Double? = nil,
+        weeklyUsageReset: Date? = nil,
+        weeklyUsageUsed: Int? = nil,
+        weeklyUsageTotal: Int? = nil,
         modelUsageTokens: Int? = nil,
         modelUsageCalls: Int? = nil,
         toolNetworkSearchCount: Int? = nil,
@@ -400,6 +410,10 @@ struct DetailedUsage {
         self.mcpUsageReset = mcpUsageReset
         self.mcpUsageUsed = mcpUsageUsed
         self.mcpUsageTotal = mcpUsageTotal
+        self.weeklyUsagePercent = weeklyUsagePercent
+        self.weeklyUsageReset = weeklyUsageReset
+        self.weeklyUsageUsed = weeklyUsageUsed
+        self.weeklyUsageTotal = weeklyUsageTotal
         self.modelUsageTokens = modelUsageTokens
         self.modelUsageCalls = modelUsageCalls
         self.toolNetworkSearchCount = toolNetworkSearchCount
@@ -437,6 +451,7 @@ extension DetailedUsage: Codable {
         case authSource, authUsageSummary, authErrorMessage, geminiAccounts
         case tokenUsagePercent, tokenUsageReset, tokenUsageUsed, tokenUsageTotal
         case mcpUsagePercent, mcpUsageReset, mcpUsageUsed, mcpUsageTotal
+        case weeklyUsagePercent, weeklyUsageReset, weeklyUsageUsed, weeklyUsageTotal
         case modelUsageTokens, modelUsageCalls
         case toolNetworkSearchCount, toolWebReadCount, toolZreadCount
         case cursorAutoUsage, cursorAutoReset, cursorApiUsage, cursorApiReset
@@ -516,6 +531,10 @@ extension DetailedUsage: Codable {
         mcpUsageReset = try container.decodeIfPresent(Date.self, forKey: .mcpUsageReset)
         mcpUsageUsed = try container.decodeIfPresent(Int.self, forKey: .mcpUsageUsed)
         mcpUsageTotal = try container.decodeIfPresent(Int.self, forKey: .mcpUsageTotal)
+        weeklyUsagePercent = try container.decodeIfPresent(Double.self, forKey: .weeklyUsagePercent)
+        weeklyUsageReset = try container.decodeIfPresent(Date.self, forKey: .weeklyUsageReset)
+        weeklyUsageUsed = try container.decodeIfPresent(Int.self, forKey: .weeklyUsageUsed)
+        weeklyUsageTotal = try container.decodeIfPresent(Int.self, forKey: .weeklyUsageTotal)
         modelUsageTokens = try container.decodeIfPresent(Int.self, forKey: .modelUsageTokens)
         modelUsageCalls = try container.decodeIfPresent(Int.self, forKey: .modelUsageCalls)
         toolNetworkSearchCount = try container.decodeIfPresent(Int.self, forKey: .toolNetworkSearchCount)
@@ -605,6 +624,10 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(mcpUsageReset, forKey: .mcpUsageReset)
         try container.encodeIfPresent(mcpUsageUsed, forKey: .mcpUsageUsed)
         try container.encodeIfPresent(mcpUsageTotal, forKey: .mcpUsageTotal)
+        try container.encodeIfPresent(weeklyUsagePercent, forKey: .weeklyUsagePercent)
+        try container.encodeIfPresent(weeklyUsageReset, forKey: .weeklyUsageReset)
+        try container.encodeIfPresent(weeklyUsageUsed, forKey: .weeklyUsageUsed)
+        try container.encodeIfPresent(weeklyUsageTotal, forKey: .weeklyUsageTotal)
         try container.encodeIfPresent(modelUsageTokens, forKey: .modelUsageTokens)
         try container.encodeIfPresent(modelUsageCalls, forKey: .modelUsageCalls)
         try container.encodeIfPresent(toolNetworkSearchCount, forKey: .toolNetworkSearchCount)
@@ -748,13 +771,26 @@ struct JSONFormatter {
                 }
             }
 
-            // Z.AI: include both token and MCP usage percentages
+            // Z.AI: include token, MCP and (lite tier) weekly usage windows
             if identifier == .zaiCodingPlan {
                 if let tokenPercent = result.details?.tokenUsagePercent {
                     providerDict["tokenUsagePercent"] = tokenPercent
                 }
                 if let mcpPercent = result.details?.mcpUsagePercent {
                     providerDict["mcpUsagePercent"] = mcpPercent
+                }
+                if let weeklyPercent = result.details?.weeklyUsagePercent {
+                    providerDict["weeklyUsagePercent"] = weeklyPercent
+                }
+                if let weeklyUsed = result.details?.weeklyUsageUsed {
+                    providerDict["weeklyUsageUsed"] = weeklyUsed
+                }
+                if let weeklyTotal = result.details?.weeklyUsageTotal {
+                    providerDict["weeklyUsageTotal"] = weeklyTotal
+                }
+                if let weeklyReset = result.details?.weeklyUsageReset {
+                    let formatter = ISO8601DateFormatter()
+                    providerDict["weeklyResetsAt"] = formatter.string(from: weeklyReset)
                 }
             }
 
@@ -1043,10 +1079,14 @@ struct TableFormatter {
             if identifier == .grok, let monthlyUsage = result.details?.monthlyUsage {
                 return UsagePercentDisplayFormatter.string(from: monthlyUsage)
             }
-            // Z.AI: show both token and MCP percentages when both are available
+            // Z.AI: show token/MCP/weekly window percentages when available
             if identifier == .zaiCodingPlan {
-                let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
-                if percents.count == 2 {
+                let percents = [
+                    result.details?.tokenUsagePercent,
+                    result.details?.mcpUsagePercent,
+                    result.details?.weeklyUsagePercent
+                ].compactMap { $0 }
+                if percents.count >= 2 {
                     return percents.map { UsagePercentDisplayFormatter.string(from: $0) }.joined(separator: ",")
                 }
             }
@@ -1503,6 +1543,7 @@ extension DetailedUsage {
             || secondaryUsage != nil || secondaryReset != nil || primaryReset != nil
             || sparkUsage != nil || sparkReset != nil || sparkSecondaryUsage != nil || sparkSecondaryReset != nil || sparkWindowLabel != nil
             || creditsBalance != nil || planType != nil
+            || weeklyUsagePercent != nil || weeklyUsageReset != nil || weeklyUsageUsed != nil || weeklyUsageTotal != nil
             || chutesMonthlyValueCapUSD != nil || chutesMonthlyValueUsedUSD != nil || chutesMonthlyValueUsedPercent != nil
             || openCodeGoMonthlyUsage != nil || openCodeGoMonthlyReset != nil || openCodeGoModelCount != nil
             || extraUsageEnabled != nil

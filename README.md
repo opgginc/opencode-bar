@@ -51,7 +51,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 | **MiniMax Coding Plan** | Quota-based | 5h/weekly quotas, Anthropic-style dual-window submenu, OpenCode auth |
 | **OpenCode Go** | Quota-based | 5h/weekly/monthly usage windows, model API validation, OpenCode auth |
 | **Grok** | Quota-based | Monthly usage, reset time, email-scoped subscription settings, local session tokens |
-| **Z.AI Coding Plan** | Quota-based | Token/MCP quotas, model usage, tool usage (24h) |
+| **Z.AI Coding Plan** | Quota-based | Token/MCP and Lite session/weekly quotas, model usage, tool usage (24h) |
 | **Brave Search** | Quota-based | Monthly search quota, reset schedule |
 | **Tavily** | Quota-based | Monthly search quota, plan usage |
 | **Synthetic** | Quota-based | 5h usage limit, request limits, reset time |

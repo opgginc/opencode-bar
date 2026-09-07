@@ -70,6 +70,7 @@ jobs:
             | xcbeautify --renderer github-actions
 
       - name: Test (Debug)
+        timeout-minutes: 5
         run: |
           cd CopilotMonitor
           set -o pipefail
@@ -78,6 +79,9 @@ jobs:
             -scheme CopilotMonitor \
             -configuration Debug \
             -destination 'platform=macOS' \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 30 \
+            -maximum-test-execution-time-allowance 30 \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \

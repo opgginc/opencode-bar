@@ -739,6 +739,22 @@ extension StatusBarController {
                 submenu.addItem(item)
             }
 
+            // === Weekly Usage (CREDIT_LIMIT unit=6, lite tier) ===
+            if let weeklyUsage = details.weeklyUsagePercent {
+                let items = createUsageWindowRow(
+                    label: "Weekly (7d)",
+                    usagePercent: weeklyUsage,
+                    resetDate: details.weeklyUsageReset,
+                    windowHours: 24 * 7,
+                    isMonthly: false
+                )
+                items.forEach { submenu.addItem($0) }
+            }
+            if let weeklyUsed = details.weeklyUsageUsed, let weeklyTotal = details.weeklyUsageTotal {
+                let item = createLimitRow(label: "Weekly", used: Double(weeklyUsed), total: Double(weeklyTotal))
+                submenu.addItem(item)
+            }
+
             // === Last 24h stats (provider-specific, keep as-is) ===
             let numberFormatter = NumberFormatter()
             numberFormatter.numberStyle = .decimal

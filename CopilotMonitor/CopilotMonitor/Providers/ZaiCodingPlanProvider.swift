@@ -7,20 +7,40 @@ private struct ZaiEnvelope<T: Decodable>: Decodable {
     let data: T?
 }
 
-private struct ZaiQuotaLimitResponse: Decodable {
+struct ZaiQuotaLimitResponse: Decodable {
     let limits: [ZaiQuotaLimitItem]?
 }
 
-private struct ZaiQuotaLimitItem: Decodable {
+struct ZaiQuotaLimitItem: Decodable {
     let type: String
     let percentage: Double?
     let currentValue: Int?
     let total: Int?
     let nextResetTime: Int64?
+    /// CREDIT_LIMIT items (lite tier) report capacity as `usage` when `total`
+    /// is absent. `currentValue` remains the consumed amount, while
+    /// `remaining` is server-reported leftover metadata.
+    let usage: Int?
+    /// Optional duration metadata for identifying known CREDIT_LIMIT windows.
+    let number: Int?
+    let remaining: Int?
+    /// Window unit used to distinguish the plan's rolling windows:
+    /// unit=3 (hours) -> 5-hour session quota, unit=6 (weeks) -> 7-day weekly quota.
+    /// See docs.z.ai FAQ and third-party parsers (ClaudeBar ZaiUsageProbe, token-monitor).
+    let unit: Int?
+
+    /// Resolved total capacity: prefers `total` (TOKENS_LIMIT / TIME_LIMIT),
+    /// falls back to `usage` (CREDIT_LIMIT).
+    var resolvedTotal: Int? {
+        total ?? usage
+    }
 
     var computedPercentage: Double? {
-        guard let currentValue = currentValue, let total = total, total > 0 else { return nil }
-        return (Double(currentValue) / Double(total)) * 100
+        if let percentage {
+            return percentage
+        }
+        guard let currentValue, let resolvedTotal, resolvedTotal > 0 else { return nil }
+        return (Double(currentValue) / Double(resolvedTotal)) * 100
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -29,6 +49,10 @@ private struct ZaiQuotaLimitItem: Decodable {
         case currentValue
         case total
         case nextResetTime
+        case usage
+        case unit
+        case number
+        case remaining
     }
 
     init(from decoder: Decoder) throws {
@@ -38,6 +62,10 @@ private struct ZaiQuotaLimitItem: Decodable {
         currentValue = Self.decodeInt(container, forKey: .currentValue)
         total = Self.decodeInt(container, forKey: .total)
         nextResetTime = Self.decodeInt64(container, forKey: .nextResetTime)
+        usage = Self.decodeInt(container, forKey: .usage)
+        unit = Self.decodeInt(container, forKey: .unit)
+        number = Self.decodeInt(container, forKey: .number)
+        remaining = Self.decodeInt(container, forKey: .remaining)
     }
 
     private static func decodeDouble(_ container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) -> Double? {
@@ -159,16 +187,19 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
 
     private let tokenManager: TokenManager
     private let session: URLSession
+    /// Optional injected API key for tests; falls back to the credential store.
+    private let apiKeyOverride: String?
 
-    init(tokenManager: TokenManager = .shared, session: URLSession = .shared) {
+    init(tokenManager: TokenManager = .shared, session: URLSession = .shared, apiKey: String? = nil) {
         self.tokenManager = tokenManager
         self.session = session
+        self.apiKeyOverride = apiKey
     }
 
     func fetch() async throws -> ProviderResult {
         logger.info("Z.AI Coding Plan fetch started")
 
-        guard let apiKey = tokenManager.getZaiCodingPlanAPIKey() else {
+        guard let apiKey = apiKeyOverride ?? tokenManager.getZaiCodingPlanAPIKey() else {
             logger.error("Z.AI Coding Plan API key not found")
             throw ProviderError.authenticationFailed("Z.AI Coding Plan API key not available")
         }
@@ -179,18 +210,38 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
             throw ProviderError.decodingError("Missing quota limits")
         }
 
+        // Standard schema (unchanged): TOKENS_LIMIT -> 5h token window,
+        // TIME_LIMIT -> MCP window.
         let tokenLimit = limits.first { $0.type.uppercased() == "TOKENS_LIMIT" }
         let mcpLimit = limits.first { $0.type.uppercased() == "TIME_LIMIT" }
 
-        let tokenUsagePercent = tokenLimit?.percentage ?? tokenLimit?.computedPercentage
-        let mcpUsagePercent = mcpLimit?.percentage ?? mcpLimit?.computedPercentage
+        // New schema (lite tier): only CREDIT_LIMIT items are returned. `usage`
+        // supplies capacity when `total` is absent, `currentValue` remains the
+        // consumed amount, and `remaining` is server-reported leftover metadata.
+        // The two known rolling windows are identified by unit plus optional
+        // duration metadata: unit=3/number=5 is the 5-hour session quota, and
+        // unit=6/number=1 is the 7-day weekly quota. Missing number preserves
+        // compatibility with older responses; contradictory values are ignored.
+        let creditLimits = limits.filter { $0.type.uppercased() == "CREDIT_LIMIT" }
+        let isCreditOnlySchema = tokenLimit == nil && mcpLimit == nil
+        let creditSessionLimit = isCreditOnlySchema
+            ? creditLimits.first { $0.unit == 3 && ($0.number == nil || $0.number == 5) }
+            : nil
+        let creditWeeklyLimit = isCreditOnlySchema
+            ? creditLimits.first { $0.unit == 6 && ($0.number == nil || $0.number == 1) }
+            : nil
 
-        guard tokenUsagePercent != nil || mcpUsagePercent != nil else {
+        let tokenUsagePercent = tokenLimit?.percentage ?? tokenLimit?.computedPercentage
+            ?? creditSessionLimit?.percentage ?? creditSessionLimit?.computedPercentage
+        let mcpUsagePercent = mcpLimit?.percentage ?? mcpLimit?.computedPercentage
+        let weeklyUsagePercent = creditWeeklyLimit?.percentage ?? creditWeeklyLimit?.computedPercentage
+
+        guard tokenUsagePercent != nil || mcpUsagePercent != nil || weeklyUsagePercent != nil else {
             logger.error("Z.AI Coding Plan quota limits missing percentage values")
             throw ProviderError.decodingError("Missing usage percentages")
         }
 
-        let overallUsed = max(tokenUsagePercent ?? 0, mcpUsagePercent ?? 0)
+        let overallUsed = max(tokenUsagePercent ?? 0, mcpUsagePercent ?? 0, weeklyUsagePercent ?? 0)
         let remainingPercent = Int((100.0 - overallUsed).rounded())
 
         let usage = ProviderUsage.quotaBased(
@@ -226,13 +277,17 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
         let details = DetailedUsage(
             authSource: "~/.local/share/opencode/auth.json",
             tokenUsagePercent: tokenUsagePercent,
-            tokenUsageReset: dateFromMilliseconds(tokenLimit?.nextResetTime),
-            tokenUsageUsed: tokenLimit?.currentValue,
-            tokenUsageTotal: tokenLimit?.total,
+            tokenUsageReset: dateFromMilliseconds((tokenLimit ?? creditSessionLimit)?.nextResetTime),
+            tokenUsageUsed: (tokenLimit ?? creditSessionLimit)?.currentValue,
+            tokenUsageTotal: (tokenLimit ?? creditSessionLimit)?.resolvedTotal,
             mcpUsagePercent: mcpUsagePercent,
             mcpUsageReset: dateFromMilliseconds(mcpLimit?.nextResetTime),
             mcpUsageUsed: mcpLimit?.currentValue,
-            mcpUsageTotal: mcpLimit?.total,
+            mcpUsageTotal: mcpLimit?.resolvedTotal,
+            weeklyUsagePercent: weeklyUsagePercent,
+            weeklyUsageReset: dateFromMilliseconds(creditWeeklyLimit?.nextResetTime),
+            weeklyUsageUsed: creditWeeklyLimit?.currentValue,
+            weeklyUsageTotal: creditWeeklyLimit?.resolvedTotal,
             modelUsageTokens: modelUsageTotals?.totalTokensUsage,
             modelUsageCalls: modelUsageTotals?.totalModelCallCount,
             toolNetworkSearchCount: toolUsageTotals?.totalNetworkSearchCount,

@@ -47,7 +47,7 @@ final class CLIFormatterTests: XCTestCase {
     
     func testQuotaBasedOverage() {
         let usage = ProviderUsage.quotaBased(remaining: -10, entitlement: 100, overagePermitted: true)
-        XCTAssertEqual(usage.usagePercentage, 110.0)
+        XCTAssertEqual(usage.usagePercentage, 110.0, accuracy: 0.000_001)
     }
     
     // MARK: - ProviderUsage Limit Tests
@@ -428,6 +428,40 @@ final class CLIFormatterTests: XCTestCase {
                                      "Separator must be at least as wide as every data row. Row: \(row)")
         }
     }
+    // MARK: - Z.AI CREDIT_LIMIT (lite tier) formatter tests
+
+    private func zaiCreditOnlyResult() -> ProviderResult {
+        let details = DetailedUsage(
+            tokenUsagePercent: 1,
+            tokenUsageReset: Date(timeIntervalSince1970: 1786717056),
+            tokenUsageUsed: 27,
+            tokenUsageTotal: 2000,
+            weeklyUsagePercent: 1,
+            weeklyUsageReset: Date(timeIntervalSince1970: 1787301777),
+            weeklyUsageUsed: 27,
+            weeklyUsageTotal: 10000
+        )
+        let usage = ProviderUsage.quotaBased(remaining: 99, entitlement: 100, overagePermitted: false)
+        return ProviderResult(usage: usage, details: details)
+    }
+
+    /// Table must surface both the 5-hour session window and the weekly window.
+    func testZaiTableShowsBothCreditWindows() {
+        let output = TableFormatter.format([.zaiCodingPlan: zaiCreditOnlyResult()])
+        XCTAssertTrue(output.contains("1%,1%"), "Usage column should show both windows, got:\n\(output)")
+        XCTAssertTrue(output.contains("99/100 remaining"), "Metrics should show overall remaining, got:\n\(output)")
+    }
+
+    /// JSON must include the weekly window fields alongside token/MCP.
+    func testZaiJSONIncludesWeeklyWindow() throws {
+        let json = try JSONFormatter.format([.zaiCodingPlan: zaiCreditOnlyResult()])
+        XCTAssertTrue(json.contains("\"tokenUsagePercent\" : 1"), "Missing tokenUsagePercent in:\n\(json)")
+        XCTAssertTrue(json.contains("\"weeklyUsagePercent\" : 1"), "Missing weeklyUsagePercent in:\n\(json)")
+        XCTAssertTrue(json.contains("\"weeklyUsageUsed\" : 27"), "Missing weeklyUsageUsed in:\n\(json)")
+        XCTAssertTrue(json.contains("\"weeklyUsageTotal\" : 10000"), "Missing weeklyUsageTotal in:\n\(json)")
+        XCTAssertTrue(json.contains("\"weeklyResetsAt\""), "Missing weeklyResetsAt in:\n\(json)")
+    }
+
     // MARK: - Balance-style pay-as-you-go formatter tests (DeepSeek)
 
     /// Table metrics must show the remaining balance (CNY) instead of
@@ -460,11 +494,14 @@ final class CLIFormatterTests: XCTestCase {
         let result = ProviderResult(usage: usage, details: details)
 
         let json = try JSONFormatter.format([.deepSeek: result])
-        XCTAssertTrue(json.contains("\"balance\" : 103.49"), "Missing balance in:\n\(json)")
-        XCTAssertTrue(json.contains("\"currency\" : \"CNY\""), "Missing currency in:\n\(json)")
-        XCTAssertTrue(json.contains("\"grantedBalance\" : 0"), "Missing grantedBalance in:\n\(json)")
-        XCTAssertTrue(json.contains("\"toppedUpBalance\" : 103.49"), "Missing toppedUpBalance in:\n\(json)")
-        XCTAssertFalse(json.contains("\"cost\""), "cost must stay nil for balance-style providers:\n\(json)")
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: [String: Any]])
+        let provider = try XCTUnwrap(payload["deepseek"])
+        // Compare JSON numbers rather than their platform-dependent decimal spelling.
+        XCTAssertEqual(try XCTUnwrap(provider["balance"] as? Double), 103.49, accuracy: 0.000_001)
+        XCTAssertEqual(provider["currency"] as? String, "CNY")
+        XCTAssertEqual(provider["grantedBalance"] as? Double, 0)
+        XCTAssertEqual(try XCTUnwrap(provider["toppedUpBalance"] as? Double), 103.49, accuracy: 0.000_001)
+        XCTAssertNil(provider["cost"])
     }
 
     /// Providers with a real cost keep the existing "$x spent" rendering.
