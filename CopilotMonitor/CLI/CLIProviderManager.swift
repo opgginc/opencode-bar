@@ -126,6 +126,14 @@ actor CLIProviderManager {
         return results
     }
     
+    func fetch(_ identifier: ProviderIdentifier) async throws -> ProviderResult {
+        guard let provider = providers.first(where: { $0.identifier == identifier }) else {
+            throw ProviderError.providerError("Provider '\(identifier.displayName)' is unavailable.")
+        }
+        logger.info("Fetching selected provider: \(identifier.rawValue, privacy: .public)")
+        return try await fetchWithTimeout(provider: provider)
+    }
+
     // MARK: - Private Helpers
     
     /// Fetches provider data with timeout protection

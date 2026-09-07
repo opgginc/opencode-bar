@@ -95,6 +95,19 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 - **Dynamic Updates**: New providers appear as you add them to OpenCode
 - **Smart Categorization**: Pay-as-you-go vs Quota-based providers displayed separately
 
+### Kiro Authentication
+
+Kiro usage is fetched from its regional usage API with credentials read from
+`~/Library/Application Support/kiro-cli/data.sqlite3`. The database is opened
+read-only. Missing, expired, or rejected credentials appear as authentication
+errors; sign in through Kiro itself to update them.
+
+After installing the current OpenCode Bar CLI, run `scripts/query-kiro.sh --json`
+to query the same provider implementation. Its output and exit codes match
+`opencodebar provider kiro --json`.
+The `provider` command fetches only the selected provider and returns the
+documented authentication or network error exit code if that request fails.
+
 ### Real-time Monitoring
 - **Menu Bar Dashboard**: View all provider usage at a glance
 - **Visual Indicators**: Color-coded progress (green → yellow → orange → red)

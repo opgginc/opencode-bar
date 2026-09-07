@@ -182,29 +182,11 @@ struct ProviderCommand: ParsableCommand {
         let semaphore = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var error: Error?
         nonisolated(unsafe) var output: String?
-        nonisolated(unsafe) var fetchFailed = false
         
         Task {
             do {
                 let manager = CLIProviderManager()
-                let results = await manager.fetchAll()
-                
-                guard let result = results[identifier] else {
-                    if jsonFlag {
-                        let errorDict = ["error": "Failed to fetch data for '\(identifier.displayName)'"]
-                        let encoder = JSONEncoder()
-                        encoder.outputFormatting = [.prettyPrinted]
-                        if let jsonData = try? encoder.encode(errorDict),
-                           let jsonString = String(data: jsonData, encoding: .utf8) {
-                            output = jsonString
-                        }
-                    } else {
-                        output = "Error: Failed to fetch data for '\(identifier.displayName)'\nThis provider may not be configured or authentication may have failed."
-                    }
-                    fetchFailed = true
-                    semaphore.signal()
-                    return
-                }
+                let result = try await manager.fetch(identifier)
                 
                 if jsonFlag {
                     let singleResult = [identifier: result]
@@ -224,7 +206,10 @@ struct ProviderCommand: ParsableCommand {
         semaphore.wait()
         
         if let error = error {
-            if let output = output {
+            if jsonFlag {
+                let data = try JSONEncoder().encode(["error": error.localizedDescription])
+                FileHandle.standardOutput.write(data + Data([0x0A]))
+            } else if let output = output {
                 print(output)
             }
             
@@ -248,13 +233,6 @@ struct ProviderCommand: ParsableCommand {
                 stderr.write(Data(message.utf8))
                 Foundation.exit(CLIExitCode.generalError.rawValue)
             }
-        }
-        
-        if fetchFailed {
-            if let output = output {
-                print(output)
-            }
-            Foundation.exit(CLIExitCode.generalError.rawValue)
         }
         
         if let output = output {
