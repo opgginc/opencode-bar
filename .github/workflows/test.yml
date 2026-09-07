@@ -8,6 +8,9 @@ on:
     paths:
       - '**.swift'
       - '**.xcodeproj/**'
+      - 'scripts/claude-version.sh'
+      - 'scripts/query-claude.sh'
+      - 'scripts/tests/query-claude-version-test.sh'
       - '.github/workflows/test.yml'
   pull_request:
     branches:
@@ -16,6 +19,9 @@ on:
     paths:
       - '**.swift'
       - '**.xcodeproj/**'
+      - 'scripts/claude-version.sh'
+      - 'scripts/query-claude.sh'
+      - 'scripts/tests/query-claude-version-test.sh'
       - '.github/workflows/test.yml'
   workflow_dispatch:
 
@@ -27,6 +33,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Test Claude version detection
+        run: bash scripts/tests/query-claude-version-test.sh
       
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1

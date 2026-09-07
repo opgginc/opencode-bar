@@ -95,6 +95,19 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 - **Dynamic Updates**: New providers appear as you add them to OpenCode
 - **Smart Categorization**: Pay-as-you-go vs Quota-based providers displayed separately
 
+### Kiro Authentication
+
+Kiro usage is fetched from its regional usage API with credentials read from
+`~/Library/Application Support/kiro-cli/data.sqlite3`. The database is opened
+read-only. Missing, expired, or rejected credentials appear as authentication
+errors; sign in through Kiro itself to update them.
+
+After installing the current OpenCode Bar CLI, run `scripts/query-kiro.sh --json`
+to query the same provider implementation. Its output and exit codes match
+`opencodebar provider kiro --json`.
+The `provider` command fetches only the selected provider and returns the
+documented authentication or network error exit code if that request fails.
+
 ### Real-time Monitoring
 - **Menu Bar Dashboard**: View all provider usage at a glance
 - **Visual Indicators**: Color-coded progress (green → yellow → orange → red)
@@ -411,6 +424,8 @@ For ChatGPT/Codex multi-account setups, the app also searches:
 3. `~/.opencode/projects/*/openai-codex-accounts.json`
 
 If `oc-chatgpt-multi-auth` is installed and OpenCode sets `provider.openai.options.baseURL` to a localhost proxy, OpenCode Bar still queries the direct ChatGPT usage endpoint by default. Only the explicit `opencode-bar.codex.usageURL` override changes the usage endpoint.
+
+OpenCode Bar also reads `provider.openai.options.apiKey` from the OpenCode configuration. API-key accounts require an external codex-lb usage endpoint configured through `opencode-bar.codex.usageURL`. When its response includes `upstream_limits`, those account-level quota windows take precedence over per-key `limits`.
 
 ### GitHub Copilot not showing
 GitHub Copilot accounts are discovered from multiple sources (in priority order):

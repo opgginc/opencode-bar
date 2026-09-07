@@ -428,4 +428,54 @@ final class CLIFormatterTests: XCTestCase {
                                      "Separator must be at least as wide as every data row. Row: \(row)")
         }
     }
+    // MARK: - Balance-style pay-as-you-go formatter tests (DeepSeek)
+
+    /// Table metrics must show the remaining balance (CNY) instead of
+    /// "Cost unavailable" when cost is nil and details carry a balance.
+    func testDeepSeekTableShowsRemainingBalance() {
+        let details = DetailedUsage(
+            creditsBalance: 103.49,
+            balanceCurrency: "CNY",
+            balanceGranted: 0.0,
+            balanceToppedUp: 103.49
+        )
+        let usage = ProviderUsage.payAsYouGo(utilization: 0, cost: nil, resetsAt: nil)
+        let result = ProviderResult(usage: usage, details: details)
+
+        let output = TableFormatter.format([.deepSeek: result])
+        XCTAssertTrue(output.contains("¥103.49 remaining"), "Table should show CNY remaining balance, got:\n\(output)")
+        XCTAssertFalse(output.contains("Cost unavailable"), "Balance must not be reported as unavailable:\n\(output)")
+    }
+
+    /// JSON must emit balance/currency/granted/topped-up for balance-style
+    /// pay-as-you-go providers and omit "cost".
+    func testDeepSeekJSONIncludesBalanceFields() throws {
+        let details = DetailedUsage(
+            creditsBalance: 103.49,
+            balanceCurrency: "CNY",
+            balanceGranted: 0.0,
+            balanceToppedUp: 103.49
+        )
+        let usage = ProviderUsage.payAsYouGo(utilization: 0, cost: nil, resetsAt: nil)
+        let result = ProviderResult(usage: usage, details: details)
+
+        let json = try JSONFormatter.format([.deepSeek: result])
+        XCTAssertTrue(json.contains("\"balance\" : 103.49"), "Missing balance in:\n\(json)")
+        XCTAssertTrue(json.contains("\"currency\" : \"CNY\""), "Missing currency in:\n\(json)")
+        XCTAssertTrue(json.contains("\"grantedBalance\" : 0"), "Missing grantedBalance in:\n\(json)")
+        XCTAssertTrue(json.contains("\"toppedUpBalance\" : 103.49"), "Missing toppedUpBalance in:\n\(json)")
+        XCTAssertFalse(json.contains("\"cost\""), "cost must stay nil for balance-style providers:\n\(json)")
+    }
+
+    /// Providers with a real cost keep the existing "$x spent" rendering.
+    func testPayAsYouGoWithCostKeepsSpentRendering() throws {
+        let usage = ProviderUsage.payAsYouGo(utilization: 0, cost: 12.34, resetsAt: nil)
+        let result = ProviderResult(usage: usage, details: nil)
+
+        let table = TableFormatter.format([.openRouter: result])
+        XCTAssertTrue(table.contains("$12.34 spent"), "Table should show spent cost, got:\n\(table)")
+
+        let json = try JSONFormatter.format([.openRouter: result])
+        XCTAssertTrue(json.contains("\"cost\" : 12.34"), "JSON should keep cost, got:\n\(json)")
+    }
 }

@@ -17,7 +17,8 @@ actor CLIProviderManager {
         .antigravity, .openCodeZen, .openCodeGo, .kiro, .grok, .kimi, .minimaxCodingPlan, .zaiCodingPlan,
         .nanoGpt,
         .chutes, .copilot,
-        .synthetic
+        .synthetic,
+        .deepSeek
     ]
     
     // MARK: - Initialization
@@ -42,6 +43,7 @@ actor CLIProviderManager {
         let nanoGptProvider = NanoGptProvider()
         let chutesProvider = ChutesProvider()
         let syntheticProvider = SyntheticProvider()
+        let deepSeekProvider = DeepSeekProvider()
 
         // 1 CLI-specific provider (uses browser cookies instead of WebView)
         let copilotCLIProvider = CopilotCLIProvider()
@@ -64,7 +66,8 @@ actor CLIProviderManager {
             nanoGptProvider,
             chutesProvider,
             copilotCLIProvider,
-            syntheticProvider
+            syntheticProvider,
+            deepSeekProvider
         ]
 
         let providerCount = providers.count
@@ -126,6 +129,14 @@ actor CLIProviderManager {
         return results
     }
     
+    func fetch(_ identifier: ProviderIdentifier) async throws -> ProviderResult {
+        guard let provider = providers.first(where: { $0.identifier == identifier }) else {
+            throw ProviderError.providerError("Provider '\(identifier.displayName)' is unavailable.")
+        }
+        logger.info("Fetching selected provider: \(identifier.rawValue, privacy: .public)")
+        return try await fetchWithTimeout(provider: provider)
+    }
+
     // MARK: - Private Helpers
     
     /// Fetches provider data with timeout protection

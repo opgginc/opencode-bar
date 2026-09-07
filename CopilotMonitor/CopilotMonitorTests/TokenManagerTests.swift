@@ -2,6 +2,45 @@ import XCTest
 @testable import OpenCode_Bar
 
 final class TokenManagerTests: XCTestCase {
+    func testGeminiProjectPolicyPrefersConfiguredProject() {
+        XCTAssertEqual(
+            GeminiProjectPolicy.resolve(primary: "configured-project", fallback: "managed-project"),
+            "configured-project"
+        )
+    }
+
+    func testGeminiProjectPolicyUsesManagedProjectFallback() {
+        XCTAssertEqual(
+            GeminiProjectPolicy.resolve(primary: "", fallback: "managed-project"),
+            "managed-project"
+        )
+    }
+
+    func testGeminiProjectPolicyUsesDefaultWhenProjectIsMissing() {
+        XCTAssertEqual(GeminiProjectPolicy.resolve(primary: nil), "default")
+    }
+
+    func testGeminiStandaloneProjectPolicyUsesDefaultWhenMetadataIsMissing() {
+        XCTAssertEqual(
+            GeminiProjectPolicy.resolveStandalone(
+                projectId: nil,
+                quotaProjectId: nil,
+                environmentProjectId: nil
+            ),
+            "default"
+        )
+    }
+
+    func testGeminiStandaloneProjectPolicyPrefersEnvironmentBeforeDefault() {
+        XCTAssertEqual(
+            GeminiProjectPolicy.resolveStandalone(
+                projectId: nil,
+                quotaProjectId: nil,
+                environmentProjectId: "environment-project"
+            ),
+            "environment-project"
+        )
+    }
 
     private func makeTestJWT(payload: String) -> String {
         func encode(_ string: String) -> String {

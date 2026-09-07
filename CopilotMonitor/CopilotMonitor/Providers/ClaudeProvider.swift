@@ -7,39 +7,225 @@ private let logger = Logger(subsystem: "com.opencodeproviders", category: "Claud
 enum ClaudeOAuthRequestPolicy {
     static let betaHeader = "oauth-2025-04-20"
     static let defaultClaudeCodeVersion = "2.1.80"
+    private static let installedVersionCache = InstalledVersionCache()
 
-    static func codeVersion(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
-        let rawVersion = environment["ANTHROPIC_CLI_VERSION"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let rawVersion, !rawVersion.isEmpty {
-            return rawVersion
+    private actor InstalledVersionCache {
+        private enum Value {
+            case resolved(String?)
         }
+
+        private var cachedValue: Value?
+        private var discoveryTask: Task<String?, Never>?
+
+        func value(discover: @escaping @Sendable () async -> String?) async -> String? {
+            if case let .resolved(version)? = cachedValue {
+                logger.debug("Using cached Claude CLI version discovery result")
+                return version
+            }
+
+            if let discoveryTask {
+                return await discoveryTask.value
+            }
+
+            let discoveryTask = Task { await discover() }
+            self.discoveryTask = discoveryTask
+            let version = await discoveryTask.value
+            cachedValue = .resolved(version)
+            self.discoveryTask = nil
+            logger.debug("Cached Claude CLI version discovery result: found=\(version != nil)")
+            return version
+        }
+
+        func reset() {
+            cachedValue = nil
+            discoveryTask = nil
+        }
+    }
+
+    static func codeVersion(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        installedVersion: String? = nil
+    ) -> String {
+        let rawVersion = environment["ANTHROPIC_CLI_VERSION"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let overrideVersion = normalizedVersion(rawVersion) {
+            return overrideVersion
+        }
+
+        if let installedVersion = normalizedVersion(installedVersion) {
+            return installedVersion
+        }
+
         return defaultClaudeCodeVersion
     }
 
-    static func usageUserAgent(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+    static func usageUserAgent(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        installedVersion: String? = nil
+    ) -> String {
         let rawUserAgent = environment["ANTHROPIC_CODE_USER_AGENT"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let rawUserAgent, !rawUserAgent.isEmpty {
             return rawUserAgent
         }
-        return "claude-code/\(codeVersion(environment: environment))"
+        return "claude-code/\(codeVersion(environment: environment, installedVersion: installedVersion))"
+    }
+
+    static func installedClaudeCodeVersion(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) async -> String? {
+        await installedVersionCache.value {
+            guard let executableURL = findClaudeExecutable(environment: environment, fileManager: fileManager) else {
+                logger.debug("Claude CLI version discovery found no executable")
+                return nil
+            }
+
+            logger.debug("Claude CLI version discovery running discovered executable")
+            return await runVersionCommand(executableURL: executableURL)
+        }
+    }
+
+    static func resetInstalledClaudeCodeVersionCacheForTesting() async {
+        await installedVersionCache.reset()
+    }
+
+    private static func findClaudeExecutable(
+        environment: [String: String],
+        fileManager: FileManager
+    ) -> URL? {
+        let homeDirectory = fileManager.homeDirectoryForCurrentUser
+        var candidatePaths: [String] = []
+
+        if let configuredPath = environment["CLAUDE_CODE_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !configuredPath.isEmpty {
+            candidatePaths.append(configuredPath)
+        }
+
+        if let path = environment["PATH"] {
+            candidatePaths.append(contentsOf: path.split(separator: ":").map { directory in
+                URL(fileURLWithPath: String(directory)).appendingPathComponent("claude").path
+            })
+        }
+
+        candidatePaths.append(contentsOf: [
+            homeDirectory.appendingPathComponent(".local/bin/claude").path,
+            "/opt/homebrew/bin/claude",
+            "/usr/local/bin/claude"
+        ])
+
+        var visitedPaths = Set<String>()
+        for path in candidatePaths where visitedPaths.insert(path).inserted {
+            guard fileManager.isExecutableFile(atPath: path) else { continue }
+            return URL(fileURLWithPath: path)
+        }
+
+        return nil
+    }
+
+    static func versionFromCommandOutput(_ output: String) -> String? {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.contains(where: \.isNewline) else {
+            return nil
+        }
+
+        let versionText = String(trimmed.prefix { !$0.isWhitespace })
+        guard let version = normalizedVersion(versionText) else { return nil }
+
+        let suffix = String(trimmed.dropFirst(versionText.count))
+        guard suffix.isEmpty || suffix == " (Claude Code)" else { return nil }
+        return version
+    }
+
+    private struct VersionCommandResult {
+        let output: String
+        let terminationStatus: Int32
+    }
+
+    private static func runVersionCommand(executableURL: URL) async -> String? {
+        await withTaskGroup(of: VersionCommandResult?.self) { group in
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = executableURL
+            process.arguments = ["--version"]
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+
+            group.addTask {
+                await withCheckedContinuation { continuation in
+                    process.terminationHandler = { _ in
+                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                        continuation.resume(returning: VersionCommandResult(
+                            output: String(data: data, encoding: .utf8) ?? "",
+                            terminationStatus: process.terminationStatus
+                        ))
+                    }
+
+                    do {
+                        try process.run()
+                    } catch {
+                        continuation.resume(returning: nil)
+                    }
+                }
+            }
+
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                return nil
+            }
+
+            let result: VersionCommandResult?
+            if let firstResult = await group.next() {
+                result = firstResult
+            } else {
+                result = nil
+            }
+            group.cancelAll()
+            if process.isRunning {
+                process.terminate()
+            }
+
+            guard let result else { return nil }
+            guard result.terminationStatus == 0 else {
+                logger.debug("Claude CLI version command failed with status \(result.terminationStatus)")
+                return nil
+            }
+            return versionFromCommandOutput(result.output)
+        }
+    }
+
+    private static func normalizedVersion(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = trimmed.split(separator: ".", omittingEmptySubsequences: false)
+        guard components.count == 3,
+              components.allSatisfy({ component in
+                  !component.isEmpty && component.utf8.allSatisfy { byte in
+                      byte >= 48 && byte <= 57
+                  }
+              }) else {
+            return nil
+        }
+        return trimmed
     }
 
     static func applyHeaders(
         to request: inout URLRequest,
         accessToken: String,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        installedVersion: String? = nil
     ) {
+        let userAgent = usageUserAgent(environment: environment, installedVersion: installedVersion)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(usageUserAgent(environment: environment), forHTTPHeaderField: "User-Agent")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
         request.setValue(nil, forHTTPHeaderField: "Cookie")
         request.httpShouldHandleCookies = false
         request.timeoutInterval = 10
 
         logger.debug(
-            "Prepared Claude OAuth request headers: userAgent=\(usageUserAgent(environment: environment), privacy: .public), cookies=disabled"
+            "Prepared Claude OAuth request headers: userAgent=\(userAgent, privacy: .public), cookies=disabled"
         )
     }
 }
@@ -191,11 +377,12 @@ final class ClaudeProvider: ProviderProtocol {
             throw ProviderError.authenticationFailed("Anthropic access token not available")
         }
 
+        let installedVersion = await ClaudeOAuthRequestPolicy.installedClaudeCodeVersion()
         var candidates: [ClaudeAccountCandidate] = []
         var fetchErrors: [Error] = []
         for account in accounts {
             do {
-                let candidate = try await fetchUsageForAccount(account)
+                let candidate = try await fetchUsageForAccount(account, installedVersion: installedVersion)
                 candidates.append(candidate)
             } catch {
                 fetchErrors.append(error)
@@ -204,7 +391,11 @@ final class ClaudeProvider: ProviderProtocol {
                     logger.info("Skipping unavailable OpenCode Claude account")
                     continue
                 }
-                let fallback = await unavailableCandidate(for: account, error: error)
+                let fallback = await unavailableCandidate(
+                    for: account,
+                    error: error,
+                    installedVersion: installedVersion
+                )
                 candidates.append(fallback)
             }
         }
@@ -398,7 +589,10 @@ final class ClaudeProvider: ProviderProtocol {
         return String(full.prefix(12))
     }
 
-    private func fetchAccountIdentity(accessToken: String) async -> (accountId: String?, email: String?)? {
+    private func fetchAccountIdentity(
+        accessToken: String,
+        installedVersion: String?
+    ) async -> (accountId: String?, email: String?)? {
         let endpoints = [
             "/api/oauth/profile",
             "/api/oauth/account"
@@ -409,7 +603,11 @@ final class ClaudeProvider: ProviderProtocol {
 
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
-            ClaudeOAuthRequestPolicy.applyHeaders(to: &request, accessToken: accessToken)
+            ClaudeOAuthRequestPolicy.applyHeaders(
+                to: &request,
+                accessToken: accessToken,
+                installedVersion: installedVersion
+            )
 
             do {
                 let (data, response) = try await session.data(for: request)
@@ -458,12 +656,18 @@ final class ClaudeProvider: ProviderProtocol {
         return nil
     }
 
-    private func resolveAccountIdentity(_ account: ClaudeAuthAccount) async -> ClaudeResolvedIdentity {
+    private func resolveAccountIdentity(
+        _ account: ClaudeAuthAccount,
+        installedVersion: String?
+    ) async -> ClaudeResolvedIdentity {
         var resolvedAccountId = normalizedNonEmpty(account.accountId)
         var resolvedEmail = normalizedNonEmpty(account.email, lowercase: true)
 
         if resolvedAccountId == nil || resolvedEmail == nil,
-           let apiIdentity = await fetchAccountIdentity(accessToken: account.accessToken) {
+           let apiIdentity = await fetchAccountIdentity(
+               accessToken: account.accessToken,
+               installedVersion: installedVersion
+           ) {
             if resolvedAccountId == nil {
                 resolvedAccountId = apiIdentity.accountId
             }
@@ -539,7 +743,10 @@ final class ClaudeProvider: ProviderProtocol {
         return message
     }
 
-    private func requestClaudeUsageData(accessToken: String) async throws -> Data {
+    private func requestClaudeUsageData(
+        accessToken: String,
+        installedVersion: String?
+    ) async throws -> Data {
         guard let url = claudeUsageEndpoint else {
             logger.error("Invalid Claude API URL")
             throw ProviderError.networkError("Invalid API endpoint")
@@ -547,7 +754,11 @@ final class ClaudeProvider: ProviderProtocol {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        ClaudeOAuthRequestPolicy.applyHeaders(to: &request, accessToken: accessToken)
+        ClaudeOAuthRequestPolicy.applyHeaders(
+            to: &request,
+            accessToken: accessToken,
+            installedVersion: installedVersion
+        )
 
         let (data, response) = try await session.data(for: request)
 
@@ -576,10 +787,14 @@ final class ClaudeProvider: ProviderProtocol {
         return data
     }
 
-    private func unavailableCandidate(for account: ClaudeAuthAccount, error: Error) async -> ClaudeAccountCandidate {
+    private func unavailableCandidate(
+        for account: ClaudeAuthAccount,
+        error: Error,
+        installedVersion: String?
+    ) async -> ClaudeAccountCandidate {
         let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
         let authUsageSummary = sourceSummary(sourceLabels, fallback: "Unknown")
-        let identity = await resolveAccountIdentity(account)
+        let identity = await resolveAccountIdentity(account, installedVersion: installedVersion)
 
         logger.info(
             "Claude account fallback (\(authUsageSummary)): reason=\(error.localizedDescription)"
@@ -603,10 +818,16 @@ final class ClaudeProvider: ProviderProtocol {
         )
     }
 
-    private func fetchUsageForAccount(_ account: ClaudeAuthAccount) async throws -> ClaudeAccountCandidate {
+    private func fetchUsageForAccount(
+        _ account: ClaudeAuthAccount,
+        installedVersion: String?
+    ) async throws -> ClaudeAccountCandidate {
         // No token refresh here — refresh tokens are single-use.
         // If this app consumes the refresh token, OpenCode can no longer re-authenticate.
-        let data = try await requestClaudeUsageData(accessToken: account.accessToken)
+        let data = try await requestClaudeUsageData(
+            accessToken: account.accessToken,
+            installedVersion: installedVersion
+        )
 
         do {
             let decoder = JSONDecoder()
@@ -657,7 +878,7 @@ final class ClaudeProvider: ProviderProtocol {
 
             let sourceLabels = account.sourceLabels.isEmpty ? [sourceLabel(account.source)] : account.sourceLabels
             let authUsageSummary = sourceSummary(sourceLabels, fallback: "Unknown")
-            let identity = await resolveAccountIdentity(account)
+            let identity = await resolveAccountIdentity(account, installedVersion: installedVersion)
 
             logger.info("Claude usage fetched (\(authUsageSummary)): 7d=\(utilization)%, 5h=\(fiveHourUsage?.description ?? "N/A")%, fable7d=\(fableUsage?.description ?? "N/A", privacy: .public)%")
             logger.debug("Claude account identity (\(authUsageSummary)): dedupeKey=\(identity.dedupeKey), accountId=\(identity.accountId ?? "nil"), email=\(identity.email ?? "nil")")

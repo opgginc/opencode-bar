@@ -157,6 +157,22 @@ struct DetailedUsage {
     let creditsBalance: Double?
     let planType: String?
 
+    // DeepSeek balance details (pay-as-you-go CNY balance)
+    let balanceCurrency: String?
+    let balanceGranted: Double?
+    let balanceToppedUp: Double?
+
+    /// Currency symbol for `balanceCurrency` (e.g. "USD" -> "$", "CNY" -> "¥").
+    /// Falls back to the raw code with a trailing space for unknown currencies.
+    var balanceCurrencySymbol: String {
+        switch balanceCurrency?.uppercased() {
+        case "USD", "US": return "$"
+        case "CNY", "RMB": return "¥"
+        case let code? where !code.isEmpty: return code + " "
+        default: return ""
+        }
+    }
+
     // Chutes-specific value cap tracking
     let chutesMonthlyValueCapUSD: Double?
     let chutesMonthlyValueUsedUSD: Double?
@@ -265,6 +281,9 @@ struct DetailedUsage {
         sparkSecondaryWindowHours: Int? = nil,
         creditsBalance: Double? = nil,
         planType: String? = nil,
+        balanceCurrency: String? = nil,
+        balanceGranted: Double? = nil,
+        balanceToppedUp: Double? = nil,
         chutesMonthlyValueCapUSD: Double? = nil,
         chutesMonthlyValueUsedUSD: Double? = nil,
         chutesMonthlyValueUsedPercent: Double? = nil,
@@ -348,6 +367,9 @@ struct DetailedUsage {
         self.sparkSecondaryWindowHours = sparkSecondaryWindowHours
         self.creditsBalance = creditsBalance
         self.planType = planType
+        self.balanceCurrency = balanceCurrency
+        self.balanceGranted = balanceGranted
+        self.balanceToppedUp = balanceToppedUp
         self.chutesMonthlyValueCapUSD = chutesMonthlyValueCapUSD
         self.chutesMonthlyValueUsedUSD = chutesMonthlyValueUsedUSD
         self.chutesMonthlyValueUsedPercent = chutesMonthlyValueUsedPercent
@@ -405,7 +427,7 @@ extension DetailedUsage: Codable {
         case codexPrimaryWindowLabel, codexPrimaryWindowHours, codexSecondaryWindowLabel, codexSecondaryWindowHours
         case sparkUsage, sparkReset, sparkSecondaryUsage, sparkSecondaryReset, sparkWindowLabel
         case sparkPrimaryWindowLabel, sparkPrimaryWindowHours, sparkSecondaryWindowLabel, sparkSecondaryWindowHours
-        case creditsBalance, planType
+        case creditsBalance, planType, balanceCurrency, balanceGranted, balanceToppedUp
         case chutesMonthlyValueCapUSD, chutesMonthlyValueUsedUSD, chutesMonthlyValueUsedPercent
         case openCodeGoMonthlyUsage, openCodeGoMonthlyReset, openCodeGoModelCount
         case extraUsageEnabled
@@ -461,6 +483,9 @@ extension DetailedUsage: Codable {
         sparkSecondaryWindowHours = try container.decodeIfPresent(Int.self, forKey: .sparkSecondaryWindowHours)
         creditsBalance = try container.decodeIfPresent(Double.self, forKey: .creditsBalance)
         planType = try container.decodeIfPresent(String.self, forKey: .planType)
+        balanceCurrency = try container.decodeIfPresent(String.self, forKey: .balanceCurrency)
+        balanceGranted = try container.decodeIfPresent(Double.self, forKey: .balanceGranted)
+        balanceToppedUp = try container.decodeIfPresent(Double.self, forKey: .balanceToppedUp)
         chutesMonthlyValueCapUSD = try container.decodeIfPresent(Double.self, forKey: .chutesMonthlyValueCapUSD)
         chutesMonthlyValueUsedUSD = try container.decodeIfPresent(Double.self, forKey: .chutesMonthlyValueUsedUSD)
         chutesMonthlyValueUsedPercent = try container.decodeIfPresent(Double.self, forKey: .chutesMonthlyValueUsedPercent)
@@ -547,6 +572,9 @@ extension DetailedUsage: Codable {
         try container.encodeIfPresent(sparkSecondaryWindowHours, forKey: .sparkSecondaryWindowHours)
         try container.encodeIfPresent(creditsBalance, forKey: .creditsBalance)
         try container.encodeIfPresent(planType, forKey: .planType)
+        try container.encodeIfPresent(balanceCurrency, forKey: .balanceCurrency)
+        try container.encodeIfPresent(balanceGranted, forKey: .balanceGranted)
+        try container.encodeIfPresent(balanceToppedUp, forKey: .balanceToppedUp)
         try container.encodeIfPresent(chutesMonthlyValueCapUSD, forKey: .chutesMonthlyValueCapUSD)
         try container.encodeIfPresent(chutesMonthlyValueUsedUSD, forKey: .chutesMonthlyValueUsedUSD)
         try container.encodeIfPresent(chutesMonthlyValueUsedPercent, forKey: .chutesMonthlyValueUsedPercent)
@@ -624,6 +652,22 @@ struct JSONFormatter {
                 if let resetsAt = resetsAt {
                     let formatter = ISO8601DateFormatter()
                     providerDict["resetsAt"] = formatter.string(from: resetsAt)
+                }
+                // Balance-style providers (cost nil) expose the remaining
+                // balance from details instead.
+                if cost == nil, let details = result.details {
+                    if let balance = details.creditsBalance {
+                        providerDict["balance"] = balance
+                    }
+                    if let currency = details.balanceCurrency {
+                        providerDict["currency"] = currency
+                    }
+                    if let granted = details.balanceGranted {
+                        providerDict["grantedBalance"] = granted
+                    }
+                    if let toppedUp = details.balanceToppedUp {
+                        providerDict["toppedUpBalance"] = toppedUp
+                    }
                 }
 
             case .quotaBased(let remaining, let entitlement, let overagePermitted):
@@ -1075,6 +1119,9 @@ struct TableFormatter {
 
             if let cost = cost {
                 metrics += String(format: "$%.2f spent", cost)
+            } else if let balance = result.details?.creditsBalance {
+                // Balance-style providers (cost nil): show remaining balance.
+                metrics += String(format: "%@%.2f remaining", result.details?.balanceCurrencySymbol ?? "", balance)
             } else {
                 metrics += "Cost unavailable"
             }

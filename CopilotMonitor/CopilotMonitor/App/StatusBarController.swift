@@ -917,12 +917,12 @@ final class StatusBarController: NSObject {
         return ProviderIdentifier.allCases.first(where: { isProviderEnabled($0) })
     }
 
-    private func normalizedUsagePercent(_ percent: Double?) -> Double? {
+    private static func normalizedUsagePercent(_ percent: Double?) -> Double? {
         guard let percent, percent.isFinite else { return nil }
         return min(max(percent, 0), 999)
     }
 
-    private func dailyPercentFromDetails(_ details: DetailedUsage?) -> Double? {
+    private static func dailyPercentFromDetails(_ details: DetailedUsage?) -> Double? {
         guard let details else { return nil }
         if let limit = details.limit, limit > 0, let used = details.dailyUsage {
             return (used / limit) * 100.0
@@ -930,7 +930,7 @@ final class StatusBarController: NSObject {
         return details.dailyUsage
     }
 
-    private func priorityForWindowHours(
+    private static func priorityForWindowHours(
         _ hours: Int?,
         fallback: UsageDisplayWindowPriority
     ) -> UsageDisplayWindowPriority {
@@ -941,7 +941,7 @@ final class StatusBarController: NSObject {
         return .hourly
     }
 
-    private func chutesMonthlyPercentFromDetails(_ details: DetailedUsage?) -> Double? {
+    private static func chutesMonthlyPercentFromDetails(_ details: DetailedUsage?) -> Double? {
         guard let details else { return nil }
 
         let configuredPlan = SubscriptionSettingsManager.shared.getPlan(for: .chutes)
@@ -966,7 +966,7 @@ final class StatusBarController: NSObject {
     ) -> [UsagePercentCandidate] {
         var candidates: [UsagePercentCandidate] = []
         func add(_ percent: Double?, priority: UsageDisplayWindowPriority) {
-            guard let normalized = normalizedUsagePercent(percent) else { return }
+            guard let normalized = Self.normalizedUsagePercent(percent) else { return }
             candidates.append(UsagePercentCandidate(percent: normalized, priority: priority))
         }
 
@@ -995,19 +995,19 @@ final class StatusBarController: NSObject {
         case .codex:
             add(
                 details?.secondaryUsage,
-                priority: priorityForWindowHours(details?.codexSecondaryWindowHours, fallback: .weekly)
+                priority: Self.priorityForWindowHours(details?.codexSecondaryWindowHours, fallback: .weekly)
             )
             add(
                 details?.sparkSecondaryUsage,
-                priority: priorityForWindowHours(details?.sparkSecondaryWindowHours, fallback: .weekly)
+                priority: Self.priorityForWindowHours(details?.sparkSecondaryWindowHours, fallback: .weekly)
             )
             add(
-                dailyPercentFromDetails(details),
-                priority: priorityForWindowHours(details?.codexPrimaryWindowHours, fallback: .daily)
+                Self.dailyPercentFromDetails(details),
+                priority: Self.priorityForWindowHours(details?.codexPrimaryWindowHours, fallback: .daily)
             )
             add(
                 details?.sparkUsage,
-                priority: priorityForWindowHours(details?.sparkPrimaryWindowHours, fallback: .hourly)
+                priority: Self.priorityForWindowHours(details?.sparkPrimaryWindowHours, fallback: .hourly)
             )
         case .commandCode:
             add(usage.usagePercentage, priority: .monthly)
@@ -1027,13 +1027,13 @@ final class StatusBarController: NSObject {
         case .nanoGpt:
             add(details?.sevenDayUsage, priority: .weekly)
         case .chutes:
-            add(chutesMonthlyPercentFromDetails(details), priority: .monthly)
-            add(dailyPercentFromDetails(details), priority: .daily)
+            add(Self.chutesMonthlyPercentFromDetails(details), priority: .monthly)
+            add(Self.dailyPercentFromDetails(details), priority: .daily)
         case .synthetic:
             add(details?.fiveHourUsage, priority: .hourly)
         case .tavilySearch, .braveSearch:
             add(details?.mcpUsagePercent, priority: .monthly)
-        case .antigravity, .geminiCLI, .openRouter, .openCode, .openCodeZen:
+        case .antigravity, .geminiCLI, .openRouter, .openCode, .openCodeZen, .deepSeek:
             break
         }
 
@@ -1085,7 +1085,7 @@ final class StatusBarController: NSObject {
         // Gemini CLI special case: add as fallback priority since these don't have window metadata
         if identifier == .geminiCLI, let geminiAccounts = result.details?.geminiAccounts {
             for account in geminiAccounts {
-                if let normalized = normalizedUsagePercent(100.0 - account.remainingPercentage) {
+                if let normalized = Self.normalizedUsagePercent(100.0 - account.remainingPercentage) {
                     allCandidates.append(UsagePercentCandidate(percent: normalized, priority: .fallback))
                 }
             }
@@ -1108,7 +1108,7 @@ final class StatusBarController: NSObject {
 
         func appendMetrics(usage: ProviderUsage, details: DetailedUsage?) {
             guard case .quotaBased = usage else { return }
-            if let percent = normalizedUsagePercent(usage.usagePercentage) {
+            if let percent = Self.normalizedUsagePercent(usage.usagePercentage) {
                 usedPercents.append(percent)
             }
 
@@ -1129,7 +1129,7 @@ final class StatusBarController: NSObject {
                     details.openCodeGoMonthlyUsage
                 ]
                 for percent in extraPercents {
-                    if let normalized = normalizedUsagePercent(percent) {
+                    if let normalized = Self.normalizedUsagePercent(percent) {
                         usedPercents.append(normalized)
                     }
                 }
@@ -1146,7 +1146,7 @@ final class StatusBarController: NSObject {
 
         if identifier == .geminiCLI, let geminiAccounts = result.details?.geminiAccounts {
             for account in geminiAccounts {
-                if let percent = normalizedUsagePercent(100.0 - account.remainingPercentage) {
+                if let percent = Self.normalizedUsagePercent(100.0 - account.remainingPercentage) {
                     usedPercents.append(percent)
                 }
             }
@@ -1659,7 +1659,7 @@ final class StatusBarController: NSObject {
 
          var hasPayAsYouGo = false
 
-            let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen]
+            let payAsYouGoOrder: [ProviderIdentifier] = [.openRouter, .openCodeZen, .deepSeek]
             for identifier in payAsYouGoOrder {
                 guard isProviderEnabled(identifier) else { continue }
 
@@ -1677,9 +1677,17 @@ final class StatusBarController: NSObject {
                 } else if let result {
                     if case .payAsYouGo(_, let cost, _) = result.usage {
                         hasPayAsYouGo = true
-                        let costValue = cost ?? 0.0
+                        // Balance-style providers (DeepSeek) leave `cost` nil and
+                        // surface the remaining balance through details.
+                        let costValue = cost ?? result.details?.creditsBalance ?? 0.0
+                        let title: String
+                        if let symbol = result.details?.balanceCurrencySymbol, !symbol.isEmpty {
+                            title = String(format: "%@ (%@%.2f)", identifier.displayName, symbol, costValue)
+                        } else {
+                            title = String(format: "%@ ($%.2f)", identifier.displayName, costValue)
+                        }
                         let item = NSMenuItem(
-                            title: String(format: "%@ ($%.2f)", identifier.displayName, costValue),
+                            title: title,
                             action: nil, keyEquivalent: ""
                         )
                         item.image = iconForProvider(identifier)
@@ -2139,7 +2147,7 @@ final class StatusBarController: NSObject {
                             let percents = [account.details?.tokenUsagePercent, account.details?.mcpUsagePercent].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else if identifier == .chutes {
-                            let percents = [dailyPercentFromDetails(account.details), chutesMonthlyPercentFromDetails(account.details)].compactMap { $0 }
+                            let percents = [Self.dailyPercentFromDetails(account.details), Self.chutesMonthlyPercentFromDetails(account.details)].compactMap { $0 }
                             usedPercents = percents.isEmpty ? [account.usage.usagePercentage] : percents
                         } else if identifier == .nanoGpt {
                             let percents = [
@@ -2225,7 +2233,7 @@ final class StatusBarController: NSObject {
                         let percents = [result.details?.tokenUsagePercent, result.details?.mcpUsagePercent].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else if identifier == .chutes {
-                        let percents = [dailyPercentFromDetails(result.details), chutesMonthlyPercentFromDetails(result.details)].compactMap { $0 }
+                        let percents = [Self.dailyPercentFromDetails(result.details), Self.chutesMonthlyPercentFromDetails(result.details)].compactMap { $0 }
                         usedPercents = percents.isEmpty ? [singlePercent] : percents
                     } else if identifier == .nanoGpt {
                         let percents = [
@@ -2304,7 +2312,7 @@ final class StatusBarController: NSObject {
                 for account in geminiAccounts {
                     hasQuota = true
                     let accountNumber = account.accountIndex + 1
-                    let usedPercent = normalizedUsagePercent(100.0 - account.remainingPercentage) ?? 0.0
+                    let usedPercent = Self.normalizedUsagePercent(100.0 - account.remainingPercentage) ?? 0.0
                     // Gemini account rows should represent Gemini quota only.
                     // Antigravity has its own provider row and should not be duplicated here.
                     let usedPercents: [Double] = [usedPercent]
@@ -3081,6 +3089,8 @@ final class StatusBarController: NSObject {
             image = NSImage(named: "TavilyIcon")
         case .braveSearch:
             image = NSImage(named: "BraveSearchIcon")
+        case .deepSeek:
+            image = NSImage(systemSymbolName: identifier.iconName, accessibilityDescription: identifier.displayName)
         }
 
          // Keep consistent icon sizing and make Gemini slightly larger.

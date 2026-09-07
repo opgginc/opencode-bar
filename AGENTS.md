@@ -114,6 +114,10 @@ log stream --predicate 'subsystem == "com.opencodeproviders"' --level debug
 
 ## Architecture Patterns
 
+### Usage Authentication Ownership
+- Usage collection reads existing provider credentials. Missing, expired, or rejected credentials must return authentication errors.
+- Kiro quota queries must use the regional usage API and open its credential database with `SQLITE_OPEN_READONLY`.
+
 ### SwiftUI Shell with AppKit Core
 The app uses a hybrid architecture:
 - **Entry Point**: `App/ModernApp.swift` with `@main` attribute and `MenuBarExtra`

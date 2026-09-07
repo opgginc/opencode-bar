@@ -67,6 +67,13 @@ extension StatusBarController {
         let subscriptionAccountId = resolvedSubscriptionAccountId(details: details, fallback: accountId)
 
         switch identifier {
+        case .deepSeek:
+            for (label, value) in Self.deepSeekBalanceRows(details: details) {
+                let item = NSMenuItem()
+                item.view = createDisabledLabelView(text: String(format: "%@: %@%.2f", label, details.balanceCurrencySymbol, value))
+                submenu.addItem(item)
+            }
+
         case .openRouter:
             if let remaining = details.creditsRemaining {
                 let item = NSMenuItem()
@@ -1018,6 +1025,20 @@ extension StatusBarController {
         }
 
         return submenu
+    }
+
+    /// Label/value pairs for the DeepSeek balance detail rows, in display
+    /// order. Extracted as a pure function so the menu rows are testable
+    /// without instantiating StatusBarController.
+    static func deepSeekBalanceRows(details: DetailedUsage) -> [(label: String, value: Double)] {
+        let rows: [(String, Double?)] = [
+            ("Balance", details.creditsBalance),
+            ("Topped-up", details.balanceToppedUp),
+            ("Granted", details.balanceGranted)
+        ]
+        return rows.compactMap { label, value -> (label: String, value: Double)? in
+            value.map { (label: label, value: $0) }
+        }
     }
 
     private func resolvedSubscriptionAccountId(details: DetailedUsage, fallback accountId: String?) -> String? {
