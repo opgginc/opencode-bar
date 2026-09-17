@@ -82,6 +82,7 @@
 		F11111111111111111111111 /* UsagePredictor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F22222222222222222222222 /* UsagePredictor.swift */; };
 		F35960B456C28D71BE7575A5 /* GeminiCLIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06EC3B683EB6892E4F9C8316 /* GeminiCLIProvider.swift */; };
 		KI1111111111111111111111 /* KimiProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = KI2222222222222222222222 /* KimiProvider.swift */; };
+		SHMOCKTESTBF1111111111 /* SharedMockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = SHMOCKTESTFR1111111111 /* SharedMockURLProtocol.swift */; };
 		MINIMAXTESTBF11111111111 /* MiniMaxProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = MINIMAXTESTFR11111111111 /* MiniMaxProviderTests.swift */; };
 		OCGOTESTBF11111111111 /* OpenCodeGoProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = OCGOTESTFR11111111111 /* OpenCodeGoProviderTests.swift */; };
 		GROKTESTBF11111111111 /* GrokProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = GROKTESTFR11111111111 /* GrokProviderTests.swift */; };
@@ -214,6 +215,7 @@
 		F22222222222222222222222 /* UsagePredictor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePredictor.swift; sourceTree = "<group>"; };
 		F4AE672516E564CC52739BD9 /* CopilotProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CopilotProvider.swift; sourceTree = "<group>"; };
 		KI2222222222222222222222 /* KimiProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KimiProvider.swift; sourceTree = "<group>"; };
+		SHMOCKTESTFR1111111111 /* SharedMockURLProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedMockURLProtocol.swift; sourceTree = "<group>"; };
 		MINIMAXTESTFR11111111111 /* MiniMaxProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniMaxProviderTests.swift; sourceTree = "<group>"; };
 		OCGOTESTFR11111111111 /* OpenCodeGoProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoProviderTests.swift; sourceTree = "<group>"; };
 		GROKTESTFR11111111111 /* GrokProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokProviderTests.swift; sourceTree = "<group>"; };
@@ -467,6 +469,7 @@
 				NANOGPTTESTFR1111111111 /* NanoGptProviderTests.swift */,
 				CLIFMTTESTFR1111111111 /* CLIFormatterTests.swift */,
 				DEEPSKIPTESTFR1111111 /* DeepSeekProviderTests.swift */,
+				SHMOCKTESTFR1111111111 /* SharedMockURLProtocol.swift */,
 				MINIMAXTESTFR11111111111 /* MiniMaxProviderTests.swift */,
 				OCGOTESTFR11111111111 /* OpenCodeGoProviderTests.swift */,
 				GROKTESTFR11111111111 /* GrokProviderTests.swift */,
@@ -732,6 +735,7 @@
 			NANOGPTTESTBF1111111111 /* NanoGptProviderTests.swift in Sources */,
 			CLIFMTTESTBF1111111111 /* CLIFormatterTests.swift in Sources */,
 			DEEPSKIPTESTBF1111111 /* DeepSeekProviderTests.swift in Sources */,
+			SHMOCKTESTBF1111111111 /* SharedMockURLProtocol.swift in Sources */,
 			MINIMAXTESTBF11111111111 /* MiniMaxProviderTests.swift in Sources */,
 			OCGOTESTBF11111111111 /* OpenCodeGoProviderTests.swift in Sources */,
 			GROKTESTBF11111111111 /* GrokProviderTests.swift in Sources */,

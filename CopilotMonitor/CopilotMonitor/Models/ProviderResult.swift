@@ -1438,10 +1438,44 @@ enum CopilotCandidateDedupe {
     }
 }
 
+/// Shared lenient decoding helpers for JSON fields with loose shapes.
+extension KeyedDecodingContainer {
+    /// Tries each key in order, returning the first present value.
+    func decodeIfPresent<T: Decodable>(_ type: T.Type, forKeys keys: [Key]) throws -> T? {
+        for key in keys {
+            if let value = try decodeIfPresent(type, forKey: key) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    /// Decodes a Double that may arrive as a number or a numeric string.
+    /// Booleans and other shapes decode as nil.
+    func decodeFlexibleDoubleIfPresent(forKey key: Key) throws -> Double? {
+        try decodeFlexibleDoubleIfPresent(forKeys: [key])
+    }
+
+    func decodeFlexibleDoubleIfPresent(forKeys keys: [Key]) throws -> Double? {
+        for key in keys {
+            if let value = try? decodeIfPresent(Double.self, forKey: key) {
+                return value
+            }
+            if let value = try? decodeIfPresent(Int.self, forKey: key) {
+                return Double(value)
+            }
+            if let value = try? decodeIfPresent(String.self, forKey: key),
+               let parsed = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return parsed
+            }
+        }
+        return nil
+    }
+}
+
 /// Shared numeric parser for API response dictionaries.
 /// APIs may return Double, Int, NSNumber, or String for numeric fields.
-enum APIValueParser {
-    static func parseDouble(from dict: [String: Any], keys: [String]) -> Double {
+enum APIValueParser {    static func parseDouble(from dict: [String: Any], keys: [String]) -> Double {
         for key in keys {
             if let value = dict[key] as? Double { return value }
             if let value = dict[key] as? Int { return Double(value) }

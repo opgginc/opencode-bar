@@ -1,29 +1,27 @@
 #!/usr/bin/env bash
-# Query OpenCode Go API-key status and dashboard usage.
+# Query OpenCode Go API-key status and usage.
 #
 # OpenCode stores the Go model API key in the OpenCode data auth file under:
 #   ~/.local/share/opencode/auth.json -> ["opencode-go"].key
 #
-# The key validates access to the OpenCode Go model API. Usage windows are
-# exposed by the web dashboard. This script first uses explicit dashboard
-# config, then falls back to Chromium browser auth cookies and workspace
-# history from Chrome, Brave, Arc, or Edge.
+# The key validates access to the OpenCode Go model API. Usage windows come
+# from the official usage API (https://opencode.ai/zen/go/v1/usage) with the
+# same API key.
 
 set -euo pipefail
 
 PROVIDER_ID="opencode-go"
+# Mirrored in OpenCodeGoAPI (Providers/OpenCodeGoProvider.swift).
+# Update both when the endpoint moves.
 MODELS_URL="https://opencode.ai/zen/go/v1/models"
-DASHBOARD_BASE_URL="https://opencode.ai/workspace"
+USAGE_API_URL="https://opencode.ai/zen/go/v1/usage"
 
 JSON_OUTPUT=false
 MODELS_ONLY=false
 AUTH_FILE_OVERRIDE="${OPENCODE_GO_AUTH_FILE:-${OPENCODE_AUTH_FILE:-}}"
-CONFIG_FILE_OVERRIDE="${OPENCODE_GO_CONFIG_FILE:-}"
 API_KEY="${OPENCODE_GO_API_KEY:-${OPENCODE_API_KEY:-}}"
 API_KEY_SOURCE=""
-WORKSPACE_ID="${OPENCODE_GO_WORKSPACE_ID:-}"
-AUTH_COOKIE="${OPENCODE_GO_AUTH_COOKIE:-}"
-USAGE_CONFIG_SOURCE=""
+USAGE_SOURCE="OpenCode Go API (zen/go/v1/usage)"
 
 usage() {
     cat <<'EOF'
@@ -33,9 +31,6 @@ Options:
   --json                    Print machine-readable JSON
   --models-only             Validate the OpenCode Go API key only
   --auth-file PATH          Read OpenCode auth from PATH
-  --config-file PATH        Read dashboard usage config from PATH
-  --workspace-id ID         OpenCode workspace ID for dashboard usage scraping
-  --auth-cookie COOKIE      Browser auth cookie value for dashboard usage scraping
   -h, --help                Show this help
 
 Environment:
@@ -43,18 +38,6 @@ Environment:
   OPENCODE_API_KEY          OpenCode API key override used by the Go provider
   OPENCODE_GO_AUTH_FILE     OpenCode auth.json path override
   OPENCODE_AUTH_FILE        OpenCode auth.json path override
-  OPENCODE_GO_CONFIG_FILE   Dashboard config JSON path override
-  OPENCODE_GO_WORKSPACE_ID  Workspace ID for https://opencode.ai/workspace/<id>/go
-  OPENCODE_GO_AUTH_COOKIE   Browser auth cookie value for the OpenCode dashboard
-
-Config file:
-  ~/.config/opencode-bar/opencode-go.json or ~/.config/opencode-quota/opencode-go.json
-  with fields: {"workspaceId":"...","authCookie":"..."}
-
-Fallback:
-  If dashboard config is not set, the script tries to read the opencode.ai
-  auth cookie and recent /workspace/<id>/go visits from Chromium browser
-  profiles on this Mac.
 EOF
 }
 
@@ -96,21 +79,6 @@ parse_args() {
             --auth-file)
                 [[ $# -ge 2 ]] || fail "--auth-file requires a path"
                 AUTH_FILE_OVERRIDE="$2"
-                shift 2
-                ;;
-            --config-file)
-                [[ $# -ge 2 ]] || fail "--config-file requires a path"
-                CONFIG_FILE_OVERRIDE="$2"
-                shift 2
-                ;;
-            --workspace-id)
-                [[ $# -ge 2 ]] || fail "--workspace-id requires a value"
-                WORKSPACE_ID="$2"
-                shift 2
-                ;;
-            --auth-cookie)
-                [[ $# -ge 2 ]] || fail "--auth-cookie requires a value"
-                AUTH_COOKIE="$2"
                 shift 2
                 ;;
             -h|--help)
@@ -168,61 +136,32 @@ load_api_key() {
 
     API_KEY_SOURCE="$auth_file"
 }
-
-dashboard_config_candidates() {
-    if [[ -n "$CONFIG_FILE_OVERRIDE" ]]; then
-        printf '%s\n' "$CONFIG_FILE_OVERRIDE"
-    fi
-
-    if [[ -n "${XDG_CONFIG_HOME:-}" ]]; then
-        printf '%s\n' "$XDG_CONFIG_HOME/opencode-bar/opencode-go.json"
-        printf '%s\n' "$XDG_CONFIG_HOME/opencode-quota/opencode-go.json"
-    fi
-
-    printf '%s\n' "$HOME/.config/opencode-bar/opencode-go.json"
-    printf '%s\n' "$HOME/.config/opencode-quota/opencode-go.json"
-    printf '%s\n' "$HOME/Library/Application Support/opencode-bar/opencode-go.json"
-    printf '%s\n' "$HOME/Library/Application Support/opencode-quota/opencode-go.json"
+http_get_to_file() {
+    local url="$1"
+    local dest="$2"
+    shift 2
+    local status
+    status="$(
+        curl -sS -L -o "$dest" -w '%{http_code}' "$url" "$@" || true
+    )"
+    printf '%s' "$status"
+    [[ "$status" =~ ^2 ]]
 }
 
-load_dashboard_config() {
-    if [[ -n "$WORKSPACE_ID" && -n "$AUTH_COOKIE" ]]; then
-        USAGE_CONFIG_SOURCE="environment"
-        return
-    fi
-
-    local candidate
-    while IFS= read -r candidate; do
-        [[ -n "$candidate" ]] || continue
-        [[ -f "$candidate" ]] || continue
-
-        local workspace_id auth_cookie
-        workspace_id="$(jq -r '.workspaceId // .workspaceID // .workspace_id // empty' "$candidate" 2>/dev/null || true)"
-        auth_cookie="$(jq -r '.authCookie // .auth_cookie // .cookie // empty' "$candidate" 2>/dev/null || true)"
-
-        if [[ -n "$workspace_id" && -n "$auth_cookie" ]]; then
-            [[ -n "$WORKSPACE_ID" ]] || WORKSPACE_ID="$workspace_id"
-            [[ -n "$AUTH_COOKIE" ]] || AUTH_COOKIE="$auth_cookie"
-            USAGE_CONFIG_SOURCE="$candidate"
-            return
-        fi
-    done < <(dashboard_config_candidates)
+# Extract a server error message from a JSON failure body.
+json_error_message() {
+    jq -r '.error.message // .message // .error // empty' "$1" 2>/dev/null || true
 }
 
 validate_models_api() {
     local body_file
     body_file="$(mktemp)"
-
     local status
-    status="$(
-        curl -sS -L -o "$body_file" -w '%{http_code}' "$MODELS_URL" \
-            -H "Authorization: Bearer $API_KEY" \
-            -H "Accept: application/json" || true
-    )"
-
-    if [[ ! "$status" =~ ^2 ]]; then
+    if ! status="$(http_get_to_file "$MODELS_URL" "$body_file" \
+        -H "Authorization: Bearer $API_KEY" \
+        -H "Accept: application/json")"; then
         local message
-        message="$(jq -r '.error.message // .message // .error // empty' "$body_file" 2>/dev/null || true)"
+        message="$(json_error_message "$body_file")"
         rm -f "$body_file"
         [[ -n "$message" ]] || message="HTTP $status from $MODELS_URL"
         fail "OpenCode Go API key validation failed: $message"
@@ -234,351 +173,75 @@ validate_models_api() {
     printf '%s\n' "$model_count"
 }
 
-fetch_dashboard_usage() {
-    [[ -n "$WORKSPACE_ID" ]] || return 3
-    [[ -n "$AUTH_COOKIE" ]] || return 3
-
-    local dashboard_url="$DASHBOARD_BASE_URL/$WORKSPACE_ID/go"
-    local cookie_header="auth=$AUTH_COOKIE"
-    if [[ "$AUTH_COOKIE" == *"auth="* ]]; then
-        cookie_header="$AUTH_COOKIE"
-    fi
-
-    local html_file
-    html_file="$(mktemp)"
-
+fetch_usage_api() {
+    local body_file
+    body_file="$(mktemp)"
     local status
-    status="$(
-        curl -sS -L -o "$html_file" -w '%{http_code}' "$dashboard_url" \
-            -H "Accept: text/html,application/xhtml+xml" \
-            -H "Cookie: $cookie_header" \
-            -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" || true
-    )"
-
-    if [[ ! "$status" =~ ^2 ]]; then
-        rm -f "$html_file"
+    if ! status="$(http_get_to_file "$USAGE_API_URL" "$body_file" \
+        -H "Authorization: Bearer $API_KEY" \
+        -H "Accept: application/json")"; then
+        local message
+        message="$(json_error_message "$body_file")"
+        rm -f "$body_file"
+        [[ -n "$message" ]] || message="OpenCode Go usage API request failed (HTTP $status)"
+        jq -n --arg message "$message" '{"error": $message}'
         return 4
     fi
 
-    python3 - "$html_file" <<'PY'
-import datetime as dt
-import html
-import json
-import re
-import sys
-
-path = sys.argv[1]
-raw = open(path, "r", encoding="utf-8", errors="ignore").read()
-text = html.unescape(raw).replace('\\"', '"')
-
-fields = {
-    "rolling": ("rollingUsage", "5h"),
-    "weekly": ("weeklyUsage", "Weekly"),
-    "monthly": ("monthlyUsage", "Monthly"),
-}
-
-number = r'"?(-?\d+(?:\.\d+)?)"?'
-now = dt.datetime.now(dt.timezone.utc)
-windows = {}
-
-def duration(seconds):
-    seconds = max(0, int(seconds))
-    days, rem = divmod(seconds, 86400)
-    hours, rem = divmod(rem, 3600)
-    minutes = rem // 60
-    if days:
-        return f"{days}d {hours}h"
-    if hours:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m"
-
-for key, (field, label) in fields.items():
-    object_match = re.search(rf'["\']?{re.escape(field)}["\']?\s*:\s*(?:\$R\[\d+\]\s*=\s*)?\{{(?P<body>[^{{}}]*)\}}', text, re.DOTALL)
-    if not object_match:
-        continue
-
-    body = object_match.group("body")
-    usage_match = re.search(rf'["\']?usagePercent["\']?\s*:\s*{number}', body)
-    reset_match = re.search(rf'["\']?resetInSec["\']?\s*:\s*{number}', body)
-    if not usage_match or not reset_match:
-        continue
-
-    usage_percent = float(usage_match.group(1))
-    reset_seconds = int(float(reset_match.group(1)))
-    reset_at = now + dt.timedelta(seconds=reset_seconds)
-    windows[key] = {
-        "field": field,
-        "label": label,
-        "usage_percent": usage_percent,
-        "percent_remaining": max(0.0, 100.0 - usage_percent),
-        "reset_in_seconds": reset_seconds,
-        "reset_in": duration(reset_seconds),
-        "resets_at": reset_at.isoformat().replace("+00:00", "Z"),
-    }
-
-if not windows:
-    print(json.dumps({"error": "No OpenCode Go usage windows found in dashboard HTML"}))
-    sys.exit(2)
-
-print(json.dumps({"windows": windows}, sort_keys=True))
-PY
-
+    parse_go_windows "$body_file"
     local parse_status=$?
-    rm -f "$html_file"
+    rm -f "$body_file"
     return "$parse_status"
 }
 
-discover_browser_dashboard_candidates() {
-    python3 <<'PY'
-import json
-import os
-import re
-import shutil
-import sqlite3
-import subprocess
-import sys
-import tempfile
-from dataclasses import dataclass
-from hashlib import pbkdf2_hmac
-from pathlib import Path
-
-try:
-    from Crypto.Cipher import AES
-    CRYPTO_BACKEND = "pycryptodome"
-except ImportError:
-    try:
-        from cryptography.hazmat.backends import default_backend
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-        CRYPTO_BACKEND = "cryptography"
-    except ImportError:
-        CRYPTO_BACKEND = None
-
-
-@dataclass
-class Browser:
-    name: str
-    base: Path
-    keychain_service: str
-    keychain_account: str
-
-
-BROWSERS = [
-    Browser("Chrome", Path("~/Library/Application Support/Google/Chrome").expanduser(), "Chrome Safe Storage", "Chrome"),
-    Browser("Brave", Path("~/Library/Application Support/BraveSoftware/Brave-Browser").expanduser(), "Brave Safe Storage", "Brave"),
-    Browser("Arc", Path("~/Library/Application Support/Arc/User Data").expanduser(), "Arc Safe Storage", "Arc"),
-    Browser("Edge", Path("~/Library/Application Support/Microsoft Edge").expanduser(), "Microsoft Edge Safe Storage", "Microsoft Edge"),
-]
-
-
-def fail_quietly():
-    sys.exit(0)
-
-
-if CRYPTO_BACKEND is None:
-    print("note: install pycryptodome or cryptography to enable browser cookie discovery", file=sys.stderr)
-    fail_quietly()
-
-
-def profiles(browser):
-    if not browser.base.exists():
-        return []
-    result = []
-    for child in browser.base.iterdir():
-        if child.name == "Default" or child.name.startswith("Profile "):
-            if (child / "Cookies").exists() and (child / "History").exists():
-                result.append(child)
-    return result
-
-
-def key_for(browser):
-    password = subprocess.check_output(
-        [
-            "security",
-            "find-generic-password",
-            "-s",
-            browser.keychain_service,
-            "-a",
-            browser.keychain_account,
-            "-w",
-        ],
-        stderr=subprocess.DEVNULL,
-    ).rstrip(b"\n")
-    return pbkdf2_hmac("sha1", password, b"saltysalt", 1003, 16)
-
-
-def decrypt_cookie(encrypted_value, key):
-    if not encrypted_value:
-        return ""
-    if not encrypted_value.startswith((b"v10", b"v11")):
-        try:
-            return encrypted_value.decode("utf-8")
-        except UnicodeDecodeError:
-            return ""
-
-    encrypted_value = encrypted_value[3:]
-    iv = b" " * 16
-    if CRYPTO_BACKEND == "pycryptodome":
-        decrypted = AES.new(key, AES.MODE_CBC, iv).decrypt(encrypted_value)
-    else:
-        decryptor = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend()).decryptor()
-        decrypted = decryptor.update(encrypted_value) + decryptor.finalize()
-
-    padding = decrypted[-1]
-    if 1 <= padding <= 16 and decrypted.endswith(bytes([padding]) * padding):
-        decrypted = decrypted[:-padding]
-
-    if len(decrypted) > 32 and decrypted[32:].startswith(b"Fe26."):
-        decrypted = decrypted[32:]
-    elif len(decrypted) > 32:
-        candidate = decrypted[32:]
-        if all((byte >= 32 or byte in (9, 10, 13)) for byte in candidate[:16]):
-            decrypted = candidate
-
-    try:
-        return decrypted.decode("utf-8")
-    except UnicodeDecodeError:
-        return ""
-
-
-def copy_db(path):
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-    tmp.close()
-    shutil.copy2(path, tmp.name)
-    return tmp.name
-
-
-def auth_cookie(profile, key):
-    tmp_path = copy_db(profile / "Cookies")
-    try:
-        conn = sqlite3.connect(tmp_path)
-        rows = conn.execute(
-            """
-            SELECT encrypted_value, value
-            FROM cookies
-            WHERE host_key LIKE '%opencode.ai' AND name = 'auth'
-            ORDER BY expires_utc DESC
-            LIMIT 1
-            """
-        ).fetchall()
-        conn.close()
-    finally:
-        os.unlink(tmp_path)
-
-    if not rows:
-        return ""
-
-    encrypted_value, plain_value = rows[0]
-    if plain_value:
-        return plain_value
-    return decrypt_cookie(encrypted_value, key)
-
-
-def workspace_history(profile):
-    tmp_path = copy_db(profile / "History")
-    try:
-        conn = sqlite3.connect(tmp_path)
-        rows = conn.execute(
-            """
-            SELECT url, last_visit_time
-            FROM urls
-            WHERE url LIKE 'https://opencode.ai/workspace/%'
-            ORDER BY last_visit_time DESC
-            LIMIT 100
-            """
-        ).fetchall()
-        conn.close()
-    finally:
-        os.unlink(tmp_path)
-
-    seen = set()
-    result = []
-    for url, last_visit_time in rows:
-        match = re.search(r"/workspace/(wrk_[A-Z0-9]+)", url)
-        if not match:
-            continue
-        workspace_id = match.group(1)
-        if workspace_id in seen:
-            continue
-        seen.add(workspace_id)
-        result.append((workspace_id, last_visit_time))
-    return result
-
-
-all_candidates = []
-for browser in BROWSERS:
-    try:
-        key = key_for(browser)
-    except Exception:
-        continue
-
-    for profile in profiles(browser):
-        try:
-            cookie = auth_cookie(profile, key)
-            workspaces = workspace_history(profile)
-        except Exception:
-            continue
-
-        if not cookie or not workspaces:
-            continue
-
-        for workspace_id, last_visit_time in workspaces:
-            all_candidates.append(
-                {
-                    "workspaceId": workspace_id,
-                    "authCookie": cookie,
-                    "source": f"Browser Cookies ({browser.name} {profile.name})",
-                    "lastVisitTime": last_visit_time,
-                }
-            )
-
-seen = set()
-for candidate in sorted(all_candidates, key=lambda item: item["lastVisitTime"], reverse=True):
-    key = (candidate["workspaceId"], candidate["authCookie"])
-    if key in seen:
-        continue
-    seen.add(key)
-    print(json.dumps(candidate, separators=(",", ":")))
-PY
-}
-
-fetch_browser_dashboard_usage() {
-    local candidates_file
-    candidates_file="$(mktemp)"
-    discover_browser_dashboard_candidates > "$candidates_file"
-
-    if [[ ! -s "$candidates_file" ]]; then
-        rm -f "$candidates_file"
-        return 3
-    fi
-
-    local line
-    local found_usage_json=""
-    while IFS= read -r line; do
-        [[ -n "$line" ]] || continue
-
-        WORKSPACE_ID="$(jq -r '.workspaceId // empty' <<<"$line")"
-        AUTH_COOKIE="$(jq -r '.authCookie // empty' <<<"$line")"
-        USAGE_CONFIG_SOURCE="$(jq -r '.source // "Browser Cookies"' <<<"$line")"
-
-        [[ -n "$WORKSPACE_ID" && -n "$AUTH_COOKIE" ]] || continue
-
-        local usage_json
-        if usage_json="$(fetch_dashboard_usage)"; then
-            found_usage_json="$(
-                jq --arg source "$USAGE_CONFIG_SOURCE" '. + {_usage_source: $source}' <<<"$usage_json"
-            )"
-            break
-        fi
-    done < "$candidates_file"
-
-    rm -f "$candidates_file"
-
-    if [[ -n "$found_usage_json" ]]; then
-        printf '%s\n' "$found_usage_json"
-        return 0
-    fi
-
-    return 4
+# Usage-window parser for the usage API response. Pure jq: no Python needed.
+# Usage: parse_go_windows <file>
+# Prints {"windows": {...}} on success or {"error": ...} on failure.
+parse_go_windows() {
+    jq '
+def parse_reset:
+  if type != "string" or length == 0 then null
+  else ((. | sub("\\.[0-9]+Z$"; "Z")) | try fromdateiso8601 catch null) as $t
+    | if $t == null then null else {epoch: $t} end
+  end;
+def duration:
+  (. | floor | if . < 0 then 0 else . end) as $s
+  | ($s / 86400 | floor) as $d
+  | (($s % 86400) / 3600 | floor) as $h
+  | (($s % 3600) / 60 | floor) as $m
+  | if $d > 0 then "\($d)d \($h)h"
+    elif $h > 0 then "\($h)h \($m)m"
+    else "\($m)m" end;
+def parse_percent:
+  if type == "boolean" or . == null then null
+  elif type == "number" then .
+  elif type == "string" then (try tonumber catch null)
+  else null end;
+(now | floor) as $now
+| ((.usage | select(type == "object")) // {}) as $u | (["rolling", "weekly", "monthly"] | map(
+      . as $k
+      | ($u[$k] | select(type == "object")) as $e
+      | select($e != null)
+      | select((($e.status | type) != "string") or (($e.status | ascii_downcase) == "ok"))
+      | ($e.percent | parse_percent) as $p
+      | select($p != null)
+      | ($e.resetsAt | parse_reset) as $r
+      | {
+          key: $k,
+          value: {
+            field: $k,
+            label: ({"rolling": "5h", "weekly": "Weekly", "monthly": "Monthly"}[$k]),
+            usage_percent: $p,
+            percent_remaining: ([0, 100 - $p] | max),
+            reset_in_seconds: (if $r == null then null else ([$r.epoch - $now, 0] | max | floor) end),
+            reset_in: (if $r == null then null else ($r.epoch - $now | duration) end),
+            resets_at: $e.resetsAt
+          }
+        }
+    ) | from_entries) as $w
+| if ($w | length) == 0 then {error: "No OpenCode Go usage windows found in API response"} | ., halt_error
+  else {windows: $w} end
+' "$1"
 }
 
 print_text_result() {
@@ -599,23 +262,16 @@ print_text_result() {
     echo ""
     if [[ -z "$usage_json" ]]; then
         echo "Usage: not available"
-        if [[ -n "$usage_error" ]]; then
-            echo "Reason: $usage_error"
-        else
-            echo "Reason: dashboard usage requires a browser login/history match, OPENCODE_GO_WORKSPACE_ID and OPENCODE_GO_AUTH_COOKIE, or ~/.config/opencode-bar/opencode-go.json."
-        fi
-        echo "Note: no public API-key-only usage endpoint was found for OpenCode Go."
+        echo "Reason: ${usage_error:-usage API request failed}"
         return
     fi
 
-    if [[ -n "$USAGE_CONFIG_SOURCE" ]]; then
-        echo "Usage source: $USAGE_CONFIG_SOURCE"
-    fi
+    echo "Usage source: $USAGE_SOURCE"
     echo "$usage_json" | jq -r '
         def pct: ((. * 100 | round) / 100 | tostring);
         .windows
         | to_entries[]
-        | "\(.value.label): \(.value.usage_percent | pct)% used, \(.value.percent_remaining | pct)% left, resets in \(.value.reset_in) (\(.value.resets_at))"
+        | "\(.value.label): \(.value.usage_percent | pct)% used, \(.value.percent_remaining | pct)% left, resets in \(.value.reset_in // "unknown") (\(.value.resets_at // "unknown"))"
     '
 }
 
@@ -629,7 +285,7 @@ print_json_result() {
         --arg auth_source "$API_KEY_SOURCE" \
         --arg key_preview "$(mask_secret "$API_KEY")" \
         --arg models_url "$MODELS_URL" \
-        --arg usage_source "$USAGE_CONFIG_SOURCE" \
+        --arg usage_source "$USAGE_SOURCE" \
         --argjson model_count "$model_count" \
         --argjson usage "$usage_json" \
         --arg usage_error "$usage_error" \
@@ -654,10 +310,8 @@ main() {
     parse_args "$@"
     require_command curl
     require_command jq
-    require_command python3
 
     load_api_key
-    load_dashboard_config
 
     local model_count
     model_count="$(validate_models_api)"
@@ -673,37 +327,12 @@ main() {
 
     local usage_json=""
     local usage_error=""
-    if usage_json="$(fetch_dashboard_usage)"; then
-        :
+    local api_output=""
+    if ! api_output="$(fetch_usage_api)"; then
+        usage_error="$(jq -r '.error // empty' <<<"$api_output" 2>/dev/null || true)"
+        [[ -n "$usage_error" ]] || usage_error="usage API request failed"
     else
-        local status=$?
-        if usage_json="$(fetch_browser_dashboard_usage)"; then
-            :
-        else
-            local browser_status=$?
-            case "$status:$browser_status" in
-                3:3)
-                    usage_error="Dashboard usage requires a browser login/history match, OPENCODE_GO_WORKSPACE_ID and OPENCODE_GO_AUTH_COOKIE, or ~/.config/opencode-bar/opencode-go.json."
-                    ;;
-                4:3|4:4)
-                    usage_error="Dashboard request failed. Check workspace ID and auth cookie, or log in to opencode.ai and visit the Go dashboard once."
-                    ;;
-                *)
-                    usage_error="$(printf '%s' "$usage_json" | jq -r '.error // "Dashboard usage parsing failed."' 2>/dev/null || true)"
-                    [[ -n "$usage_error" ]] || usage_error="Dashboard usage parsing failed."
-                    ;;
-            esac
-            usage_json=""
-        fi
-    fi
-
-    if [[ -n "$usage_json" ]]; then
-        local embedded_usage_source
-        embedded_usage_source="$(jq -r '._usage_source // empty' <<<"$usage_json" 2>/dev/null || true)"
-        if [[ -n "$embedded_usage_source" ]]; then
-            USAGE_CONFIG_SOURCE="$embedded_usage_source"
-            usage_json="$(jq 'del(._usage_source)' <<<"$usage_json")"
-        fi
+        usage_json="$api_output"
     fi
 
     if [[ "$JSON_OUTPUT" == true ]]; then
@@ -717,4 +346,6 @@ main() {
     fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

@@ -288,29 +288,11 @@ curl -s "https://opencode.ai/zen/go/v1/models" \
   -H "Accept: application/json"
 ```
 
-OpenCode Go usage is currently exposed through the OpenCode dashboard. OpenCode Bar reads the dashboard page when both a workspace ID and browser auth cookie are configured:
-
-```json
-{
-  "workspaceId": "your-workspace-id",
-  "authCookie": "your-auth-cookie"
-}
-```
-
-Supported config paths:
-
-- `~/.config/opencode-bar/opencode-go.json`
-- `~/.config/opencode-quota/opencode-go.json`
-
-Environment overrides:
-
-- `OPENCODE_GO_WORKSPACE_ID`
-- `OPENCODE_GO_AUTH_COOKIE`
-- `OPENCODE_GO_CONFIG_FILE`
+OpenCode Go usage comes from the official `GET https://opencode.ai/zen/go/v1/usage` API using the `opencode-go` API key from `auth.json` (`Authorization: Bearer <key>`). It returns `rolling` (5h), `weekly`, and `monthly` windows with `percent` used and `resetsAt` timestamps.
 
 OpenCode Go is displayed with explicit 5-hour, weekly, and monthly used percentages. The official limits are value-based: 5h `$12`, weekly `$30`, monthly `$60`; the subscription preset is `Go ($10/m)`.
 
-The bundled [`scripts/query-opencode-go.sh`](/Users/kargnas/projects/opencode-bar/scripts/query-opencode-go.sh) validates the API key and prints the dashboard usage windows when dashboard config is available.
+The bundled `scripts/query-opencode-go.sh` validates the API key and prints the usage API windows.
 
 ---
 
