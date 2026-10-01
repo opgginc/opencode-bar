@@ -127,6 +127,9 @@ final class DeepSeekProviderTests: XCTestCase {
         XCTAssertEqual(details.balanceCurrencySymbol, "¥")
         XCTAssertEqual(details.balanceGranted, 0.0)
         XCTAssertEqual(details.balanceToppedUp, 103.49)
+        XCTAssertEqual(result.balanceInfos, [
+            ProviderBalanceInfo(currency: "CNY", totalBalance: 103.49, grantedBalance: 0.0, toppedUpBalance: 103.49)
+        ])
     }
 
     func testFetchUnavailableBalanceStillReturnsData() async throws {
@@ -178,26 +181,28 @@ final class DeepSeekProviderTests: XCTestCase {
 
     // MARK: - Multi-currency policy
 
-    /// CNY must win over USD regardless of array order.
-    func testMultiCurrencyPrefersCNYRegardlessOfOrder() async throws {
-        let usdFirst = """
-        {"is_available": true, "balance_infos": [
-          {"currency": "USD", "total_balance": "12.00", "granted_balance": "0.00", "topped_up_balance": "12.00"},
-          {"currency": "CNY", "total_balance": "88.88", "granted_balance": "0.00", "topped_up_balance": "88.88"}
-        ]}
-        """
+    /// Both currencies must be preserved, including a zero CNY balance next to funded USD.
+    func testMultiCurrencyPreservesUSDWhenCNYBalanceIsZero() async throws {
         let cnyFirst = """
         {"is_available": true, "balance_infos": [
-          {"currency": "CNY", "total_balance": "88.88", "granted_balance": "0.00", "topped_up_balance": "88.88"},
-          {"currency": "USD", "total_balance": "12.00", "granted_balance": "0.00", "topped_up_balance": "12.00"}
+          {"currency": "CNY", "total_balance": "0.00", "granted_balance": "0.00", "topped_up_balance": "0.00"},
+          {"currency": "USD", "total_balance": "26.00", "granted_balance": "0.00", "topped_up_balance": "26.00"}
         ]}
         """
-        for body in [usdFirst, cnyFirst] {
+        let usdFirst = """
+        {"is_available": true, "balance_infos": [
+          {"currency": "USD", "total_balance": "26.00", "granted_balance": "0.00", "topped_up_balance": "26.00"},
+          {"currency": "CNY", "total_balance": "0.00", "granted_balance": "0.00", "topped_up_balance": "0.00"}
+        ]}
+        """
+        for body in [cnyFirst, usdFirst] {
             let result = try await makeProvider(body: body).fetch()
             let details = try XCTUnwrap(result.details)
-            XCTAssertEqual(details.balanceCurrency, "CNY", "CNY must win regardless of array order")
-            XCTAssertEqual(details.creditsBalance, 88.88)
-            XCTAssertEqual(details.balanceCurrencySymbol, "¥")
+            XCTAssertEqual(details.balanceCurrency, "USD", "Use a funded currency for legacy single-balance fields")
+            XCTAssertEqual(details.creditsBalance, 26.0)
+            XCTAssertEqual(details.balanceCurrencySymbol, "$")
+            XCTAssertEqual(result.balanceInfos?.map(\.currency), ["CNY", "USD"])
+            XCTAssertEqual(result.balanceInfos?.map(\.totalBalance), [0.0, 26.0])
         }
     }
 
@@ -232,28 +237,139 @@ final class DeepSeekProviderTests: XCTestCase {
         }
     }
 
+    /// One broken ledger must not hide a valid one: a malformed total_balance
+    /// is skipped (logged) while the usable currency still renders.
+    func testMalformedLedgerIsSkippedWhenAnotherIsUsable() async throws {
+        let mixed = """
+        {"is_available": true, "balance_infos": [
+          {"currency": "USD", "total_balance": "not-a-number", "granted_balance": "0.00", "topped_up_balance": "26.00"},
+          {"currency": "CNY", "total_balance": "10.00", "granted_balance": "0.00", "topped_up_balance": "10.00"}
+        ]}
+        """
+        let result = try await makeProvider(body: mixed).fetch()
+        XCTAssertEqual(result.balanceInfos?.map(\.currency), ["CNY"])
+        XCTAssertEqual(result.balanceInfos?.first?.totalBalance, 10.0)
+        XCTAssertEqual(result.details?.creditsBalance, 10.0)
+    }
+
+    /// Non-finite secondary amounts must not reach menu or JSON formatting.
+    func testNonFiniteSecondaryBalancesFallBackToZero() async throws {
+        let body = """
+        {"is_available": true, "balance_infos": [
+          {"currency": "USD", "total_balance": "26.00", "granted_balance": "NaN", "topped_up_balance": "Infinity"}
+        ]}
+        """
+        let result = try await makeProvider(body: body).fetch()
+        let balance = try XCTUnwrap(result.balanceInfos?.first)
+        XCTAssertEqual(balance.totalBalance, 26.0)
+        XCTAssertEqual(balance.grantedBalance, 0.0)
+        XCTAssertEqual(balance.toppedUpBalance, 0.0)
+    }
+
+    /// An unsupported code next to a usable ledger is skipped quietly while
+    /// the supported currency still renders.
+    func testUnsupportedLedgerNextToSupportedStillRendersSupported() async throws {
+        let mixed = """
+        {"is_available": true, "balance_infos": [
+          {"currency": "EUR", "total_balance": "12.00", "granted_balance": "0.00", "topped_up_balance": "12.00"},
+          {"currency": "CNY", "total_balance": "10.00", "granted_balance": "0.00", "topped_up_balance": "10.00"}
+        ]}
+        """
+        let result = try await makeProvider(body: mixed).fetch()
+        XCTAssertEqual(result.balanceInfos?.map(\.currency), ["CNY"])
+        XCTAssertEqual(result.balanceInfos?.first?.totalBalance, 10.0)
+        XCTAssertEqual(result.details?.creditsBalance, 10.0)
+    }
+
+    /// When every supported ledger is malformed the fetch still fails,
+    /// instead of silently reporting an empty account.
+    func testAllSupportedLedgersMalformedThrowsDecodingError() async throws {
+        let broken = """
+        {"is_available": true, "balance_infos": [
+          {"currency": "CNY", "total_balance": "?", "granted_balance": "0.00", "topped_up_balance": "0.00"},
+          {"currency": "USD", "total_balance": "", "granted_balance": "0.00", "topped_up_balance": "0.00"}
+        ]}
+        """
+        do {
+            _ = try await makeProvider(body: broken).fetch()
+            XCTFail("Expected decodingError when no ledger is usable")
+        } catch let error as ProviderError {
+            guard case .decodingError = error else {
+                return XCTFail("Expected decodingError, got \(error)")
+            }
+        }
+    }
+
     // MARK: - Detail menu rows
 
-    /// The DeepSeek detail submenu rows: Balance/Topped-up/Granted in display
-    /// order, formatted with the currency symbol.
     @MainActor
-    func testDeepSeekBalanceRowsOrderValuesAndCurrency() {
-        let details = DetailedUsage(
-            creditsBalance: 103.49,
-            balanceCurrency: "CNY",
-            balanceGranted: 0.0,
-            balanceToppedUp: 103.49
+    func testDeepSeekBalanceRowTextsKeepBothCurrenciesSeparate() {
+        // The provider stores balances in display order (CNY before USD);
+        // the rows keep both currencies separate, follow that order, and pin
+        // the exact rendered string the submenu shows.
+        let balances = [
+            ProviderBalanceInfo(currency: "CNY", totalBalance: 0.0, grantedBalance: 0.0, toppedUpBalance: 0.0),
+            ProviderBalanceInfo(currency: "USD", totalBalance: 26.0, grantedBalance: 0.0, toppedUpBalance: 26.0)
+        ]
+
+        let rows = StatusBarController.deepSeekBalanceRowTexts(balanceInfos: balances)
+
+        XCTAssertEqual(rows, [
+            "Balance (CNY): ¥0.00",
+            "Topped-up (CNY): ¥0.00",
+            "Granted (CNY): ¥0.00",
+            "Balance (USD): $26.00",
+            "Topped-up (USD): $26.00",
+            "Granted (USD): $0.00"
+        ])
+    }
+
+    /// The main row must drop a zero CNY ledger and keep only the funded USD,
+    /// but fall back to showing all when every currency is zero.
+    @MainActor
+    func testDeepSeekMainRowShowsOnlyFundedCurrencies() {
+        let funded = [
+            ProviderBalanceInfo(currency: "CNY", totalBalance: 0.0, grantedBalance: 0.0, toppedUpBalance: 0.0),
+            ProviderBalanceInfo(currency: "USD", totalBalance: 26.0, grantedBalance: 0.0, toppedUpBalance: 26.0)
+        ]
+        XCTAssertEqual(StatusBarController.deepSeekMainRowBalances(funded).map(\.currency), ["USD"])
+
+        let allZero = [
+            ProviderBalanceInfo(currency: "CNY", totalBalance: 0.0, grantedBalance: 0.0, toppedUpBalance: 0.0),
+            ProviderBalanceInfo(currency: "USD", totalBalance: 0.0, grantedBalance: 0.0, toppedUpBalance: 0.0)
+        ]
+        XCTAssertEqual(StatusBarController.deepSeekMainRowBalances(allZero).map(\.currency), ["CNY", "USD"])
+    }
+
+    /// The pinned status bar and the dropdown row share one balance string:
+    /// funded currencies only, or all when nothing is funded.
+    @MainActor
+    func testFundedBalanceTextMatchesRowTitleRule() {
+        let funded = [
+            ProviderBalanceInfo(currency: "CNY", totalBalance: 0.0, grantedBalance: 0.0, toppedUpBalance: 0.0),
+            ProviderBalanceInfo(currency: "USD", totalBalance: 26.0, grantedBalance: 0.0, toppedUpBalance: 26.0)
+        ]
+        XCTAssertEqual(StatusBarController.fundedBalanceText(funded), "$26.00")
+
+        let bothFunded = [
+            ProviderBalanceInfo(currency: "CNY", totalBalance: 103.49, grantedBalance: 0.0, toppedUpBalance: 103.49),
+            ProviderBalanceInfo(currency: "USD", totalBalance: 26.0, grantedBalance: 0.0, toppedUpBalance: 26.0)
+        ]
+        XCTAssertEqual(StatusBarController.fundedBalanceText(bothFunded), "¥103.49, $26.00")
+
+        let balanceResult = ProviderResult(
+            usage: .payAsYouGo(utilization: 0, cost: nil, resetsAt: nil),
+            details: nil,
+            balanceInfos: funded
         )
+        XCTAssertEqual(StatusBarController.balanceStatusText(for: balanceResult), "$26.00")
 
-        let rows = StatusBarController.deepSeekBalanceRows(details: details)
-        XCTAssertEqual(rows.map(\.label), ["Balance", "Topped-up", "Granted"])
-        XCTAssertEqual(rows[0].value, 103.49)
-        XCTAssertEqual(rows[1].value, 103.49)
-        XCTAssertEqual(rows[2].value, 0.0)
-
-        // The menu renders "label: <symbol><value>".
-        let rendered = rows.map { String(format: "%@: %@%.2f", $0.label, details.balanceCurrencySymbol, $0.value) }
-        XCTAssertEqual(rendered, ["Balance: ¥103.49", "Topped-up: ¥103.49", "Granted: ¥0.00"])
+        let costResult = ProviderResult(
+            usage: .payAsYouGo(utilization: 0, cost: 5.0, resetsAt: nil),
+            details: nil,
+            balanceInfos: funded
+        )
+        XCTAssertNil(StatusBarController.balanceStatusText(for: costResult))
     }
 
 }

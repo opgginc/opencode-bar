@@ -62,16 +62,25 @@ enum ModelUsageGrouper {
 
 extension StatusBarController {
 
-    func createDetailSubmenu(_ details: DetailedUsage, identifier: ProviderIdentifier, accountId: String? = nil) -> NSMenu {
+    func createDetailSubmenu(
+        _ details: DetailedUsage,
+        identifier: ProviderIdentifier,
+        accountId: String? = nil,
+        balanceInfos: [ProviderBalanceInfo]? = nil
+    ) -> NSMenu {
         let submenu = NSMenu()
         let subscriptionAccountId = resolvedSubscriptionAccountId(details: details, fallback: accountId)
 
         switch identifier {
         case .deepSeek:
-            for (label, value) in Self.deepSeekBalanceRows(details: details) {
-                let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "%@: %@%.2f", label, details.balanceCurrencySymbol, value))
-                submenu.addItem(item)
+            if let balanceInfos, !balanceInfos.isEmpty {
+                for text in Self.deepSeekBalanceRowTexts(balanceInfos: balanceInfos) {
+                    let item = NSMenuItem()
+                    item.view = createDisabledLabelView(text: text)
+                    submenu.addItem(item)
+                }
+            } else {
+                debugLog("createDetailSubmenu(deepSeek): missing balanceInfos")
             }
 
         case .openRouter:
@@ -1043,20 +1052,6 @@ extension StatusBarController {
         return submenu
     }
 
-    /// Label/value pairs for the DeepSeek balance detail rows, in display
-    /// order. Extracted as a pure function so the menu rows are testable
-    /// without instantiating StatusBarController.
-    static func deepSeekBalanceRows(details: DetailedUsage) -> [(label: String, value: Double)] {
-        let rows: [(String, Double?)] = [
-            ("Balance", details.creditsBalance),
-            ("Topped-up", details.balanceToppedUp),
-            ("Granted", details.balanceGranted)
-        ]
-        return rows.compactMap { label, value -> (label: String, value: Double)? in
-            value.map { (label: label, value: $0) }
-        }
-    }
-
     private func resolvedSubscriptionAccountId(details: DetailedUsage, fallback accountId: String?) -> String? {
         if let email = details.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
            !email.isEmpty {
@@ -1069,6 +1064,53 @@ extension StatusBarController {
         }
 
         return nil
+    }
+
+    /// Rendered menu rows for the DeepSeek balance submenu: Balance /
+    /// Topped-up / Granted per currency, e.g. "Balance (CNY): ¥103.49".
+    /// The provider stores balances in display order (CNY before USD), so
+    /// rows follow the stored order; the ordering rule lives in the provider.
+    /// Returns the visible strings so tests pin the exact rendering.
+    static func deepSeekBalanceRowTexts(balanceInfos: [ProviderBalanceInfo]) -> [String] {
+        balanceInfos.flatMap { balance in
+            [
+                ("Balance", balance.totalBalance),
+                ("Topped-up", balance.toppedUpBalance),
+                ("Granted", balance.grantedBalance)
+            ].map { label, value in
+                String(format: "%@ (%@): %@%.2f", label, balance.currency, balance.currencySymbol, value)
+            }
+        }
+    }
+
+    /// Currencies to show in the main pay-as-you-go row: only funded balances,
+    /// falling back to all when everything is zero so the account state is
+    /// still visible. Pure/static for testing.
+    static func deepSeekMainRowBalances(_ balanceInfos: [ProviderBalanceInfo]) -> [ProviderBalanceInfo] {
+        let funded = balanceInfos.filter(\.isFunded)
+        return funded.isEmpty ? balanceInfos : funded
+    }
+
+    /// Balance list shared by the pay-as-you-go row title and the pinned
+    /// status-bar text (funded currencies only), e.g. "$26.00" or
+    /// "¥103.49, $26.00". Both surfaces render from this one function so
+    /// they can never disagree.
+    static func fundedBalanceText(_ balanceInfos: [ProviderBalanceInfo]) -> String {
+        deepSeekMainRowBalances(balanceInfos)
+            .map { String(format: "%@%.2f", $0.currencySymbol, $0.totalBalance) }
+            .joined(separator: ", ")
+    }
+
+    /// Balance text for nil-cost pay-as-you-go results. Shared by the menu
+    /// row title and pinned status-bar display.
+    static func balanceStatusText(for result: ProviderResult) -> String? {
+        guard case .payAsYouGo(_, let cost, _) = result.usage,
+              cost == nil,
+              let balanceInfos = result.balanceInfos,
+              !balanceInfos.isEmpty else {
+            return nil
+        }
+        return fundedBalanceText(balanceInfos)
     }
 
     private func addHorizontalDivider(to submenu: NSMenu) {

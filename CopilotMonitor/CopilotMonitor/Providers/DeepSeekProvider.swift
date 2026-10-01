@@ -5,17 +5,23 @@ private let logger = Logger(subsystem: "com.opencodeproviders", category: "DeepS
 
 /// Provider for DeepSeek pay-as-you-go balance tracking.
 ///
-/// DeepSeek is billed as prepaid credit: the account carries a CNY balance
-/// (split into topped-up and granted parts) reported by the official
-/// `GET https://api.deepseek.com/user/balance` endpoint. There is no quota
-/// window or utilization percentage — the balance is the only metric, so it
-/// is surfaced through `DetailedUsage.creditsBalance` (plus
-/// `balanceCurrency` / `balanceGranted` / `balanceToppedUp`) while
-/// `payAsYouGo.cost` stays nil: cost means money spent, and a remaining
-/// balance must never count toward the aggregate spend total.
+/// DeepSeek is billed as prepaid credit. Its official balance endpoint may
+/// return separate balances in CNY and USD; currencies are never merged into
+/// one number, and one broken ledger never hides the others (malformed or
+/// unsupported entries are skipped and logged; the fetch fails only when
+/// nothing usable remains). There is no quota window or utilization
+/// percentage, so balances are surfaced as remaining funds while
+/// `payAsYouGo.cost` stays nil: cost means money spent and must not count
+/// toward the aggregate spend total.
 final class DeepSeekProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .deepSeek
     let type: ProviderType = .payAsYouGo
+
+    /// Currencies DeepSeek may bill in, in display order (CNY first). This
+    /// list is the single source of truth for both what parses and how the
+    /// stored balances are ordered, so adding a third currency here is the
+    /// only edit needed.
+    private static let supportedCurrencies = ["CNY", "USD"]
 
     private let tokenManager: TokenManager
     private let session: URLSession
@@ -79,33 +85,73 @@ final class DeepSeekProvider: ProviderProtocol {
             throw ProviderError.decodingError("Missing balance_infos")
         }
 
-        // Explicit currency policy: prefer CNY (the account currency), fall
-        // back to USD; anything else is unsupported. Never pick `.first` —
-        // balance_infos order is not guaranteed.
-        let info = balanceInfos.first { $0.currency?.uppercased() == "CNY" }
-            ?? balanceInfos.first { $0.currency?.uppercased() == "USD" }
-        guard let info else {
+        // Preserve every supported currency: balance_infos can contain both
+        // CNY and USD, and one currency may be zero while the other is funded.
+        // One broken ledger must not hide the rest: unsupported codes and
+        // unparseable totals are skipped and logged, and the fetch only
+        // fails when nothing usable is left.
+        var skippedUnsupported: [String] = []
+        var skippedMalformed: [String] = []
+        let parsedBalances: [ProviderBalanceInfo] = balanceInfos.compactMap { info in
+            guard let currency = info.currency?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased() else {
+                skippedUnsupported.append("<missing>")
+                return nil
+            }
+            guard Self.supportedCurrencies.contains(currency) else {
+                skippedUnsupported.append(currency)
+                return nil
+            }
+
+            guard let totalBalance = Double(info.totalBalance ?? ""), totalBalance.isFinite else {
+                skippedMalformed.append(currency)
+                return nil
+            }
+
+            let grantedBalance = Double(info.grantedBalance ?? "").flatMap { $0.isFinite ? $0 : nil } ?? 0.0
+            let toppedUpBalance = Double(info.toppedUpBalance ?? "").flatMap { $0.isFinite ? $0 : nil } ?? 0.0
+            return ProviderBalanceInfo(
+                currency: currency,
+                totalBalance: totalBalance,
+                grantedBalance: grantedBalance,
+                toppedUpBalance: toppedUpBalance
+            )
+        }
+
+        if !skippedUnsupported.isEmpty {
+            logger.warning("DeepSeek: skipped ledgers with unsupported currency: \(skippedUnsupported.joined(separator: ", "), privacy: .public)")
+        }
+        if !skippedMalformed.isEmpty {
+            logger.error("DeepSeek: skipped ledgers with unparseable total_balance: \(skippedMalformed.joined(separator: ", "), privacy: .public)")
+        }
+
+        // supportedCurrencies is both the whitelist and the display order,
+        // so the stored list is built by walking it instead of sorting.
+        let orderedBalances = Self.supportedCurrencies.compactMap { code in
+            parsedBalances.first { $0.currency == code }
+        }
+        guard let primaryBalance = orderedBalances.first(where: \.isFunded)
+                ?? orderedBalances.first else {
+            let supported = Self.supportedCurrencies.joined(separator: "/")
             let currencies = balanceInfos.compactMap { $0.currency }.joined(separator: ", ")
-            logger.error("DeepSeek balance response has no supported currency (CNY/USD), got: \(currencies)")
+            if !skippedMalformed.isEmpty {
+                logger.error("DeepSeek balance response has no usable ledger (malformed: \(skippedMalformed.joined(separator: ", "), privacy: .public), seen: \(currencies, privacy: .public))")
+                throw ProviderError.decodingError("Invalid total_balance")
+            }
+            logger.error("DeepSeek balance response has no supported currency (\(supported, privacy: .public)), got: \(currencies, privacy: .public)")
             throw ProviderError.decodingError("Unsupported balance currency")
         }
-
-        guard let totalBalance = Double(info.totalBalance ?? "") else {
-            logger.error("DeepSeek balance response has unparseable total_balance: \(info.totalBalance ?? "nil")")
-            throw ProviderError.decodingError("Invalid total_balance")
-        }
-        // Granted/topped-up are secondary details; tolerate unparseable values.
-        let grantedBalance = Double(info.grantedBalance ?? "") ?? 0.0
-        let toppedUpBalance = Double(info.toppedUpBalance ?? "") ?? 0.0
-        let currency = info.currency ?? "CNY"
-
-        logger.info("DeepSeek balance fetched: \(currency) \(String(format: "%.2f", totalBalance)) (granted: \(String(format: "%.2f", grantedBalance)), topped-up: \(String(format: "%.2f", toppedUpBalance)))")
+        let balanceSummary = orderedBalances
+            .map { "\($0.currency) \(String(format: "%.2f", $0.totalBalance))" }
+            .joined(separator: ", ")
+        logger.info("DeepSeek balances fetched: \(balanceSummary, privacy: .private)")
 
         let details = DetailedUsage(
-            creditsBalance: totalBalance,
-            balanceCurrency: currency,
-            balanceGranted: grantedBalance,
-            balanceToppedUp: toppedUpBalance,
+            creditsBalance: primaryBalance.totalBalance,
+            balanceCurrency: primaryBalance.currency,
+            balanceGranted: primaryBalance.grantedBalance,
+            balanceToppedUp: primaryBalance.toppedUpBalance,
             authSource: tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
         )
 
@@ -114,7 +160,8 @@ final class DeepSeekProvider: ProviderProtocol {
         // and the aggregate spend total never counts this provider.
         return ProviderResult(
             usage: .payAsYouGo(utilization: 0, cost: nil, resetsAt: nil),
-            details: details
+            details: details,
+            balanceInfos: orderedBalances
         )
     }
 
