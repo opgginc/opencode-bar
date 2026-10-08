@@ -11,7 +11,7 @@ concurrency:
 jobs:
   lint:
     name: SwiftLint
-    runs-on: macos-14
+    runs-on: macos-15
     
     steps:
       - name: Checkout
@@ -44,7 +44,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: macos-14
+    runs-on: macos-15
     needs: [lint, actionlint]
     
     steps:
@@ -54,7 +54,10 @@ jobs:
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '15.4'
+          xcode-version: '16.4'
+
+      - name: Show Xcode Version
+        run: xcodebuild -version
       
       - name: Resolve Swift Packages
         run: |
