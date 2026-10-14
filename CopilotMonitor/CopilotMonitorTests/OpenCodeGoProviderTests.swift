@@ -60,6 +60,53 @@ final class OpenCodeGoProviderTests: XCTestCase {
         XCTAssertEqual(usage.missingWindowNames, ["weeklyUsage", "monthlyUsage"])
     }
 
+    func testGoStatusParserReadsMeterPercentsAndResets() throws {
+        let json = """
+        {
+            "product": "go",
+            "access": {
+                "startsAt": "2026-09-30T03:26:32.000Z",
+                "endsAt": "2026-10-30T03:26:32.000Z",
+                "meters": {
+                    "fiveHour": {"startsAt": "2026-10-14T19:03:54.000Z", "resetsAt": "2026-10-15T00:03:54.000Z", "limitMicroCents": "1200000000", "usedMicroCents": "52778022"},
+                    "week": {"startsAt": "2026-10-12T00:00:00.000Z", "resetsAt": "2026-10-19T00:00:00.000Z", "limitMicroCents": "3000000000", "usedMicroCents": "448979358"},
+                    "month": {"resetsAt": "2026-10-30T03:26:32.000Z", "limitMicroCents": "6000000000", "usedMicroCents": "2254049133"}
+                }
+            }
+        }
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-14T20:00:00Z"))
+
+        let usage = try OpenCodeGoProvider.parseGoStatusData(data, now: now)
+
+        XCTAssertEqual(usage.rolling?.usagePercent ?? -1, 4.3983, accuracy: 0.01)
+        XCTAssertEqual(usage.weekly?.usagePercent ?? -1, 14.966, accuracy: 0.01)
+        XCTAssertEqual(usage.monthly?.usagePercent ?? -1, 37.567, accuracy: 0.01)
+        XCTAssertEqual(usage.rolling?.resetInSeconds, 4 * 3_600 + 3 * 60 + 54)
+        XCTAssertTrue(usage.missingWindowNames.isEmpty)
+    }
+
+    func testGoStatusParserKeepsPartialMeters() throws {
+        let json = """
+        {"access": {"meters": {"week": {"resetsAt": "2026-10-19T00:00:00.000Z", "limitMicroCents": 3000000000, "usedMicroCents": 1500000000}}}}
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+
+        let usage = try OpenCodeGoProvider.parseGoStatusData(data)
+
+        XCTAssertNil(usage.rolling)
+        XCTAssertEqual(usage.weekly?.usagePercent ?? -1, 50.0, accuracy: 0.001)
+        XCTAssertNil(usage.monthly)
+        XCTAssertEqual(usage.missingWindowNames, ["rollingUsage", "monthlyUsage"])
+    }
+
+    func testGoStatusParserThrowsOnUnexpectedShape() {
+        for json in [#"{"product": "go"}"#, #"[]"#, #"not json"#] {
+            XCTAssertThrowsError(try OpenCodeGoProvider.parseGoStatusData(Data(json.utf8)), "json: \(json)")
+        }
+    }
+
     func testWorkspaceIDExtractionKeepsRecentOrderAndDeduplicates() {
         let urls = [
             "https://opencode.ai/workspace/wrk_01ABCDEF0123456789ABCDEFG/go",

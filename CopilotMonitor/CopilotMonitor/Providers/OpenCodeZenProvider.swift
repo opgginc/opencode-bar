@@ -139,7 +139,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
     }
 
     /// Parsed statistics from `opencode stats`.
-    private struct OpenCodeStats {
+    struct OpenCodeStats {
         let totalCost: Double
         let avgCostPerDay: Double
         let modelCosts: [String: Double]
@@ -171,8 +171,19 @@ final class OpenCodeZenProvider: ProviderProtocol {
         }
 
         debugLog("Fetching current stats only (history tracking disabled)")
-        let output = try await runOpenCodeStats(days: 7)
-        let stats = try parseStats(output)
+        // OpenCode v2 changed `opencode stats` text output (no more │Total Cost│
+        // table), but `--json` is stable. Prefer JSON, fall back to legacy text.
+        let stats: OpenCodeStats
+        do {
+            let jsonData = try await runOpenCodeStatsJSON(days: 7)
+            stats = try Self.parseStatsJSON(jsonData, days: 7)
+            debugLog("Parsed stats via --json")
+        } catch {
+            logger.warning("OpenCode Zen: JSON stats failed (\(error.localizedDescription, privacy: .public)), falling back to text parse")
+            debugLog("JSON stats failed, falling back to text parse: \(error.localizedDescription)")
+            let output = try await runOpenCodeStats(days: 7)
+            stats = try parseStats(output)
+        }
         let displayStats = Self.adjustStatsForDisplay(
             totalCost: stats.totalCost,
             avgCostPerDay: stats.avgCostPerDay,
@@ -262,6 +273,98 @@ final class OpenCodeZenProvider: ProviderProtocol {
                 continuation.resume(throwing: ProviderError.networkError("Failed to execute CLI: \(error.localizedDescription)"))
             }
         }
+    }
+
+    /// Runs `opencode stats --days N --models --json` and returns raw JSON data.
+    /// OpenCode v2 removed the parseable text summary table, so this is the
+    /// primary stats source; text parsing remains as fallback for older CLIs.
+    private func runOpenCodeStatsJSON(days: Int) async throws -> Data {
+        guard let binaryPath = opencodePath else {
+            throw ProviderError.providerError("OpenCode CLI not found")
+        }
+
+        killStaleOpenCodeStatsProcesses()
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            process.executableURL = binaryPath
+            process.arguments = ["stats", "--days", "\(days)", "--models", "--json"]
+
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+
+            nonisolated(unsafe) var outputData = Data()
+
+            pipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if !data.isEmpty {
+                    outputData.append(data)
+                }
+            }
+
+            process.terminationHandler = { proc in
+                pipe.fileHandleForReading.readabilityHandler = nil
+
+                let remainingData = pipe.fileHandleForReading.readDataToEndOfFile()
+                if !remainingData.isEmpty {
+                    outputData.append(remainingData)
+                }
+
+                if proc.terminationStatus != 0 {
+                    continuation.resume(throwing: ProviderError.providerError("OpenCode CLI failed with exit code \(proc.terminationStatus)"))
+                    return
+                }
+
+                continuation.resume(returning: outputData)
+            }
+
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: ProviderError.networkError("Failed to execute CLI: \(error.localizedDescription)"))
+            }
+        }
+    }
+
+    /// Parses `opencode stats --models --json` output.
+    /// Model keys are rebuilt as `providerID/modelID` so the existing
+    /// `isOpenCodeZenModel` prefix filter keeps working unchanged.
+    /// Per-model message counts are not exposed in JSON, so messages stay empty.
+    static func parseStatsJSON(_ data: Data, days: Int) throws -> OpenCodeStats {
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw ProviderError.decodingError("Invalid stats JSON: \(error.localizedDescription)")
+        }
+        guard let root = object as? [String: Any] else {
+            throw ProviderError.decodingError("Unexpected stats JSON shape")
+        }
+        guard let totalCost = doubleValue(root["cost"]) else {
+            throw ProviderError.decodingError("Cannot parse total cost")
+        }
+
+        var modelCosts: [String: Double] = [:]
+        if let models = root["models"] as? [[String: Any]] {
+            for entry in models {
+                let modelInfo = entry["model"] as? [String: Any] ?? [:]
+                let providerID = (modelInfo["providerID"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let modelID = (modelInfo["id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !providerID.isEmpty, !modelID.isEmpty,
+                      let cost = doubleValue(entry["cost"]) else { continue }
+                modelCosts["\(providerID)/\(modelID)"] = (modelCosts["\(providerID)/\(modelID)"] ?? 0) + cost
+            }
+        }
+
+        let avgCostPerDay = days > 0 ? totalCost / Double(days) : 0
+        return OpenCodeStats(totalCost: totalCost, avgCostPerDay: avgCostPerDay, modelCosts: modelCosts, modelMessages: [:])
+    }
+
+    private static func doubleValue(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String { return Double(string) }
+        return nil
     }
 
     /// Kills stale `opencode stats` processes that have run for over an hour.
