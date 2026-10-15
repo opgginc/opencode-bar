@@ -171,18 +171,27 @@ final class OpenCodeZenProvider: ProviderProtocol {
         }
 
         debugLog("Fetching current stats only (history tracking disabled)")
-        // OpenCode v2 changed `opencode stats` text output (no more │Total Cost│
-        // table), but `--json` is stable. Prefer JSON, fall back to legacy text.
+        // OpenCode v2 removed the parseable text summary table, but `--json`
+        // is stable. Prefer JSON, fall back to legacy text for older CLIs.
+        // If the fallback also fails, surface the original JSON error so the
+        // user doesn't see a misleading legacy parse message.
         let stats: OpenCodeStats
         do {
-            let jsonData = try await runOpenCodeStatsJSON(days: 7)
+            let jsonData = try await runOpenCodeStats(days: 7, json: true)
             stats = try Self.parseStatsJSON(jsonData, days: 7)
             debugLog("Parsed stats via --json")
-        } catch {
-            logger.warning("OpenCode Zen: JSON stats failed (\(error.localizedDescription, privacy: .public)), falling back to text parse")
-            debugLog("JSON stats failed, falling back to text parse: \(error.localizedDescription)")
-            let output = try await runOpenCodeStats(days: 7)
-            stats = try parseStats(output)
+        } catch let jsonError {
+            logger.warning("OpenCode Zen: JSON stats failed (\(jsonError.localizedDescription, privacy: .public)), falling back to text parse")
+            debugLog("JSON stats failed, falling back to text parse: \(jsonError.localizedDescription)")
+            do {
+                let outputData = try await runOpenCodeStats(days: 7, json: false)
+                guard let output = String(data: outputData, encoding: .utf8) else {
+                    throw ProviderError.decodingError("Failed to decode CLI output")
+                }
+                stats = try parseStats(output)
+            } catch {
+                throw jsonError
+            }
         }
         let displayStats = Self.adjustStatsForDisplay(
             totalCost: stats.totalCost,
@@ -215,7 +224,10 @@ final class OpenCodeZenProvider: ProviderProtocol {
         )
     }
 
-    private func runOpenCodeStats(days: Int) async throws -> String {
+    /// Runs `opencode stats --days N --models [--json]` and returns raw stdout.
+    /// A single runner so process-lifecycle fixes (hangs, zombie reaping)
+    /// only ever land in one place.
+    private func runOpenCodeStats(days: Int, json: Bool) async throws -> Data {
         guard let binaryPath = opencodePath else {
             throw ProviderError.providerError("OpenCode CLI not found")
         }
@@ -230,70 +242,15 @@ final class OpenCodeZenProvider: ProviderProtocol {
             process.executableURL = binaryPath
             // Use the unlimited --models form so filtering can inspect every
             // reported provider/model row instead of truncating the stats table.
-            process.arguments = ["stats", "--days", "\(days)", "--models"]
+            process.arguments = ["stats", "--days", "\(days)", "--models"] + (json ? ["--json"] : [])
 
             let pipe = Pipe()
             process.standardOutput = pipe
-            process.standardError = pipe
+            // JSON must stay parseable: CLI warnings go to null, not stdout.
+            // Text mode keeps the old combined behavior.
+            process.standardError = json ? FileHandle.nullDevice : pipe
 
             // This buffer is only mutated by Process handlers for this process lifecycle.
-            nonisolated(unsafe) var outputData = Data()
-
-            pipe.fileHandleForReading.readabilityHandler = { handle in
-                let data = handle.availableData
-                if !data.isEmpty {
-                    outputData.append(data)
-                }
-            }
-
-            process.terminationHandler = { proc in
-                pipe.fileHandleForReading.readabilityHandler = nil
-
-                let remainingData = pipe.fileHandleForReading.readDataToEndOfFile()
-                if !remainingData.isEmpty {
-                    outputData.append(remainingData)
-                }
-
-                if proc.terminationStatus != 0 {
-                    continuation.resume(throwing: ProviderError.providerError("OpenCode CLI failed with exit code \(proc.terminationStatus)"))
-                    return
-                }
-
-                guard let output = String(data: outputData, encoding: .utf8) else {
-                    continuation.resume(throwing: ProviderError.decodingError("Failed to decode CLI output"))
-                    return
-                }
-
-                continuation.resume(returning: output)
-            }
-
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: ProviderError.networkError("Failed to execute CLI: \(error.localizedDescription)"))
-            }
-        }
-    }
-
-    /// Runs `opencode stats --days N --models --json` and returns raw JSON data.
-    /// OpenCode v2 removed the parseable text summary table, so this is the
-    /// primary stats source; text parsing remains as fallback for older CLIs.
-    private func runOpenCodeStatsJSON(days: Int) async throws -> Data {
-        guard let binaryPath = opencodePath else {
-            throw ProviderError.providerError("OpenCode CLI not found")
-        }
-
-        killStaleOpenCodeStatsProcesses()
-
-        return try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            process.executableURL = binaryPath
-            process.arguments = ["stats", "--days", "\(days)", "--models", "--json"]
-
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
-
             nonisolated(unsafe) var outputData = Data()
 
             pipe.fileHandleForReading.readabilityHandler = { handle in
@@ -341,7 +298,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
         guard let root = object as? [String: Any] else {
             throw ProviderError.decodingError("Unexpected stats JSON shape")
         }
-        guard let totalCost = doubleValue(root["cost"]) else {
+        guard let totalCost = APIValueParser.parseDouble(root["cost"]) else {
             throw ProviderError.decodingError("Cannot parse total cost")
         }
 
@@ -352,19 +309,13 @@ final class OpenCodeZenProvider: ProviderProtocol {
                 let providerID = (modelInfo["providerID"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let modelID = (modelInfo["id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !providerID.isEmpty, !modelID.isEmpty,
-                      let cost = doubleValue(entry["cost"]) else { continue }
+                      let cost = APIValueParser.parseDouble(entry["cost"]) else { continue }
                 modelCosts["\(providerID)/\(modelID)"] = (modelCosts["\(providerID)/\(modelID)"] ?? 0) + cost
             }
         }
 
         let avgCostPerDay = days > 0 ? totalCost / Double(days) : 0
         return OpenCodeStats(totalCost: totalCost, avgCostPerDay: avgCostPerDay, modelCosts: modelCosts, modelMessages: [:])
-    }
-
-    private static func doubleValue(_ value: Any?) -> Double? {
-        if let number = value as? NSNumber { return number.doubleValue }
-        if let string = value as? String { return Double(string) }
-        return nil
     }
 
     /// Kills stale `opencode stats` processes that have run for over an hour.

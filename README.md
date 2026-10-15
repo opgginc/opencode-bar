@@ -230,8 +230,8 @@ OpenRouter            Pay-as-you-go    -           $37.42 spent
 
 - OpenCode Go is resolved from the OpenCode auth entry `opencode-go` in `auth.json`.
 - OpenCode Bar validates the API key against `https://opencode.ai/zen/go/v1/models`.
-- Usage windows come from the OpenCode dashboard and require `OPENCODE_GO_WORKSPACE_ID` plus `OPENCODE_GO_AUTH_COOKIE`, or `~/.config/opencode-bar/opencode-go.json`.
-- The monthly dashboard window is a usage cap signal; the app's subscription preset for the Go plan remains `$10.00`.
+- Usage windows come from the key-based usage API `https://opencode.ai/zen/go/v1/usage` (same API key, no extra setup).
+- The monthly usage window is a usage cap signal; the app's subscription preset for the Go plan remains `$10.00`.
 
 #### Grok Notes
 
@@ -399,7 +399,7 @@ Quit (⌘Q)
 
 MiniMax Coding Plan uses `https://api.minimax.io/v1/api/openplatform/coding_plan/remains` and is displayed with explicit 5h used and weekly used windows in the provider submenu.
 
-OpenCode Go reads the API key from the OpenCode auth entry `opencode-go`. Current usage is exposed by the OpenCode dashboard, so live usage also needs `OPENCODE_GO_WORKSPACE_ID` and `OPENCODE_GO_AUTH_COOKIE`, or a local `~/.config/opencode-bar/opencode-go.json` file with `workspaceId` and `authCookie`.
+OpenCode Go reads the API key from the OpenCode auth entry `opencode-go`. Usage windows come from the key-based usage API `https://opencode.ai/zen/go/v1/usage` with the same API key, so no workspace ID, browser cookies, or extra config is needed.
 
 Grok reads identity from `~/.grok/auth.json`, uses the email address as the subscription scope, and fetches monthly billing usage from Grok's gRPC-web billing endpoint with the Grok CLI bearer token.
 

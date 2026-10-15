@@ -1441,6 +1441,14 @@ enum CopilotCandidateDedupe {
 /// Shared numeric parser for API response dictionaries.
 /// APIs may return Double, Int, NSNumber, or String for numeric fields.
 enum APIValueParser {
+    /// Optional single-value coercion (Double/Int/NSNumber/numeric String).
+    /// Nil when the value is missing or not numeric.
+    static func parseDouble(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String { return Double(string) }
+        return nil
+    }
+
     static func parseDouble(from dict: [String: Any], keys: [String]) -> Double {
         for key in keys {
             if let value = dict[key] as? Double { return value }
