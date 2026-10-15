@@ -132,6 +132,43 @@ final class OpenCodeZenProviderTests: XCTestCase {
         XCTAssertFalse(OpenCodeZenProvider.isOpenCodeZenModel("nano-gpt/minimax/minimax-m2.5"))
     }
 
+    func testParseStatsJSONReadsV2FormatAndKeepsZenFilter() throws {
+        let json = """
+        {
+            "cost": 16.7118,
+            "models": [
+                {"model": {"providerID": "opencode-go", "id": "muse-spark-1.3-contributor"}, "steps": 6479, "cost": 6.7162},
+                {"model": {"providerID": "opencode", "id": "deepseek-v4.1-flash"}, "steps": 535, "cost": 1.4187},
+                {"model": {"providerID": "commandcode", "id": "deepseek/deepseek-v4.1-flash"}, "steps": 3, "cost": 1.25}
+            ]
+        }
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+
+        let stats = try OpenCodeZenProvider.parseStatsJSON(data, days: 7)
+
+        XCTAssertEqual(stats.totalCost, 16.7118, accuracy: 0.0001)
+        XCTAssertEqual(stats.avgCostPerDay, 16.7118 / 7, accuracy: 0.0001)
+        XCTAssertEqual(stats.modelCosts["opencode-go/muse-spark-1.3-contributor"], 6.7162)
+        XCTAssertEqual(stats.modelCosts["opencode/deepseek-v4.1-flash"], 1.4187)
+
+        let adjusted = OpenCodeZenProvider.adjustStatsForDisplay(
+            totalCost: stats.totalCost,
+            avgCostPerDay: stats.avgCostPerDay,
+            modelCosts: stats.modelCosts,
+            modelMessages: stats.modelMessages
+        )
+        // commandcode cost must be excluded from Zen totals
+        XCTAssertEqual(adjusted.totalCost, 6.7162 + 1.4187, accuracy: 0.0001)
+        XCTAssertEqual(adjusted.excludedCost, 16.7118 - (6.7162 + 1.4187), accuracy: 0.0001)
+    }
+
+    func testParseStatsJSONThrowsWhenCostMissing() {
+        let json = #"{"models": []}"#
+        let data = Data(json.utf8)
+        XCTAssertThrowsError(try OpenCodeZenProvider.parseStatsJSON(data, days: 7))
+    }
+
     func testParseETimeSecondsParsesMinutesHoursAndDaysFormats() {
         let cases: [(String, Int?)] = [
             ("03:14", 194),

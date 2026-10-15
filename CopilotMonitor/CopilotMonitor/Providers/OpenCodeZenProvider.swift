@@ -139,7 +139,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
     }
 
     /// Parsed statistics from `opencode stats`.
-    private struct OpenCodeStats {
+    struct OpenCodeStats {
         let totalCost: Double
         let avgCostPerDay: Double
         let modelCosts: [String: Double]
@@ -171,8 +171,28 @@ final class OpenCodeZenProvider: ProviderProtocol {
         }
 
         debugLog("Fetching current stats only (history tracking disabled)")
-        let output = try await runOpenCodeStats(days: 7)
-        let stats = try parseStats(output)
+        // OpenCode v2 removed the parseable text summary table, but `--json`
+        // is stable. Prefer JSON, fall back to legacy text for older CLIs.
+        // If the fallback also fails, surface the original JSON error so the
+        // user doesn't see a misleading legacy parse message.
+        let stats: OpenCodeStats
+        do {
+            let jsonData = try await runOpenCodeStats(days: 7, json: true)
+            stats = try Self.parseStatsJSON(jsonData, days: 7)
+            debugLog("Parsed stats via --json")
+        } catch let jsonError {
+            logger.warning("OpenCode Zen: JSON stats failed (\(jsonError.localizedDescription, privacy: .public)), falling back to text parse")
+            debugLog("JSON stats failed, falling back to text parse: \(jsonError.localizedDescription)")
+            do {
+                let outputData = try await runOpenCodeStats(days: 7, json: false)
+                guard let output = String(data: outputData, encoding: .utf8) else {
+                    throw ProviderError.decodingError("Failed to decode CLI output")
+                }
+                stats = try parseStats(output)
+            } catch {
+                throw jsonError
+            }
+        }
         let displayStats = Self.adjustStatsForDisplay(
             totalCost: stats.totalCost,
             avgCostPerDay: stats.avgCostPerDay,
@@ -204,7 +224,10 @@ final class OpenCodeZenProvider: ProviderProtocol {
         )
     }
 
-    private func runOpenCodeStats(days: Int) async throws -> String {
+    /// Runs `opencode stats --days N --models [--json]` and returns raw stdout.
+    /// A single runner so process-lifecycle fixes (hangs, zombie reaping)
+    /// only ever land in one place.
+    private func runOpenCodeStats(days: Int, json: Bool) async throws -> Data {
         guard let binaryPath = opencodePath else {
             throw ProviderError.providerError("OpenCode CLI not found")
         }
@@ -219,11 +242,13 @@ final class OpenCodeZenProvider: ProviderProtocol {
             process.executableURL = binaryPath
             // Use the unlimited --models form so filtering can inspect every
             // reported provider/model row instead of truncating the stats table.
-            process.arguments = ["stats", "--days", "\(days)", "--models"]
+            process.arguments = ["stats", "--days", "\(days)", "--models"] + (json ? ["--json"] : [])
 
             let pipe = Pipe()
             process.standardOutput = pipe
-            process.standardError = pipe
+            // JSON must stay parseable: CLI warnings go to null, not stdout.
+            // Text mode keeps the old combined behavior.
+            process.standardError = json ? FileHandle.nullDevice : pipe
 
             // This buffer is only mutated by Process handlers for this process lifecycle.
             nonisolated(unsafe) var outputData = Data()
@@ -248,12 +273,7 @@ final class OpenCodeZenProvider: ProviderProtocol {
                     return
                 }
 
-                guard let output = String(data: outputData, encoding: .utf8) else {
-                    continuation.resume(throwing: ProviderError.decodingError("Failed to decode CLI output"))
-                    return
-                }
-
-                continuation.resume(returning: output)
+                continuation.resume(returning: outputData)
             }
 
             do {
@@ -262,6 +282,40 @@ final class OpenCodeZenProvider: ProviderProtocol {
                 continuation.resume(throwing: ProviderError.networkError("Failed to execute CLI: \(error.localizedDescription)"))
             }
         }
+    }
+
+    /// Parses `opencode stats --models --json` output.
+    /// Model keys are rebuilt as `providerID/modelID` so the existing
+    /// `isOpenCodeZenModel` prefix filter keeps working unchanged.
+    /// Per-model message counts are not exposed in JSON, so messages stay empty.
+    static func parseStatsJSON(_ data: Data, days: Int) throws -> OpenCodeStats {
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw ProviderError.decodingError("Invalid stats JSON: \(error.localizedDescription)")
+        }
+        guard let root = object as? [String: Any] else {
+            throw ProviderError.decodingError("Unexpected stats JSON shape")
+        }
+        guard let totalCost = APIValueParser.parseDouble(root["cost"]) else {
+            throw ProviderError.decodingError("Cannot parse total cost")
+        }
+
+        var modelCosts: [String: Double] = [:]
+        if let models = root["models"] as? [[String: Any]] {
+            for entry in models {
+                let modelInfo = entry["model"] as? [String: Any] ?? [:]
+                let providerID = (modelInfo["providerID"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let modelID = (modelInfo["id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !providerID.isEmpty, !modelID.isEmpty,
+                      let cost = APIValueParser.parseDouble(entry["cost"]) else { continue }
+                modelCosts["\(providerID)/\(modelID)"] = (modelCosts["\(providerID)/\(modelID)"] ?? 0) + cost
+            }
+        }
+
+        let avgCostPerDay = days > 0 ? totalCost / Double(days) : 0
+        return OpenCodeStats(totalCost: totalCost, avgCostPerDay: avgCostPerDay, modelCosts: modelCosts, modelMessages: [:])
     }
 
     /// Kills stale `opencode stats` processes that have run for over an hour.
