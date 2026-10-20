@@ -600,7 +600,7 @@ struct AntigravityAccounts: Codable {
 enum GeminiAuthSource: Equatable {
     /// NoeFabris/opencode-antigravity-auth (~/.config/opencode/antigravity-accounts.json)
     case antigravity
-    /// jenslys/opencode-gemini-auth (OpenCode auth.json google.oauth)
+    /// jenslys/opencode-gemini-auth (OpenCode google OAuth credentials)
     case opencodeAuth
     /// Gemini CLI OAuth credentials (~/.gemini/oauth_creds.json)
     case oauthCreds
@@ -696,7 +696,7 @@ struct OpenCodeGeminiAuthContainer: Decodable {
     let google: GeminiOAuthAuth?
 }
 
-/// Gemini OAuth payload as stored in OpenCode auth.json
+/// Gemini OAuth payload from the OpenCode credential store.
 struct GeminiOAuthAuth: Decodable {
     let type: String?
     let refresh: String?
@@ -864,11 +864,11 @@ final class TokenManager: @unchecked Sendable {
     private var cachedAntigravityAccounts: AntigravityAccounts?
     private var antigravityCacheTimestamp: Date?
     
-    /// Cached Gemini OAuth auth payload (OpenCode auth.json)
+    /// Cached Gemini OAuth auth payload from OpenCode.
     private var cachedGeminiOAuthAuth: GeminiOAuthAuth?
     private var geminiOAuthCacheTimestamp: Date?
 
-    /// Path where Gemini OAuth auth was found (OpenCode auth.json)
+    /// Path of the OpenCode store where Gemini OAuth auth was found.
     private(set) var lastFoundGeminiOAuthPath: URL?
 
     /// Cached Gemini OAuth creds payload (~/.gemini/oauth_creds.json)
@@ -970,7 +970,7 @@ final class TokenManager: @unchecked Sendable {
         )
     }
 
-    /// OpenCode 2.x stores credentials in its data directory, including relative DB overrides.
+    /// Resolves OPENCODE_DB relative to the OpenCode data directory unless it is absolute.
     func getOpenCodeDatabasePath() -> URL {
         let environment = ProcessInfo.processInfo.environment
         let dataHome = normalizedNonEmpty(environment["XDG_DATA_HOME"])
@@ -984,17 +984,17 @@ final class TokenManager: @unchecked Sendable {
         return dataDirectory.appendingPathComponent(configured)
     }
 
-    private func getOpenCodeAuthPaths() -> [URL] {
+    private func getOpenCodeAuthStores() -> [(url: URL, isDatabase: Bool)] {
         let databasePath = getOpenCodeDatabasePath()
         if FileManager.default.fileExists(atPath: databasePath.path) {
             // An existing V2 store is authoritative, including empty or unreadable stores.
-            return [databasePath]
+            return [(databasePath, true)]
         }
-        return getAuthFilePaths()
+        return getAuthFilePaths().map { ($0, false) }
     }
 
-    private func readOpenCodeAuthData(at path: URL) throws -> Data {
-        guard path == getOpenCodeDatabasePath() else {
+    private func readOpenCodeAuthData(at path: URL, isDatabase: Bool) throws -> Data {
+        guard isDatabase else {
             return try Data(contentsOf: path)
         }
         var database: OpaquePointer?
@@ -1029,8 +1029,12 @@ final class TokenManager: @unchecked Sendable {
                     switch value["type"] as? String {
                     case "oauth":
                         if let metadata = value["metadata"] as? [String: Any] {
-                            value["accountId"] = metadata["accountID"]
-                            value["enterpriseUrl"] = metadata["enterpriseUrl"]
+                            if let accountID = metadata["accountID"] as? String, !accountID.isEmpty {
+                                value["accountId"] = accountID
+                            }
+                            if let enterpriseURL = metadata["enterpriseUrl"] as? String, !enterpriseURL.isEmpty {
+                                value["enterpriseUrl"] = enterpriseURL
+                            }
                         }
                         entries[integrationID] = value
                     case "key":
@@ -1048,6 +1052,39 @@ final class TokenManager: @unchecked Sendable {
         }
         logger.info("Loaded OpenCode credential database: \(entries.count) integrations")
         return try JSONSerialization.data(withJSONObject: entries)
+    }
+
+    func openCodeAuthStoreDiagnostics() -> [String] {
+        var lines: [String] = []
+        var selectedPath: URL?
+        for store in getOpenCodeAuthStores() {
+            let path = store.url
+            guard FileManager.default.fileExists(atPath: path.path) else {
+                lines.append("[NOT FOUND] \(path.path)")
+                continue
+            }
+            guard FileManager.default.isReadableFile(atPath: path.path),
+                  let data = try? readOpenCodeAuthData(at: path, isDatabase: store.isDatabase) else {
+                lines.append("[UNREADABLE] \(path.path)")
+                continue
+            }
+            let auth = try? JSONDecoder().decode(OpenCodeAuth.self, from: data)
+            let google = (try? JSONDecoder().decode(OpenCodeGeminiAuthContainer.self, from: data))?.google
+            let hasGoogle = google?.type?.lowercased() == "oauth"
+                && normalizedNonEmpty(google?.refresh) != nil
+            guard auth != nil || hasGoogle else {
+                lines.append("[NO USABLE CREDENTIALS] \(path.path)")
+                continue
+            }
+            lines.append("[\(selectedPath == nil ? "ACTIVE" : "SHADOWED")] \(path.path)")
+            if selectedPath == nil { selectedPath = path }
+        }
+        if let selectedPath {
+            lines.append("[Result] Using: \(selectedPath.path)")
+        } else {
+            lines.append("[Result] NO USABLE OPENCODE CREDENTIALS FOUND")
+        }
+        return lines
     }
 
     /// Possible opencode.json/opencode.jsonc locations in priority order.
@@ -1433,6 +1470,10 @@ final class TokenManager: @unchecked Sendable {
     /// Useful for displaying in UI to help users troubleshoot
     private(set) var lastFoundAuthPath: URL?
 
+    var openCodeAuthSourceLabel: String {
+        queue.sync { lastFoundAuthPath?.path ?? "OpenCode" }
+    }
+
     /// Thread-safe read of OpenCode auth tokens with caching
     func readOpenCodeAuth() -> OpenCodeAuth? {
         return queue.sync {
@@ -1444,9 +1485,10 @@ final class TokenManager: @unchecked Sendable {
             }
             
             let fileManager = FileManager.default
-            let paths = getOpenCodeAuthPaths()
+            let stores = getOpenCodeAuthStores()
             
-            for authPath in paths {
+            for store in stores {
+                let authPath = store.url
                 guard fileManager.fileExists(atPath: authPath.path) else {
                     continue
                 }
@@ -1456,7 +1498,7 @@ final class TokenManager: @unchecked Sendable {
                 }
                 
                 do {
-                    let data = try readOpenCodeAuthData(at: authPath)
+                    let data = try readOpenCodeAuthData(at: authPath, isDatabase: store.isDatabase)
                     let auth = try JSONDecoder().decode(OpenCodeAuth.self, from: data)
                     lastFoundAuthPath = authPath
                     cachedAuth = auth
@@ -3512,7 +3554,7 @@ final class TokenManager: @unchecked Sendable {
         if let auth = readOpenCodeAuth(),
            let access = auth.anthropic?.access,
            !access.isEmpty {
-            let authSource = lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            let authSource = openCodeAuthSourceLabel
             accounts.append(
                 ClaudeAuthAccount(
                     accessToken: access,
@@ -3777,7 +3819,7 @@ final class TokenManager: @unchecked Sendable {
         if let auth = readOpenCodeAuth(),
            let access = auth.githubCopilot?.access,
            !access.isEmpty {
-            let authSource = lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            let authSource = openCodeAuthSourceLabel
             accounts.append(
                 CopilotAuthAccount(
                     accessToken: access,
@@ -3848,7 +3890,7 @@ final class TokenManager: @unchecked Sendable {
         if let auth = readOpenCodeAuth(),
            let access = auth.openai?.access,
            !access.isEmpty {
-            let authSource = lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            let authSource = openCodeAuthSourceLabel
             let metadata = resolvedOpenAIAuthMetadata(from: auth.openai)
             accounts.append(
                 OpenAIAuthAccount(
@@ -3867,7 +3909,7 @@ final class TokenManager: @unchecked Sendable {
         if let auth = readOpenCodeAuth(),
            let apiKey = auth.openaiAPIKey,
            !apiKey.key.isEmpty {
-            let authSource = lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            let authSource = openCodeAuthSourceLabel
             accounts.append(
                 OpenAIAuthAccount(
                     accessToken: apiKey.key,
@@ -3991,9 +4033,10 @@ final class TokenManager: @unchecked Sendable {
             }
 
             let fileManager = FileManager.default
-            let paths = getOpenCodeAuthPaths()
+            let stores = getOpenCodeAuthStores()
 
-            for authPath in paths {
+            for store in stores {
+                let authPath = store.url
                 guard fileManager.fileExists(atPath: authPath.path) else {
                     continue
                 }
@@ -4003,7 +4046,7 @@ final class TokenManager: @unchecked Sendable {
                     continue
                 }
                 do {
-                    let data = try readOpenCodeAuthData(at: authPath)
+                    let data = try readOpenCodeAuthData(at: authPath, isDatabase: store.isDatabase)
                     let container = try JSONDecoder().decode(OpenCodeGeminiAuthContainer.self, from: data)
                     guard let geminiAuth = container.google else {
                         continue
@@ -4822,7 +4865,7 @@ final class TokenManager: @unchecked Sendable {
         let fileManager = FileManager.default
         let homeDir = fileManager.homeDirectoryForCurrentUser
         let openCodeAuth = readOpenCodeAuth()
-        let openCodePath = lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+        let openCodePath = openCodeAuthSourceLabel
 
         var lines: [String] = []
         lines.append("Auth Discovery Summary:")
@@ -5052,69 +5095,16 @@ final class TokenManager: @unchecked Sendable {
         debugLines.append(String(repeating: "─", count: 40))
 
         // 0. XDG_DATA_HOME environment variable
-        let hasXdgDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]?.isEmpty == false
         if let xdgDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"], !xdgDataHome.isEmpty {
             debugLines.append("[XDG_DATA_HOME] SET: \(xdgDataHome)")
         } else {
             debugLines.append("[XDG_DATA_HOME] NOT SET (using default ~/.local/share)")
         }
 
-        // 1. Check all possible auth.json paths (fallback order)
+        // 1. Report the selected OpenCode credential stores.
         debugLines.append("")
         debugLines.append("Auth File Search:")
-        let authPaths = getOpenCodeAuthPaths()
-        var foundAuthPath: URL?
-
-        for (index, authPath) in authPaths.enumerated() {
-            let priority = index + 1
-            let pathLabel: String
-            if authPath == getOpenCodeDatabasePath() {
-                pathLabel = authPath.deletingLastPathComponent().path
-            } else if hasXdgDataHome {
-                switch index {
-                case 0:
-                    pathLabel = "$XDG_DATA_HOME/opencode"
-                case 1:
-                    pathLabel = "~/.local/share/opencode"
-                default:
-                    pathLabel = "~/Library/Application Support/opencode"
-                }
-            } else {
-                switch index {
-                case 0:
-                    pathLabel = "~/.local/share/opencode"
-                default:
-                    pathLabel = "~/Library/Application Support/opencode"
-                }
-            }
-
-            if fileManager.fileExists(atPath: authPath.path) {
-                if let data = try? readOpenCodeAuthData(at: authPath),
-                   let content = String(data: data, encoding: .utf8) {
-                    let lineCount = content.components(separatedBy: .newlines).count
-                    let byteCount = content.utf8.count
-                    let marker = foundAuthPath == nil ? "ACTIVE" : "SHADOWED"
-                    debugLines.append("  [\(priority)] [\(marker)] \(pathLabel)/\(authPath.lastPathComponent)")
-                    debugLines.append("      Path: \(authPath.path)")
-                    debugLines.append("      Lines: \(lineCount), Bytes: \(byteCount)")
-                    if foundAuthPath == nil {
-                        foundAuthPath = authPath
-                    }
-                } else {
-                    debugLines.append("  [\(priority)] [UNREADABLE] \(pathLabel)/\(authPath.lastPathComponent)")
-                    debugLines.append("      Path: \(authPath.path)")
-                }
-            } else {
-                debugLines.append("  [\(priority)] [NOT FOUND] \(pathLabel)/\(authPath.lastPathComponent)")
-                debugLines.append("      Path: \(authPath.path)")
-            }
-        }
-
-        if let activePath = foundAuthPath {
-            debugLines.append("  [Result] Using: \(activePath.path)")
-        } else {
-            debugLines.append("  [Result] NO READABLE OPENCODE CREDENTIAL STORE FOUND")
-        }
+        debugLines.append(contentsOf: openCodeAuthStoreDiagnostics().map { "  " + $0 })
 
         // 2. Check ~/.config/opencode directory (antigravity-accounts.json)
         debugLines.append("")
@@ -5240,68 +5230,15 @@ final class TokenManager: @unchecked Sendable {
         debugLines.append("========== Environment Debug Info ==========")
 
         // 0. XDG_DATA_HOME environment variable
-        let hasXdgDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]?.isEmpty == false
         if let xdgDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"], !xdgDataHome.isEmpty {
             debugLines.append("[XDG_DATA_HOME] SET: \(xdgDataHome)")
         } else {
             debugLines.append("[XDG_DATA_HOME] NOT SET (using default ~/.local/share)")
         }
 
-        // 1. Check all possible auth.json paths (fallback order)
+        // 1. Report the selected OpenCode credential stores.
         debugLines.append("---------- Auth File Search ----------")
-        let authPaths = getOpenCodeAuthPaths()
-        var foundAuthPath: URL?
-
-        for (index, authPath) in authPaths.enumerated() {
-            let priority = index + 1
-            let pathLabel: String
-            if authPath == getOpenCodeDatabasePath() {
-                pathLabel = authPath.deletingLastPathComponent().path
-            } else if hasXdgDataHome {
-                switch index {
-                case 0:
-                    pathLabel = "$XDG_DATA_HOME/opencode"
-                case 1:
-                    pathLabel = "~/.local/share/opencode"
-                default:
-                    pathLabel = "~/Library/Application Support/opencode"
-                }
-            } else {
-                switch index {
-                case 0:
-                    pathLabel = "~/.local/share/opencode"
-                default:
-                    pathLabel = "~/Library/Application Support/opencode"
-                }
-            }
-
-            if fileManager.fileExists(atPath: authPath.path) {
-                if let data = try? readOpenCodeAuthData(at: authPath),
-                   let content = String(data: data, encoding: .utf8) {
-                    let lineCount = content.components(separatedBy: .newlines).count
-                    let byteCount = content.utf8.count
-                    let marker = foundAuthPath == nil ? "ACTIVE" : "SHADOWED"
-                    debugLines.append("[\(priority)] [\(marker)] \(pathLabel)/\(authPath.lastPathComponent)")
-                    debugLines.append("    Path: \(authPath.path)")
-                    debugLines.append("    Lines: \(lineCount), Bytes: \(byteCount)")
-                    if foundAuthPath == nil {
-                        foundAuthPath = authPath
-                    }
-                } else {
-                    debugLines.append("[\(priority)] [UNREADABLE] \(pathLabel)/\(authPath.lastPathComponent)")
-                    debugLines.append("    Path: \(authPath.path)")
-                }
-            } else {
-                debugLines.append("[\(priority)] [NOT FOUND] \(pathLabel)/\(authPath.lastPathComponent)")
-                debugLines.append("    Path: \(authPath.path)")
-            }
-        }
-
-        if let activePath = foundAuthPath {
-            debugLines.append("[Result] Using auth from: \(activePath.path)")
-        } else {
-            debugLines.append("[Result] NO READABLE OPENCODE CREDENTIAL STORE FOUND")
-        }
+        debugLines.append(contentsOf: openCodeAuthStoreDiagnostics())
 
         // 2. ~/.local/share/opencode directory contents
         debugLines.append("---------- Directory Contents ----------")

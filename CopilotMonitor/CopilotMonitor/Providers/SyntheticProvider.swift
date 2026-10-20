@@ -92,7 +92,7 @@ final class SyntheticProvider: ProviderProtocol {
                 overagePermitted: false
             )
 
-            let authSource = tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            let authSource = tokenManager.openCodeAuthSourceLabel
             let details = DetailedUsage(
                 limit: Double(limit),
                 limitRemaining: Double(remaining),

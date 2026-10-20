@@ -151,7 +151,7 @@ final class KimiProvider: ProviderProtocol {
                 sevenDayReset: weeklyReset,
                 planType: planType,
                 email: kimiResponse.user?.userId,
-                authSource: tokenManager.lastFoundAuthPath?.path
+                authSource: tokenManager.openCodeAuthSourceLabel
             )
 
             return ProviderResult(usage: providerUsage, details: details)

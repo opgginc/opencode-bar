@@ -91,7 +91,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 
 ### Automatic Provider Detection
 - **Zero Configuration**: Reads OpenCode 2.x credentials from `opencode.db`, or OpenCode 1.x credentials from `auth.json`
-- **Multi-path Support**: Searches `$XDG_DATA_HOME/opencode`, `~/.local/share/opencode`, and `~/Library/Application Support/opencode`
+- **Custom Locations**: Supports `XDG_DATA_HOME` and `OPENCODE_DB`; legacy JSON discovery also checks the macOS Application Support directory
 - **Dynamic Updates**: New providers appear as you add them to OpenCode
 - **Smart Categorization**: Pay-as-you-go vs Quota-based providers displayed separately
 
@@ -407,7 +407,7 @@ Quit (⌘Q)
 
 ## How It Works
 
-1. **Token Discovery**: Reads authentication tokens from OpenCode's `auth.json` (with multi-path fallback), including plugin-managed OpenAI metadata
+1. **Token Discovery**: Reads the OpenCode 2.x credential database, or legacy `auth.json` when the database is absent, including OpenAI account metadata
 2. **Multi-Source Account Discovery**: For providers like ChatGPT and GitHub Copilot, discovers accounts from multiple sources (OpenCode auth, OpenCode plugin files, CLI/Keychain/config stores, browser cookies) and deduplicates them by stable account metadata
 3. **Parallel Fetching**: Queries all provider APIs simultaneously using TaskGroup
 4. **Smart Caching**: Falls back to cached data on network errors
@@ -428,11 +428,15 @@ Grok reads identity from `~/.grok/auth.json`, uses the email address as the subs
 
 ## Troubleshooting
 
-### "No providers found" or auth.json not detected
-The app searches for `auth.json` in these locations (in order):
+### "No providers found" or credentials not detected
+For OpenCode 2.x, check the database location described in [OpenCode Authentication](#opencode-authentication).
+`OPENCODE_DB` overrides the default `opencode.db` path. The app must inherit any environment overrides used by OpenCode.
+The diagnostic dialog distinguishes unreadable stores from stores without usable credentials. Reconnect the provider in OpenCode if its credentials are missing or expired.
+
+Only when that database is absent does the app search for legacy `auth.json` (in order):
 1. `$XDG_DATA_HOME/opencode/auth.json` (if XDG_DATA_HOME is set)
 2. `~/.local/share/opencode/auth.json` (default)
-3. `~/Library/Application Support/opencode/auth.json` (macOS fallback)
+3. `~/Library/Application Support/opencode/auth.json` (legacy JSON-only macOS fallback)
 
 For ChatGPT/Codex multi-account setups, the app also searches:
 1. `~/.opencode/auth/openai.json`
@@ -445,7 +449,7 @@ OpenCode Bar also reads `provider.openai.options.apiKey` from the OpenCode confi
 
 ### GitHub Copilot not showing
 GitHub Copilot accounts are discovered from multiple sources (in priority order):
-1. **OpenCode auth** — `copilot` entry in OpenCode `auth.json`
+1. **OpenCode auth** — `github-copilot` integration in the OpenCode credential store
 2. **Copilot CLI Keychain** — macOS Keychain entries for `github.com`
 3. **VS Code / Cursor** — `~/.config/github-copilot/hosts.json` and `apps.json`
 4. **Browser Cookies** — Chrome, Brave, Arc, Edge session cookies

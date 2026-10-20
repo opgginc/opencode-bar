@@ -27,6 +27,7 @@ final class TokenManagerTests: XCTestCase {
         manager.clearOpenCodeAuthCacheForTesting()
         XCTAssertEqual(manager.readOpenCodeAuth()?.openai?.access, "legacy")
         XCTAssertEqual(manager.lastFoundAuthPath, legacyPath)
+        XCTAssertEqual(manager.openCodeAuthSourceLabel, legacyPath.path)
 
         let databasePath = dataDirectory.appendingPathComponent("opencode.db")
         XCTAssertEqual(manager.getOpenCodeDatabasePath(), databasePath)
@@ -34,6 +35,7 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertEqual(sqlite3_open(databasePath.path, &database), SQLITE_OK)
         defer { sqlite3_close(database) }
         let sql = """
+        PRAGMA journal_mode=WAL;
         CREATE TABLE credential (integration_id TEXT, value TEXT, active INTEGER, time_updated INTEGER);
         INSERT INTO credential VALUES
         ('openai', '{"type":"oauth","access":"newer","metadata":{"accountID":"other"}}', 0, 20),
@@ -53,18 +55,45 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertEqual(manager.lastFoundAuthPath, databasePath)
         XCTAssertEqual(manager.readGeminiOAuthAuth()?.access, "google-token")
         XCTAssertEqual(manager.lastFoundGeminiOAuthPath, databasePath)
+        XCTAssertTrue(manager.openCodeAuthStoreDiagnostics().contains("[ACTIVE] \(databasePath.path)"))
+
+        let metadataSQL = """
+        UPDATE credential SET value = '{"type":"oauth","access":"selected","accountId":"top-level","metadata":{}}'
+        WHERE integration_id = 'openai' AND active = 1;
+        """
+        XCTAssertEqual(sqlite3_exec(database, metadataSQL, nil, nil, nil), SQLITE_OK)
+        manager.clearOpenCodeAuthCacheForTesting()
+        XCTAssertEqual(manager.readOpenCodeAuth()?.openai?.accountId, "top-level")
 
         XCTAssertEqual(sqlite3_exec(database, "UPDATE credential SET active = 0", nil, nil, nil), SQLITE_OK)
         manager.clearOpenCodeAuthCacheForTesting()
         XCTAssertEqual(manager.readOpenCodeAuth()?.openai?.access, "newer")
 
+        // Simulate a stopped writer with no shared-memory sidecar. SQLite may
+        // retain that file on close, so remove it after all connections close.
+        XCTAssertEqual(sqlite3_wal_checkpoint_v2(database, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_close(database), SQLITE_OK)
+        database = nil
+        let sharedMemoryPath = databasePath.path + "-shm"
+        if FileManager.default.fileExists(atPath: sharedMemoryPath) {
+            try FileManager.default.removeItem(atPath: sharedMemoryPath)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: databasePath.path + "-shm"))
+        manager.clearOpenCodeAuthCacheForTesting()
+        XCTAssertEqual(manager.readOpenCodeAuth()?.openai?.access, "newer")
+        XCTAssertEqual(sqlite3_open(databasePath.path, &database), SQLITE_OK)
+
         XCTAssertEqual(sqlite3_exec(database, "DELETE FROM credential", nil, nil, nil), SQLITE_OK)
         manager.clearOpenCodeAuthCacheForTesting()
         XCTAssertNil(manager.readOpenCodeAuth())
         XCTAssertNil(manager.readGeminiOAuthAuth())
+        XCTAssertEqual(manager.openCodeAuthSourceLabel, "OpenCode")
+        XCTAssertTrue(manager.openCodeAuthStoreDiagnostics().contains("[NO USABLE CREDENTIALS] \(databasePath.path)"))
+        XCTAssertFalse(manager.openCodeAuthStoreDiagnostics().contains { $0.contains("[ACTIVE]") })
         XCTAssertEqual(sqlite3_exec(database, "DROP TABLE credential", nil, nil, nil), SQLITE_OK)
         manager.clearOpenCodeAuthCacheForTesting()
         XCTAssertNil(manager.readOpenCodeAuth())
+        XCTAssertTrue(manager.openCodeAuthStoreDiagnostics().contains("[UNREADABLE] \(databasePath.path)"))
 
         setenv("OPENCODE_DB", "custom.db", 1)
         XCTAssertEqual(manager.getOpenCodeDatabasePath(), dataDirectory.appendingPathComponent("custom.db"))
@@ -285,12 +314,19 @@ final class TokenManagerTests: XCTestCase {
         defer { try? fileManager.removeItem(at: tempDirectory) }
 
         let originalXDGDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
+        let originalDatabase = ProcessInfo.processInfo.environment["OPENCODE_DB"]
+        unsetenv("OPENCODE_DB")
         if let originalXDGDataHome {
             setenv("XDG_DATA_HOME", originalXDGDataHome, 1)
         } else {
             unsetenv("XDG_DATA_HOME")
         }
         defer {
+            if let originalDatabase {
+                setenv("OPENCODE_DB", originalDatabase, 1)
+            } else {
+                unsetenv("OPENCODE_DB")
+            }
             if let originalXDGDataHome {
                 setenv("XDG_DATA_HOME", originalXDGDataHome, 1)
             } else {
