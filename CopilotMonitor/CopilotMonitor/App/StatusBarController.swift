@@ -2519,8 +2519,7 @@ final class StatusBarController: NSObject {
             let lowercased = rawSource.lowercased()
 
             if lowercased.contains("opencode")
-                || rawSource == TokenManager.shared.getOpenCodeDatabasePath().path
-                || rawSource == TokenManager.shared.openCodeAuthSourceLabel {
+                || rawSource == TokenManager.shared.getOpenCodeDatabasePath().path {
                 return "OpenCode"
             }
 

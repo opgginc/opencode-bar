@@ -66,7 +66,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
   - Also understands plugin-managed OpenCode `auth.json` fields such as `idToken`, `accountIdOverride`, and `organizationIdOverride`
 - **Antigravity/Gemini**
   - `NoeFabris/opencode-antigravity-auth` (writes `~/.config/opencode/antigravity-accounts.json`)
-  - `jenslys/opencode-gemini-auth` (writes `google.oauth` in OpenCode `auth.json`)
+  - `jenslys/opencode-gemini-auth` (`google` OAuth credentials in the OpenCode credential store)
   - Gemini CLI OAuth creds (writes `~/.gemini/oauth_creds.json` for email/account ID metadata; overlaps are merged with Antigravity accounts)
 - **Claude**: `anomalyco/opencode-anthropic-auth`
 
@@ -81,7 +81,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
   - **Browser Cookies** - Chrome, Brave, Arc, Edge session cookies
   - Multiple accounts from different sources are automatically deduplicated and merged
 - **Codex**
-  - **OpenCode + oc-chatgpt-multi-auth** - Auto-detected from OpenCode `auth.json` plus `~/.opencode/.../openai-codex-accounts.json`
+  - **OpenCode + oc-chatgpt-multi-auth** - Auto-detected from the OpenCode credential store plus `~/.opencode/.../openai-codex-accounts.json`
   - **Codex for Mac** - Auto-detected through `~/.codex/auth.json`
   - **Codex CLI** - Auto-detected through `~/.codex/auth.json`
   - **codex-lb** - Auto-detected through `~/.codex-lb/`
@@ -106,9 +106,11 @@ The database defaults to `$XDG_DATA_HOME/opencode/opencode.db`, or
 can specify an absolute path or a path relative to the OpenCode data directory.
 Environment overrides must be available to the app or CLI process.
 
-When the database is absent, OpenCode Bar uses the existing OpenCode 1.x
-`auth.json` discovery. An existing empty, unreadable, or invalid database does
-not fall back to old credentials. OpenCode remains responsible for refreshing
+When the database is absent, or a successful schema query confirms it has no
+`credential` table, OpenCode Bar uses OpenCode 1.x `auth.json` discovery. V1 also
+uses SQLite for sessions, so a database file alone does not identify a V2
+credential store. An empty `credential` table, invalid credential schema, or
+unreadable database does not fall back to old credentials. OpenCode remains responsible for refreshing
 its credentials. Token source labels show the store that was actually loaded.
 
 ### Kiro Authentication
@@ -407,7 +409,7 @@ Quit (⌘Q)
 
 ## How It Works
 
-1. **Token Discovery**: Reads the OpenCode 2.x credential database, or legacy `auth.json` when the database is absent, including OpenAI account metadata
+1. **Token Discovery**: Reads the OpenCode credential store using the V1/V2 rules in [OpenCode Authentication](#opencode-authentication), including OpenAI account metadata
 2. **Multi-Source Account Discovery**: For providers like ChatGPT and GitHub Copilot, discovers accounts from multiple sources (OpenCode auth, OpenCode plugin files, CLI/Keychain/config stores, browser cookies) and deduplicates them by stable account metadata
 3. **Parallel Fetching**: Queries all provider APIs simultaneously using TaskGroup
 4. **Smart Caching**: Falls back to cached data on network errors
@@ -433,7 +435,7 @@ For OpenCode 2.x, check the database location described in [OpenCode Authenticat
 `OPENCODE_DB` overrides the default `opencode.db` path. The app must inherit any environment overrides used by OpenCode.
 The diagnostic dialog distinguishes unreadable stores from stores without usable credentials. Reconnect the provider in OpenCode if its credentials are missing or expired.
 
-Only when that database is absent does the app search for legacy `auth.json` (in order):
+When the database is absent or has no `credential` table, the app searches for legacy `auth.json` (in order):
 1. `$XDG_DATA_HOME/opencode/auth.json` (if XDG_DATA_HOME is set)
 2. `~/.local/share/opencode/auth.json` (default)
 3. `~/Library/Application Support/opencode/auth.json` (legacy JSON-only macOS fallback)

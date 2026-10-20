@@ -34,6 +34,11 @@ final class TokenManagerTests: XCTestCase {
         var database: OpaquePointer?
         XCTAssertEqual(sqlite3_open(databasePath.path, &database), SQLITE_OK)
         defer { sqlite3_close(database) }
+        // OpenCode V1 stores sessions in SQLite but credentials in auth.json.
+        XCTAssertEqual(sqlite3_exec(database, "CREATE TABLE session (id TEXT)", nil, nil, nil), SQLITE_OK)
+        manager.clearOpenCodeAuthCacheForTesting()
+        XCTAssertEqual(manager.readOpenCodeAuth()?.openai?.access, "legacy")
+        XCTAssertEqual(manager.lastFoundAuthPath, legacyPath)
         let sql = """
         PRAGMA journal_mode=WAL;
         CREATE TABLE credential (integration_id TEXT, value TEXT, active INTEGER, time_updated INTEGER);
@@ -56,6 +61,8 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertEqual(manager.readGeminiOAuthAuth()?.access, "google-token")
         XCTAssertEqual(manager.lastFoundGeminiOAuthPath, databasePath)
         XCTAssertTrue(manager.openCodeAuthStoreDiagnostics().contains("[ACTIVE] \(databasePath.path)"))
+        XCTAssertTrue(manager.openCodeAuthStoreDiagnostics().contains("[OpenCode providers] Using: \(databasePath.path)"))
+        XCTAssertTrue(manager.openCodeAuthStoreDiagnostics().contains("[Gemini OAuth] Using: \(databasePath.path)"))
 
         let metadataSQL = """
         UPDATE credential SET value = '{"type":"oauth","access":"selected","accountId":"top-level","metadata":{}}'
@@ -88,9 +95,15 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertNil(manager.readOpenCodeAuth())
         XCTAssertNil(manager.readGeminiOAuthAuth())
         XCTAssertEqual(manager.openCodeAuthSourceLabel, "OpenCode")
-        XCTAssertTrue(manager.openCodeAuthStoreDiagnostics().contains("[NO USABLE CREDENTIALS] \(databasePath.path)"))
+        XCTAssertTrue(manager.openCodeAuthStoreDiagnostics().contains("[Result] NO USABLE OPENCODE CREDENTIALS FOUND"))
         XCTAssertFalse(manager.openCodeAuthStoreDiagnostics().contains { $0.contains("[ACTIVE]") })
         XCTAssertEqual(sqlite3_exec(database, "DROP TABLE credential", nil, nil, nil), SQLITE_OK)
+        manager.clearOpenCodeAuthCacheForTesting()
+        XCTAssertEqual(manager.readOpenCodeAuth()?.openai?.access, "legacy")
+        XCTAssertEqual(manager.lastFoundAuthPath, legacyPath)
+
+        // A credential table with an invalid schema is not a V1 database.
+        XCTAssertEqual(sqlite3_exec(database, "CREATE TABLE credential (invalid TEXT)", nil, nil, nil), SQLITE_OK)
         manager.clearOpenCodeAuthCacheForTesting()
         XCTAssertNil(manager.readOpenCodeAuth())
         XCTAssertTrue(manager.openCodeAuthStoreDiagnostics().contains("[UNREADABLE] \(databasePath.path)"))
@@ -99,6 +112,13 @@ final class TokenManagerTests: XCTestCase {
         XCTAssertEqual(manager.getOpenCodeDatabasePath(), dataDirectory.appendingPathComponent("custom.db"))
         setenv("OPENCODE_DB", databasePath.path, 1)
         XCTAssertEqual(manager.getOpenCodeDatabasePath(), databasePath)
+
+        let corruptPath = directory.appendingPathComponent("credentials-without-extension")
+        try Data("not a SQLite database".utf8).write(to: corruptPath)
+        setenv("OPENCODE_DB", corruptPath.path, 1)
+        manager.clearOpenCodeAuthCacheForTesting()
+        XCTAssertNil(manager.readOpenCodeAuth())
+        XCTAssertTrue(manager.openCodeAuthStoreDiagnostics().contains("[UNREADABLE] \(corruptPath.path)"))
     }
 
     func testGeminiProjectPolicyPrefersConfiguredProject() {

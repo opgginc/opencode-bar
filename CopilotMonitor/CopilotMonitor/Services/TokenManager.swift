@@ -987,7 +987,22 @@ final class TokenManager: @unchecked Sendable {
     private func getOpenCodeAuthStores() -> [(url: URL, isDatabase: Bool)] {
         let databasePath = getOpenCodeDatabasePath()
         if FileManager.default.fileExists(atPath: databasePath.path) {
-            // An existing V2 store is authoritative, including empty or unreadable stores.
+            // V1 also has opencode.db, but keeps credentials in auth.json.
+            // Only a successful schema probe may enable the legacy fallback.
+            var database: OpaquePointer?
+            defer { sqlite3_close(database) }
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            if FileManager.default.isReadableFile(atPath: databasePath.path),
+               sqlite3_open_v2(databasePath.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK {
+                sqlite3_busy_timeout(database, 1000)
+                let query = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'credential'"
+                if sqlite3_prepare_v2(database, query, -1, &statement, nil) == SQLITE_OK,
+                   sqlite3_step(statement) == SQLITE_DONE {
+                    logger.info("OpenCode database has no credential table; using legacy auth discovery")
+                    return getAuthFilePaths().map { ($0, false) }
+                }
+            }
             return [(databasePath, true)]
         }
         return getAuthFilePaths().map { ($0, false) }
@@ -1001,7 +1016,9 @@ final class TokenManager: @unchecked Sendable {
         let status = sqlite3_open_v2(path.path, &database, SQLITE_OPEN_READONLY, nil)
         defer { sqlite3_close(database) }
         guard status == SQLITE_OK else {
-            throw NSError(domain: "OpenCodeCredentials", code: Int(status))
+            throw NSError(domain: "OpenCodeCredentials", code: Int(status), userInfo: [
+                NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(database))
+            ])
         }
         sqlite3_busy_timeout(database, 1000)
         var statement: OpaquePointer?
@@ -1013,7 +1030,9 @@ final class TokenManager: @unchecked Sendable {
         """
         let prepared = sqlite3_prepare_v2(database, query, -1, &statement, nil)
         guard prepared == SQLITE_OK else {
-            throw NSError(domain: "OpenCodeCredentials", code: Int(prepared))
+            throw NSError(domain: "OpenCodeCredentials", code: Int(prepared), userInfo: [
+                NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(database))
+            ])
         }
         var entries: [String: Any] = [:]
         var selected = Set<String>()
@@ -1021,19 +1040,20 @@ final class TokenManager: @unchecked Sendable {
         while step == SQLITE_ROW {
             if let idText = sqlite3_column_text(statement, 0) {
                 let integrationID = String(cString: idText)
-                if selected.insert(integrationID).inserted,
-                   let valueText = sqlite3_column_text(statement, 1),
-                   var value = (try? JSONSerialization.jsonObject(
-                    with: Data(String(cString: valueText).utf8)
-                   )) as? [String: Any] {
+                if selected.insert(integrationID).inserted {
+                    guard let valueText = sqlite3_column_text(statement, 1),
+                          var value = (try? JSONSerialization.jsonObject(
+                            with: Data(String(cString: valueText).utf8)
+                          )) as? [String: Any] else {
+                        logger.warning("Ignoring OpenCode credential for \(integrationID): invalid JSON object")
+                        step = sqlite3_step(statement)
+                        continue
+                    }
                     switch value["type"] as? String {
                     case "oauth":
                         if let metadata = value["metadata"] as? [String: Any] {
                             if let accountID = metadata["accountID"] as? String, !accountID.isEmpty {
                                 value["accountId"] = accountID
-                            }
-                            if let enterpriseURL = metadata["enterpriseUrl"] as? String, !enterpriseURL.isEmpty {
-                                value["enterpriseUrl"] = enterpriseURL
                             }
                         }
                         entries[integrationID] = value
@@ -1041,22 +1061,33 @@ final class TokenManager: @unchecked Sendable {
                         value["type"] = "api"
                         entries[integrationID] = value
                     default:
-                        break
+                        logger.warning("Ignoring OpenCode credential for \(integrationID): unsupported credential type")
                     }
                 }
             }
             step = sqlite3_step(statement)
         }
         guard step == SQLITE_DONE else {
-            throw NSError(domain: "OpenCodeCredentials", code: Int(step))
+            throw NSError(domain: "OpenCodeCredentials", code: Int(step), userInfo: [
+                NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(database))
+            ])
         }
         logger.info("Loaded OpenCode credential database: \(entries.count) integrations")
         return try JSONSerialization.data(withJSONObject: entries)
     }
 
     func openCodeAuthStoreDiagnostics() -> [String] {
-        var lines: [String] = []
-        var selectedPath: URL?
+        let hasAuth = readOpenCodeAuth() != nil
+        let hasGoogle = readGeminiOAuthAuth() != nil
+        let (authPath, googlePath) = queue.sync {
+            (hasAuth ? lastFoundAuthPath : nil, hasGoogle ? lastFoundGeminiOAuthPath : nil)
+        }
+        let environment = ProcessInfo.processInfo.environment
+        var lines = [
+            "[XDG_DATA_HOME] \(environment["XDG_DATA_HOME"] ?? "NOT SET")",
+            "[OPENCODE_DB] \(environment["OPENCODE_DB"] ?? "NOT SET")",
+            "[Database path] \(getOpenCodeDatabasePath().path)"
+        ]
         for store in getOpenCodeAuthStores() {
             let path = store.url
             guard FileManager.default.fileExists(atPath: path.path) else {
@@ -1064,24 +1095,16 @@ final class TokenManager: @unchecked Sendable {
                 continue
             }
             guard FileManager.default.isReadableFile(atPath: path.path),
-                  let data = try? readOpenCodeAuthData(at: path, isDatabase: store.isDatabase) else {
+                  (try? readOpenCodeAuthData(at: path, isDatabase: store.isDatabase)) != nil else {
                 lines.append("[UNREADABLE] \(path.path)")
                 continue
             }
-            let auth = try? JSONDecoder().decode(OpenCodeAuth.self, from: data)
-            let google = (try? JSONDecoder().decode(OpenCodeGeminiAuthContainer.self, from: data))?.google
-            let hasGoogle = google?.type?.lowercased() == "oauth"
-                && normalizedNonEmpty(google?.refresh) != nil
-            guard auth != nil || hasGoogle else {
-                lines.append("[NO USABLE CREDENTIALS] \(path.path)")
-                continue
-            }
-            lines.append("[\(selectedPath == nil ? "ACTIVE" : "SHADOWED")] \(path.path)")
-            if selectedPath == nil { selectedPath = path }
+            let isActive = path == authPath || path == googlePath
+            lines.append("[\(isActive ? "ACTIVE" : "READABLE")] \(path.path)")
         }
-        if let selectedPath {
-            lines.append("[Result] Using: \(selectedPath.path)")
-        } else {
+        lines.append("[OpenCode providers] \(authPath.map { "Using: " + $0.path } ?? "NO USABLE CREDENTIALS")")
+        lines.append("[Gemini OAuth] \(googlePath.map { "Using: " + $0.path } ?? "NO USABLE CREDENTIALS")")
+        if authPath == nil && googlePath == nil {
             lines.append("[Result] NO USABLE OPENCODE CREDENTIALS FOUND")
         }
         return lines
@@ -5094,13 +5117,6 @@ final class TokenManager: @unchecked Sendable {
         debugLines.append("Environment Info:")
         debugLines.append(String(repeating: "─", count: 40))
 
-        // 0. XDG_DATA_HOME environment variable
-        if let xdgDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"], !xdgDataHome.isEmpty {
-            debugLines.append("[XDG_DATA_HOME] SET: \(xdgDataHome)")
-        } else {
-            debugLines.append("[XDG_DATA_HOME] NOT SET (using default ~/.local/share)")
-        }
-
         // 1. Report the selected OpenCode credential stores.
         debugLines.append("")
         debugLines.append("Auth File Search:")
@@ -5228,13 +5244,6 @@ final class TokenManager: @unchecked Sendable {
 
         var debugLines: [String] = []
         debugLines.append("========== Environment Debug Info ==========")
-
-        // 0. XDG_DATA_HOME environment variable
-        if let xdgDataHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"], !xdgDataHome.isEmpty {
-            debugLines.append("[XDG_DATA_HOME] SET: \(xdgDataHome)")
-        } else {
-            debugLines.append("[XDG_DATA_HOME] NOT SET (using default ~/.local/share)")
-        }
 
         // 1. Report the selected OpenCode credential stores.
         debugLines.append("---------- Auth File Search ----------")
