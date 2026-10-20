@@ -66,7 +66,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
   - Also understands plugin-managed OpenCode `auth.json` fields such as `idToken`, `accountIdOverride`, and `organizationIdOverride`
 - **Antigravity/Gemini**
   - `NoeFabris/opencode-antigravity-auth` (writes `~/.config/opencode/antigravity-accounts.json`)
-  - `jenslys/opencode-gemini-auth` (writes `google.oauth` in OpenCode `auth.json`)
+  - `jenslys/opencode-gemini-auth` (`google` OAuth credentials in the OpenCode credential store)
   - Gemini CLI OAuth creds (writes `~/.gemini/oauth_creds.json` for email/account ID metadata; overlaps are merged with Antigravity accounts)
 - **Claude**: `anomalyco/opencode-anthropic-auth`
 
@@ -75,13 +75,13 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 
 ### Other AI agents beyond OpenCode that supports auto-detection
 - **GitHub Copilot** (multi-source discovery)
-  - **OpenCode auth** - Auto-detected from OpenCode `auth.json` (`copilot` provider entry)
+  - **OpenCode auth** - Auto-detected from the OpenCode credential store (`github-copilot` integration)
   - **Copilot CLI** - Auto-detected through macOS Keychain (`github.com` entries)
   - **VS Code / Cursor** - Auto-detected from `~/.config/github-copilot/hosts.json` and `~/.config/github-copilot/apps.json`
   - **Browser Cookies** - Chrome, Brave, Arc, Edge session cookies
   - Multiple accounts from different sources are automatically deduplicated and merged
 - **Codex**
-  - **OpenCode + oc-chatgpt-multi-auth** - Auto-detected from OpenCode `auth.json` plus `~/.opencode/.../openai-codex-accounts.json`
+  - **OpenCode + oc-chatgpt-multi-auth** - Auto-detected from the OpenCode credential store plus `~/.opencode/.../openai-codex-accounts.json`
   - **Codex for Mac** - Auto-detected through `~/.codex/auth.json`
   - **Codex CLI** - Auto-detected through `~/.codex/auth.json`
   - **codex-lb** - Auto-detected through `~/.codex-lb/`
@@ -90,10 +90,28 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 ## Features
 
 ### Automatic Provider Detection
-- **Zero Configuration**: Reads your OpenCode `auth.json` automatically
-- **Multi-path Support**: Searches `$XDG_DATA_HOME/opencode`, `~/.local/share/opencode`, and `~/Library/Application Support/opencode`
+- **Zero Configuration**: Reads OpenCode 2.x credentials from `opencode.db`, or OpenCode 1.x credentials from `auth.json`
+- **Custom Locations**: Supports `XDG_DATA_HOME` and `OPENCODE_DB`; legacy JSON discovery also checks the macOS Application Support directory
 - **Dynamic Updates**: New providers appear as you add them to OpenCode
 - **Smart Categorization**: Pay-as-you-go vs Quota-based providers displayed separately
+
+### OpenCode Authentication
+
+OpenCode Bar reads the OpenCode 2.x `credential` table in read-only mode. It uses
+the active credential for each integration, or the most recently updated one
+when none is active. OAuth account metadata and API keys are supported.
+
+The database defaults to `$XDG_DATA_HOME/opencode/opencode.db`, or
+`~/.local/share/opencode/opencode.db` when `XDG_DATA_HOME` is unset. `OPENCODE_DB`
+can specify an absolute path or a path relative to the OpenCode data directory.
+Environment overrides must be available to the app or CLI process.
+
+When the database is absent, or a successful schema query confirms it has no
+`credential` table, OpenCode Bar uses OpenCode 1.x `auth.json` discovery. V1 also
+uses SQLite for sessions, so a database file alone does not identify a V2
+credential store. An empty `credential` table, invalid credential schema, or
+unreadable database does not fall back to old credentials. OpenCode remains responsible for refreshing
+its credentials. Token source labels show the store that was actually loaded.
 
 ### Kiro Authentication
 
@@ -222,13 +240,13 @@ OpenRouter            Pay-as-you-go    -           $37.42 spent
 
 #### MiniMax Notes
 
-- MiniMax Coding Plan is resolved from the OpenCode auth entry `minimax-coding-plan` in `auth.json`.
+- MiniMax Coding Plan is resolved from the OpenCode credential entry `minimax-coding-plan`.
 - OpenCode Bar uses the Coding Plan remains endpoint and converts it into used percentages for the menu bar app and CLI.
 - MiniMax response fields `current_interval_usage_count` and `current_weekly_usage_count` behave as remaining counts despite their names, so OpenCode Bar calculates used percent as `total - remaining`.
 
 #### OpenCode Go Notes
 
-- OpenCode Go is resolved from the OpenCode auth entry `opencode-go` in `auth.json`.
+- OpenCode Go is resolved from the OpenCode credential entry `opencode-go`.
 - OpenCode Bar validates the API key against `https://opencode.ai/zen/go/v1/models`.
 - Usage windows come from the OpenCode dashboard and require `OPENCODE_GO_WORKSPACE_ID` plus `OPENCODE_GO_AUTH_COOKIE`, or `~/.config/opencode-bar/opencode-go.json`.
 - The monthly dashboard window is a usage cap signal; the app's subscription preset for the Go plan remains `$10.00`.
@@ -391,7 +409,7 @@ Quit (⌘Q)
 
 ## How It Works
 
-1. **Token Discovery**: Reads authentication tokens from OpenCode's `auth.json` (with multi-path fallback), including plugin-managed OpenAI metadata
+1. **Token Discovery**: Reads the OpenCode credential store using the V1/V2 rules in [OpenCode Authentication](#opencode-authentication), including OpenAI account metadata
 2. **Multi-Source Account Discovery**: For providers like ChatGPT and GitHub Copilot, discovers accounts from multiple sources (OpenCode auth, OpenCode plugin files, CLI/Keychain/config stores, browser cookies) and deduplicates them by stable account metadata
 3. **Parallel Fetching**: Queries all provider APIs simultaneously using TaskGroup
 4. **Smart Caching**: Falls back to cached data on network errors
@@ -412,11 +430,15 @@ Grok reads identity from `~/.grok/auth.json`, uses the email address as the subs
 
 ## Troubleshooting
 
-### "No providers found" or auth.json not detected
-The app searches for `auth.json` in these locations (in order):
+### "No providers found" or credentials not detected
+For OpenCode 2.x, check the database location described in [OpenCode Authentication](#opencode-authentication).
+`OPENCODE_DB` overrides the default `opencode.db` path. The app must inherit any environment overrides used by OpenCode.
+The diagnostic dialog distinguishes unreadable stores from stores without usable credentials. Reconnect the provider in OpenCode if its credentials are missing or expired.
+
+When the database is absent or has no `credential` table, the app searches for legacy `auth.json` (in order):
 1. `$XDG_DATA_HOME/opencode/auth.json` (if XDG_DATA_HOME is set)
 2. `~/.local/share/opencode/auth.json` (default)
-3. `~/Library/Application Support/opencode/auth.json` (macOS fallback)
+3. `~/Library/Application Support/opencode/auth.json` (legacy JSON-only macOS fallback)
 
 For ChatGPT/Codex multi-account setups, the app also searches:
 1. `~/.opencode/auth/openai.json`
@@ -429,7 +451,7 @@ OpenCode Bar also reads `provider.openai.options.apiKey` from the OpenCode confi
 
 ### GitHub Copilot not showing
 GitHub Copilot accounts are discovered from multiple sources (in priority order):
-1. **OpenCode auth** — `copilot` entry in OpenCode `auth.json`
+1. **OpenCode auth** — `github-copilot` integration in the OpenCode credential store
 2. **Copilot CLI Keychain** — macOS Keychain entries for `github.com`
 3. **VS Code / Cursor** — `~/.config/github-copilot/hosts.json` and `apps.json`
 4. **Browser Cookies** — Chrome, Brave, Arc, Edge session cookies

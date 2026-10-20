@@ -2518,7 +2518,8 @@ final class StatusBarController: NSObject {
         func parseSingleSource(_ rawSource: String) -> String? {
             let lowercased = rawSource.lowercased()
 
-            if lowercased.contains("opencode") {
+            if lowercased.contains("opencode")
+                || rawSource == TokenManager.shared.getOpenCodeDatabasePath().path {
                 return "OpenCode"
             }
 
@@ -4024,7 +4025,7 @@ final class StatusBarController: NSObject {
         submenu.addItem(NSMenuItem.separator())
         let authItem = NSMenuItem()
         authItem.view = createDisabledLabelView(
-            text: "Token From: ~/.local/share/opencode/auth.json",
+            text: "Token From: \(TokenManager.shared.openCodeAuthSourceLabel)",
             icon: NSImage(systemSymbolName: "key", accessibilityDescription: "Auth Source"),
             multiline: true
         )

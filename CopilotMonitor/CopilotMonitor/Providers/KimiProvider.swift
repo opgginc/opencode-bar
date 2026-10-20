@@ -151,7 +151,7 @@ final class KimiProvider: ProviderProtocol {
                 sevenDayReset: weeklyReset,
                 planType: planType,
                 email: kimiResponse.user?.userId,
-                authSource: "~/.local/share/opencode/auth.json"
+                authSource: tokenManager.openCodeAuthSourceLabel
             )
 
             return ProviderResult(usage: providerUsage, details: details)
