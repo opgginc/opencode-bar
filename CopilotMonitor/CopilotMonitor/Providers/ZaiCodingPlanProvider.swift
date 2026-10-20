@@ -275,7 +275,7 @@ final class ZaiCodingPlanProvider: ProviderProtocol {
         }
 
         let details = DetailedUsage(
-            authSource: "~/.local/share/opencode/auth.json",
+            authSource: tokenManager.lastFoundAuthPath?.path,
             tokenUsagePercent: tokenUsagePercent,
             tokenUsageReset: dateFromMilliseconds((tokenLimit ?? creditSessionLimit)?.nextResetTime),
             tokenUsageUsed: (tokenLimit ?? creditSessionLimit)?.currentValue,

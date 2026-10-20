@@ -78,7 +78,7 @@ final class OpenRouterProvider: ProviderProtocol {
             monthlyCost: monthlyCost,
             creditsRemaining: remainingCredits,
             creditsTotal: creditsResponse.data.total_credits,
-            authSource: "~/.local/share/opencode/auth.json"
+            authSource: TokenManager.shared.lastFoundAuthPath?.path
         )
 
         return ProviderResult(

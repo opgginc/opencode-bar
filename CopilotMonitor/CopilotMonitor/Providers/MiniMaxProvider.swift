@@ -185,7 +185,7 @@ final class MiniMaxProvider: ProviderProtocol {
             fiveHourReset: dateFromMilliseconds(primaryRow.endTime),
             sevenDayUsage: weeklyUsage,
             sevenDayReset: dateFromMilliseconds(primaryRow.weeklyEndTime),
-            authSource: "~/.local/share/opencode/auth.json"
+            authSource: tokenManager.lastFoundAuthPath?.path
         )
 
         logger.info(

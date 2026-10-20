@@ -1,7 +1,77 @@
 import XCTest
+import SQLite3
 @testable import OpenCode_Bar
 
 final class TokenManagerTests: XCTestCase {
+    func testOpenCodeDatabasePrecedenceAndCredentialSelection() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dataDirectory = directory.appendingPathComponent("opencode")
+        try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+        let oldEnvironment = ProcessInfo.processInfo.environment
+        defer {
+            for name in ["XDG_DATA_HOME", "OPENCODE_DB"] {
+                if let value = oldEnvironment[name] {
+                    setenv(name, value, 1)
+                } else {
+                    unsetenv(name)
+                }
+            }
+            TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        setenv("XDG_DATA_HOME", directory.path, 1)
+        unsetenv("OPENCODE_DB")
+        let manager = TokenManager.shared
+        let legacyPath = dataDirectory.appendingPathComponent("auth.json")
+        try Data(#"{"openai":{"type":"oauth","access":"legacy"}}"#.utf8).write(to: legacyPath)
+        manager.clearOpenCodeAuthCacheForTesting()
+        XCTAssertEqual(manager.readOpenCodeAuth()?.openai?.access, "legacy")
+        XCTAssertEqual(manager.lastFoundAuthPath, legacyPath)
+
+        let databasePath = dataDirectory.appendingPathComponent("opencode.db")
+        XCTAssertEqual(manager.getOpenCodeDatabasePath(), databasePath)
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databasePath.path, &database), SQLITE_OK)
+        defer { sqlite3_close(database) }
+        let sql = """
+        CREATE TABLE credential (integration_id TEXT, value TEXT, active INTEGER, time_updated INTEGER);
+        INSERT INTO credential VALUES
+        ('openai', '{"type":"oauth","access":"newer","metadata":{"accountID":"other"}}', 0, 20),
+        ('openai', '{"type":"oauth","access":"selected","metadata":{"accountID":"account"}}', 1, 10),
+        ('openrouter', '{"type":"key","key":"router-key"}', 1, 10),
+        ('anthropic', 'invalid-json', 1, 20),
+        ('anthropic', '{"type":"oauth","access":"stale"}', 0, 10),
+        ('google', '{"type":"oauth","access":"google-token","refresh":"google-refresh"}', 1, 10);
+        """
+        XCTAssertEqual(sqlite3_exec(database, sql, nil, nil, nil), SQLITE_OK)
+        manager.clearOpenCodeAuthCacheForTesting()
+        let auth = try XCTUnwrap(manager.readOpenCodeAuth())
+        XCTAssertEqual(auth.openai?.access, "selected")
+        XCTAssertEqual(auth.openai?.accountId, "account")
+        XCTAssertEqual(auth.openrouter?.key, "router-key")
+        XCTAssertNil(auth.anthropic)
+        XCTAssertEqual(manager.lastFoundAuthPath, databasePath)
+        XCTAssertEqual(manager.readGeminiOAuthAuth()?.access, "google-token")
+        XCTAssertEqual(manager.lastFoundGeminiOAuthPath, databasePath)
+
+        XCTAssertEqual(sqlite3_exec(database, "UPDATE credential SET active = 0", nil, nil, nil), SQLITE_OK)
+        manager.clearOpenCodeAuthCacheForTesting()
+        XCTAssertEqual(manager.readOpenCodeAuth()?.openai?.access, "newer")
+
+        XCTAssertEqual(sqlite3_exec(database, "DELETE FROM credential", nil, nil, nil), SQLITE_OK)
+        manager.clearOpenCodeAuthCacheForTesting()
+        XCTAssertNil(manager.readOpenCodeAuth())
+        XCTAssertNil(manager.readGeminiOAuthAuth())
+        XCTAssertEqual(sqlite3_exec(database, "DROP TABLE credential", nil, nil, nil), SQLITE_OK)
+        manager.clearOpenCodeAuthCacheForTesting()
+        XCTAssertNil(manager.readOpenCodeAuth())
+
+        setenv("OPENCODE_DB", "custom.db", 1)
+        XCTAssertEqual(manager.getOpenCodeDatabasePath(), dataDirectory.appendingPathComponent("custom.db"))
+        setenv("OPENCODE_DB", databasePath.path, 1)
+        XCTAssertEqual(manager.getOpenCodeDatabasePath(), databasePath)
+    }
+
     func testGeminiProjectPolicyPrefersConfiguredProject() {
         XCTAssertEqual(
             GeminiProjectPolicy.resolve(primary: "configured-project", fallback: "managed-project"),

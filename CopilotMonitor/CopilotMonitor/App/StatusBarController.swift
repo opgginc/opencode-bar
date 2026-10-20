@@ -4024,7 +4024,7 @@ final class StatusBarController: NSObject {
         submenu.addItem(NSMenuItem.separator())
         let authItem = NSMenuItem()
         authItem.view = createDisabledLabelView(
-            text: "Token From: ~/.local/share/opencode/auth.json",
+            text: "Token From: \(TokenManager.shared.lastFoundAuthPath?.path ?? "OpenCode")",
             icon: NSImage(systemSymbolName: "key", accessibilityDescription: "Auth Source"),
             multiline: true
         )

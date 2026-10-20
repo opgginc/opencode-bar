@@ -75,7 +75,7 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 
 ### Other AI agents beyond OpenCode that supports auto-detection
 - **GitHub Copilot** (multi-source discovery)
-  - **OpenCode auth** - Auto-detected from OpenCode `auth.json` (`copilot` provider entry)
+  - **OpenCode auth** - Auto-detected from the OpenCode credential store (`github-copilot` integration)
   - **Copilot CLI** - Auto-detected through macOS Keychain (`github.com` entries)
   - **VS Code / Cursor** - Auto-detected from `~/.config/github-copilot/hosts.json` and `~/.config/github-copilot/apps.json`
   - **Browser Cookies** - Chrome, Brave, Arc, Edge session cookies
@@ -90,10 +90,26 @@ Download the latest `.dmg` file from the [**Releases**](https://github.com/opggi
 ## Features
 
 ### Automatic Provider Detection
-- **Zero Configuration**: Reads your OpenCode `auth.json` automatically
+- **Zero Configuration**: Reads OpenCode 2.x credentials from `opencode.db`, or OpenCode 1.x credentials from `auth.json`
 - **Multi-path Support**: Searches `$XDG_DATA_HOME/opencode`, `~/.local/share/opencode`, and `~/Library/Application Support/opencode`
 - **Dynamic Updates**: New providers appear as you add them to OpenCode
 - **Smart Categorization**: Pay-as-you-go vs Quota-based providers displayed separately
+
+### OpenCode Authentication
+
+OpenCode Bar reads the OpenCode 2.x `credential` table in read-only mode. It uses
+the active credential for each integration, or the most recently updated one
+when none is active. OAuth account metadata and API keys are supported.
+
+The database defaults to `$XDG_DATA_HOME/opencode/opencode.db`, or
+`~/.local/share/opencode/opencode.db` when `XDG_DATA_HOME` is unset. `OPENCODE_DB`
+can specify an absolute path or a path relative to the OpenCode data directory.
+Environment overrides must be available to the app or CLI process.
+
+When the database is absent, OpenCode Bar uses the existing OpenCode 1.x
+`auth.json` discovery. An existing empty, unreadable, or invalid database does
+not fall back to old credentials. OpenCode remains responsible for refreshing
+its credentials. Token source labels show the store that was actually loaded.
 
 ### Kiro Authentication
 
@@ -222,13 +238,13 @@ OpenRouter            Pay-as-you-go    -           $37.42 spent
 
 #### MiniMax Notes
 
-- MiniMax Coding Plan is resolved from the OpenCode auth entry `minimax-coding-plan` in `auth.json`.
+- MiniMax Coding Plan is resolved from the OpenCode credential entry `minimax-coding-plan`.
 - OpenCode Bar uses the Coding Plan remains endpoint and converts it into used percentages for the menu bar app and CLI.
 - MiniMax response fields `current_interval_usage_count` and `current_weekly_usage_count` behave as remaining counts despite their names, so OpenCode Bar calculates used percent as `total - remaining`.
 
 #### OpenCode Go Notes
 
-- OpenCode Go is resolved from the OpenCode auth entry `opencode-go` in `auth.json`.
+- OpenCode Go is resolved from the OpenCode credential entry `opencode-go`.
 - OpenCode Bar validates the API key against `https://opencode.ai/zen/go/v1/models`.
 - Usage windows come from the OpenCode dashboard and require `OPENCODE_GO_WORKSPACE_ID` plus `OPENCODE_GO_AUTH_COOKIE`, or `~/.config/opencode-bar/opencode-go.json`.
 - The monthly dashboard window is a usage cap signal; the app's subscription preset for the Go plan remains `$10.00`.
