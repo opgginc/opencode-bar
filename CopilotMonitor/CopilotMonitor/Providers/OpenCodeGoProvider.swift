@@ -6,7 +6,7 @@ private let logger = Logger(subsystem: "com.opencodeproviders", category: "OpenC
 struct OpenCodeGoUsageWindow: Equatable {
     let usagePercent: Double
     let resetInSeconds: Int
-    let resetDate: Date
+    let resetDate: Date?
 }
 
 struct OpenCodeGoDashboardUsage: Equatable {
@@ -27,12 +27,6 @@ struct OpenCodeGoDashboardUsage: Equatable {
     }
 }
 
-private struct OpenCodeGoDashboardCredentials {
-    let workspaceID: String
-    let authCookie: String
-    let source: String
-}
-
 final class OpenCodeGoProvider: ProviderProtocol {
     let identifier: ProviderIdentifier = .openCodeGo
     let type: ProviderType = .quotaBased
@@ -42,6 +36,7 @@ final class OpenCodeGoProvider: ProviderProtocol {
     private let tokenManager: TokenManager
     private let session: URLSession
     private let modelsURL = URL(string: "https://opencode.ai/zen/go/v1/models")!
+    private let usageURL = URL(string: "https://opencode.ai/zen/go/v1/usage")!
 
     init(tokenManager: TokenManager = .shared, session: URLSession = .shared) {
         self.tokenManager = tokenManager
@@ -58,25 +53,31 @@ final class OpenCodeGoProvider: ProviderProtocol {
 
         let modelCount = try await fetchModelCount(apiKey: apiKey)
 
-        let credentialCandidates = dashboardCredentialCandidates()
-        guard !credentialCandidates.isEmpty else {
-            logger.warning("OpenCode Go dashboard usage setup is incomplete")
-            throw ProviderError.providerError(
-                "OpenCode Go dashboard usage setup is incomplete. Log in to opencode.ai in Chrome/Brave/Arc/Edge, visit the Go dashboard once, or set OPENCODE_GO_WORKSPACE_ID and OPENCODE_GO_AUTH_COOKIE."
-            )
-        }
-
-        let (dashboardUsage, credentialSource) = try await fetchFirstDashboardUsage(from: credentialCandidates)
+        // Usage comes from the key-based usage API. No workspace ID,
+        // cookies, or extra setup needed.
+        // API errors propagate with their classification intact.
+        let dashboardUsage = try await fetchUsage(apiKey: apiKey)
+        return try Self.makeResult(
+            dashboardUsage: dashboardUsage,
+            modelCount: modelCount,
+            tokenManager: tokenManager
+        )
+    }
+    private static func makeResult(
+        dashboardUsage: OpenCodeGoDashboardUsage,
+        modelCount: Int,
+        tokenManager: TokenManager
+    ) throws -> ProviderResult {
         guard !dashboardUsage.usagePercents.isEmpty else {
-            logger.error("OpenCode Go dashboard response missing usage windows")
+            logger.error("OpenCode Go usage response missing usage windows")
             throw ProviderError.decodingError(
-                "OpenCode Go dashboard markup may have changed. No usage windows were found. Please report this issue."
+                "OpenCode Go usage response has no usage windows. Please report this issue."
             )
         }
 
         let missingWindowNames = dashboardUsage.missingWindowNames
         if !missingWindowNames.isEmpty {
-            logger.warning("OpenCode Go dashboard missing usage window(s): \(missingWindowNames.joined(separator: ", "), privacy: .public)")
+            logger.warning("OpenCode Go usage missing window(s): \(missingWindowNames.joined(separator: ", "), privacy: .public)")
         }
 
         let overallUsed = dashboardUsage.usagePercents.max() ?? 0
@@ -100,7 +101,7 @@ final class OpenCodeGoProvider: ProviderProtocol {
             openCodeGoMonthlyReset: dashboardUsage.monthly?.resetDate,
             openCodeGoModelCount: modelCount,
             authSource: authPath,
-            authUsageSummary: credentialSource
+            authUsageSummary: "OpenCode Go API"
         )
 
         logger.info(
@@ -110,21 +111,57 @@ final class OpenCodeGoProvider: ProviderProtocol {
         return ProviderResult(usage: usage, details: details)
     }
 
-    static func parseDashboardUsageHTML(_ html: String, now: Date = Date()) throws -> OpenCodeGoDashboardUsage {
-        let text = normalizedDashboardHTML(html)
-        let usage = OpenCodeGoDashboardUsage(
-            rolling: parseWindow(named: "rollingUsage", in: text, now: now),
-            weekly: parseWindow(named: "weeklyUsage", in: text, now: now),
-            monthly: parseWindow(named: "monthlyUsage", in: text, now: now)
-        )
+    // MARK: - Key-based usage API (current)
 
-        guard !usage.usagePercents.isEmpty else {
-            throw ProviderError.decodingError(
-                "OpenCode Go dashboard markup may have changed. No usage windows were found. Please report this issue."
-            )
+    /// Fetches `GET /zen/go/v1/usage` with the API-key from auth.json.
+    /// Returns rolling (5h) / weekly / monthly windows with percent used
+    /// and reset dates. Discovered via the console bundle (see also #154).
+    private func fetchUsage(apiKey: String) async throws -> OpenCodeGoDashboardUsage {
+        var request = URLRequest(url: usageURL)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let data = try await fetchData(request: request)
+        return try Self.parseGoUsageAPI(data)
+    }
+
+    /// Parses `{"usage": {"rolling": {"percent": N, "resetsAt": ISO}, ...}}`.
+    /// `percent` is already a percentage; `status` is informational.
+    static func parseGoUsageAPI(_ data: Data, now: Date = Date()) throws -> OpenCodeGoDashboardUsage {
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw ProviderError.decodingError("Invalid OpenCode Go usage JSON: \(error.localizedDescription)")
+        }
+        guard let root = object as? [String: Any],
+              let usage = root["usage"] as? [String: Any] else {
+            throw ProviderError.decodingError("Unexpected OpenCode Go usage shape")
         }
 
-        return usage
+        let parsed = OpenCodeGoDashboardUsage(
+            rolling: parseUsageWindow(usage["rolling"], now: now),
+            weekly: parseUsageWindow(usage["weekly"], now: now),
+            monthly: parseUsageWindow(usage["monthly"], now: now)
+        )
+
+        guard !parsed.usagePercents.isEmpty else {
+            throw ProviderError.decodingError("OpenCode Go usage has no usable windows")
+        }
+        return parsed
+    }
+
+    private static func parseUsageWindow(_ value: Any?, now: Date) -> OpenCodeGoUsageWindow? {
+        guard let window = value as? [String: Any],
+              let percent = APIValueParser.parseDouble(window["percent"]) else {
+            return nil
+        }
+        // A missing/unparseable resetsAt stays nil so the menu shows no
+        // reset row rather than a made-up reset time.
+        let resetDate = APIValueParser.parseDate(from: window["resetsAt"] as? String)
+        let resetInSeconds = resetDate.map { max(0, Int($0.timeIntervalSince(now).rounded())) } ?? 0
+        return OpenCodeGoUsageWindow(usagePercent: percent, resetInSeconds: resetInSeconds, resetDate: resetDate)
     }
 
     private func fetchModelCount(apiKey: String) async throws -> Int {
@@ -150,51 +187,6 @@ final class OpenCodeGoProvider: ProviderProtocol {
         }
 
         throw ProviderError.decodingError("Unexpected OpenCode Go models response")
-    }
-
-    private func fetchDashboardUsage(credentials: OpenCodeGoDashboardCredentials) async throws -> OpenCodeGoDashboardUsage {
-        guard let url = URL(string: "https://opencode.ai/workspace/\(credentials.workspaceID)/go") else {
-            throw ProviderError.networkError("Invalid OpenCode Go workspace URL")
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
-        request.setValue(cookieHeader(from: credentials.authCookie), forHTTPHeaderField: "Cookie")
-        request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-            forHTTPHeaderField: "User-Agent"
-        )
-
-        let data = try await fetchData(request: request)
-        guard let html = String(data: data, encoding: .utf8) else {
-            throw ProviderError.decodingError("OpenCode Go dashboard response is not UTF-8")
-        }
-
-        return try Self.parseDashboardUsageHTML(html)
-    }
-
-    private func fetchFirstDashboardUsage(
-        from candidates: [OpenCodeGoDashboardCredentials]
-    ) async throws -> (OpenCodeGoDashboardUsage, String) {
-        var lastError: Error?
-
-        for credentials in candidates {
-            do {
-                let usage = try await fetchDashboardUsage(credentials: credentials)
-                logger.info("OpenCode Go dashboard usage fetched from \(credentials.source, privacy: .public)")
-                return (usage, credentials.source)
-            } catch {
-                lastError = error
-                logger.warning("OpenCode Go dashboard candidate failed from \(credentials.source, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            }
-        }
-
-        if let lastError {
-            throw lastError
-        }
-
-        throw ProviderError.providerError("No OpenCode Go dashboard credential candidates available")
     }
 
     private func fetchData(request: URLRequest) async throws -> Data {
@@ -239,219 +231,4 @@ final class OpenCodeGoProvider: ProviderProtocol {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func dashboardCredentialCandidates() -> [OpenCodeGoDashboardCredentials] {
-        var candidates: [OpenCodeGoDashboardCredentials] = []
-        var seen: Set<String> = []
-
-        func append(_ credentials: OpenCodeGoDashboardCredentials) {
-            let key = "\(credentials.workspaceID)::\(credentials.authCookie)"
-            guard !seen.contains(key) else { return }
-            seen.insert(key)
-            candidates.append(credentials)
-        }
-
-        let environment = ProcessInfo.processInfo.environment
-        if let workspaceID = nonEmpty(environment["OPENCODE_GO_WORKSPACE_ID"]),
-           let authCookie = nonEmpty(environment["OPENCODE_GO_AUTH_COOKIE"]) {
-            append(OpenCodeGoDashboardCredentials(
-                workspaceID: workspaceID,
-                authCookie: authCookie,
-                source: "Environment"
-            ))
-        }
-
-        for url in dashboardConfigURLs(environment: environment) {
-            guard let credentials = dashboardCredentials(from: url) else { continue }
-            append(credentials)
-        }
-
-        browserDashboardCredentialCandidates().forEach { append($0) }
-
-        return candidates
-    }
-
-    private func browserDashboardCredentialCandidates() -> [OpenCodeGoDashboardCredentials] {
-        do {
-            let cookies = try BrowserCookieService.shared.getCookies(hostSuffix: "opencode.ai", names: ["auth"])
-            let historyEntries = try BrowserCookieService.shared.getHistoryEntries(
-                hostSuffix: "opencode.ai",
-                pathPrefix: "/workspace/",
-                limit: 200
-            )
-            let cookiesByProfile = Dictionary(grouping: cookies, by: { $0.profileKey })
-            var candidates: [OpenCodeGoDashboardCredentials] = []
-
-            for entry in historyEntries {
-                guard let workspaceID = Self.extractWorkspaceID(from: entry.url.absoluteString) else {
-                    continue
-                }
-
-                let profileCookies = cookiesByProfile[entry.profileKey] ?? []
-                let fallbackCookies = cookies.filter { $0.profileKey != entry.profileKey }
-
-                for cookie in profileCookies + fallbackCookies {
-                    candidates.append(OpenCodeGoDashboardCredentials(
-                        workspaceID: workspaceID,
-                        authCookie: cookie.value,
-                        source: "Browser Cookies (\(cookie.displaySource))"
-                    ))
-                }
-            }
-
-            logger.info("OpenCode Go browser dashboard credential candidates: \(candidates.count)")
-            return candidates
-        } catch {
-            logger.warning("OpenCode Go browser dashboard credential discovery failed: \(error.localizedDescription, privacy: .public)")
-            return []
-        }
-    }
-
-    static func extractWorkspaceIDs(from urls: [String]) -> [String] {
-        guard let regex = try? NSRegularExpression(pattern: #"/workspace/(wrk_[A-Z0-9]+)"#) else {
-            return []
-        }
-
-        var workspaceIDs: [String] = []
-        var seen: Set<String> = []
-
-        for url in urls {
-            let range = NSRange(url.startIndex..<url.endIndex, in: url)
-            guard let match = regex.firstMatch(in: url, options: [], range: range),
-                  let valueRange = Range(match.range(at: 1), in: url) else {
-                continue
-            }
-            let workspaceID = String(url[valueRange])
-            guard !seen.contains(workspaceID) else { continue }
-            seen.insert(workspaceID)
-            workspaceIDs.append(workspaceID)
-        }
-
-        return workspaceIDs
-    }
-
-    private static func extractWorkspaceID(from url: String) -> String? {
-        extractWorkspaceIDs(from: [url]).first
-    }
-
-    private func dashboardConfigURLs(environment: [String: String]) -> [URL] {
-        var urls: [URL] = []
-
-        if let override = nonEmpty(environment["OPENCODE_GO_CONFIG_FILE"]) {
-            urls.append(URL(fileURLWithPath: NSString(string: override).expandingTildeInPath))
-        }
-
-        if let xdgConfigHome = nonEmpty(environment["XDG_CONFIG_HOME"]) {
-            let base = URL(fileURLWithPath: NSString(string: xdgConfigHome).expandingTildeInPath)
-            urls.append(base.appendingPathComponent("opencode-bar/opencode-go.json"))
-            urls.append(base.appendingPathComponent("opencode-quota/opencode-go.json"))
-        }
-
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        urls.append(home.appendingPathComponent(".config/opencode-bar/opencode-go.json"))
-        urls.append(home.appendingPathComponent(".config/opencode-quota/opencode-go.json"))
-        urls.append(home.appendingPathComponent("Library/Application Support/opencode-bar/opencode-go.json"))
-        urls.append(home.appendingPathComponent("Library/Application Support/opencode-quota/opencode-go.json"))
-
-        return urls
-    }
-
-    private func dashboardCredentials(from url: URL) -> OpenCodeGoDashboardCredentials? {
-        guard FileManager.default.isReadableFile(atPath: url.path),
-              let data = try? Data(contentsOf: url),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let workspaceID = nonEmptyString(from: object, keys: ["workspaceId", "workspaceID", "workspace_id"]),
-              let authCookie = nonEmptyString(from: object, keys: ["authCookie", "auth_cookie", "cookie"]) else {
-            return nil
-        }
-
-        return OpenCodeGoDashboardCredentials(
-            workspaceID: workspaceID,
-            authCookie: authCookie,
-            source: url.path
-        )
-    }
-
-    private func nonEmptyString(from object: [String: Any], keys: [String]) -> String? {
-        for key in keys {
-            if let value = object[key] as? String,
-               let normalized = nonEmpty(value) {
-                return normalized
-            }
-        }
-        return nil
-    }
-
-    private func cookieHeader(from rawValue: String) -> String {
-        if rawValue.contains("auth=") {
-            return rawValue
-        }
-        return "auth=\(rawValue)"
-    }
-
-    private func nonEmpty(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private static func parseWindow(named fieldName: String, in text: String, now: Date) -> OpenCodeGoUsageWindow? {
-        guard let body = captureObjectBody(named: fieldName, in: text),
-              let usagePercent = captureNumber(named: "usagePercent", in: body),
-              let resetInSecondsDouble = captureNumber(named: "resetInSec", in: body) else {
-            return nil
-        }
-
-        let resetInSeconds = max(0, Int(resetInSecondsDouble.rounded()))
-        return OpenCodeGoUsageWindow(
-            usagePercent: usagePercent,
-            resetInSeconds: resetInSeconds,
-            resetDate: now.addingTimeInterval(TimeInterval(resetInSeconds))
-        )
-    }
-
-    private static func captureObjectBody(named fieldName: String, in text: String) -> String? {
-        let pattern = #"["']?\#(NSRegularExpression.escapedPattern(for: fieldName))["']?\s*:\s*(?:\$R\[\d+\]\s*=\s*)?\{(?<body>[^{}]*)\}"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else {
-            return nil
-        }
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        guard let match = regex.firstMatch(in: text, options: [], range: range) else {
-            return nil
-        }
-        let bodyRange = match.range(withName: "body")
-        guard let swiftRange = Range(bodyRange, in: text) else {
-            return nil
-        }
-        return String(text[swiftRange])
-    }
-
-    private static func captureNumber(named fieldName: String, in text: String) -> Double? {
-        let pattern = #"["']?\#(NSRegularExpression.escapedPattern(for: fieldName))["']?\s*:\s*"?(-?\d+(?:\.\d+)?)"?"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return nil
-        }
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        guard let match = regex.firstMatch(in: text, options: [], range: range),
-              let valueRange = Range(match.range(at: 1), in: text) else {
-            return nil
-        }
-        return Double(text[valueRange])
-    }
-
-    private static func normalizedDashboardHTML(_ html: String) -> String {
-        var text = html
-        let replacements = [
-            ("&quot;", "\""),
-            ("&#34;", "\""),
-            ("&#x27;", "'"),
-            ("&#39;", "'"),
-            ("&amp;", "&"),
-            (#"\""#, "\""),
-            (#"\u0022"#, "\"")
-        ]
-        for (encoded, decoded) in replacements {
-            text = text.replacingOccurrences(of: encoded, with: decoded)
-        }
-        return text
-    }
 }
