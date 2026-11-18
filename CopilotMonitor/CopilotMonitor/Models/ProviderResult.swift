@@ -66,6 +66,14 @@ struct ProviderResult {
         self.accounts = accounts
         self.balanceInfos = balanceInfos
     }
+
+    var remainingBalanceInfos: [ProviderBalanceInfo]? {
+        guard case .payAsYouGo(_, nil, _) = usage,
+              let balanceInfos, !balanceInfos.isEmpty else {
+            return nil
+        }
+        return balanceInfos
+    }
 }
 
 /// Per-account usage for providers that support multiple accounts
@@ -716,7 +724,7 @@ struct JSONFormatter {
                         providerDict["toppedUpBalance"] = toppedUp
                     }
                 }
-                if cost == nil, let balanceInfos = result.balanceInfos, !balanceInfos.isEmpty {
+                if let balanceInfos = result.remainingBalanceInfos {
                     providerDict["balances"] = balanceInfos.map { balance in
                         [
                             "currency": balance.currency,
@@ -1193,7 +1201,7 @@ struct TableFormatter {
 
             if let cost = cost {
                 metrics += String(format: "$%.2f spent", cost)
-            } else if let balanceInfos = result.balanceInfos, !balanceInfos.isEmpty {
+            } else if let balanceInfos = result.remainingBalanceInfos {
                 metrics = balanceInfos.map { balance in
                     String(format: "%@%.2f %@ remaining", balance.currencySymbol, balance.totalBalance, balance.currency)
                 }.joined(separator: ", ")

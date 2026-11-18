@@ -543,7 +543,7 @@ final class CLIFormatterTests: XCTestCase {
         XCTAssertEqual(formattedBalances.map { $0["currency"] as? String }, ["CNY", "USD"])
         XCTAssertEqual(formattedBalances.compactMap { $0["balance"] as? Double }, [0.0, 26.0])
         XCTAssertEqual(formattedBalances.compactMap { $0["toppedUpBalance"] as? Double }, [0.0, 26.0])
-        // Legacy scalars must come from the funded (primary) ledger, not the zeroed one.
+        // The formatter copies the primary balance fields selected by the provider.
         XCTAssertEqual(provider["balance"] as? Double, 26.0)
         XCTAssertEqual(provider["currency"] as? String, "USD")
     }

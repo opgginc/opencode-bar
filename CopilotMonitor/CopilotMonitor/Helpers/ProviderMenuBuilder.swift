@@ -1104,13 +1104,7 @@ extension StatusBarController {
     /// Balance text for nil-cost pay-as-you-go results. Shared by the menu
     /// row title and pinned status-bar display.
     static func balanceStatusText(for result: ProviderResult) -> String? {
-        guard case .payAsYouGo(_, let cost, _) = result.usage,
-              cost == nil,
-              let balanceInfos = result.balanceInfos,
-              !balanceInfos.isEmpty else {
-            return nil
-        }
-        return fundedBalanceText(balanceInfos)
+        result.remainingBalanceInfos.map { fundedBalanceText($0) }
     }
 
     private func addHorizontalDivider(to submenu: NSMenu) {
