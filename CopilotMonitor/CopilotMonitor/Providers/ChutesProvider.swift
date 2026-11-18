@@ -142,7 +142,7 @@ final class ChutesProvider: ProviderProtocol {
             chutesMonthlyValueCapUSD: monthlyValueCapUSD,
             chutesMonthlyValueUsedUSD: monthlyValueUsedUSD,
             chutesMonthlyValueUsedPercent: monthlyValueUsedPercent,
-            authSource: tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            authSource: tokenManager.openCodeAuthSourceLabel
         )
 
         return ProviderResult(usage: providerUsage, details: details)

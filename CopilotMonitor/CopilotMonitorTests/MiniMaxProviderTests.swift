@@ -54,10 +54,30 @@ final class MiniMaxProviderTests: XCTestCase {
     }
 
     func testFetchSuccessCreatesProviderResult() async throws {
-        guard TokenManager.shared.getMiniMaxCodingPlanAPIKey() != nil else {
-            throw XCTSkip("MiniMax Coding Plan API key not available; skipping fetch test.")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let authDirectory = directory.appendingPathComponent("opencode")
+        try FileManager.default.createDirectory(at: authDirectory, withIntermediateDirectories: true)
+        let oldEnvironment = ProcessInfo.processInfo.environment
+        defer {
+            for name in ["XDG_DATA_HOME", "OPENCODE_DB"] {
+                if let value = oldEnvironment[name] {
+                    setenv(name, value, 1)
+                } else {
+                    unsetenv(name)
+                }
+            }
+            TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+            try? FileManager.default.removeItem(at: directory)
         }
+        setenv("XDG_DATA_HOME", directory.path, 1)
+        unsetenv("OPENCODE_DB")
+        let authPath = authDirectory.appendingPathComponent("auth.json")
+        try Data(#"{"minimax-coding-plan":{"type":"api","key":"fixture-minimax-key"}}"#.utf8).write(to: authPath)
+        TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+        XCTAssertEqual(TokenManager.shared.getMiniMaxCodingPlanAPIKey(), "fixture-minimax-key")
 
+        let expectedAuthSource = TokenManager.shared.openCodeAuthSourceLabel
+        XCTAssertEqual(expectedAuthSource, authPath.path)
         let session = makeSession()
         let provider = MiniMaxProvider(tokenManager: .shared, session: session)
         let responseJSON = """
@@ -120,7 +140,7 @@ final class MiniMaxProviderTests: XCTestCase {
         XCTAssertEqual(result.details?.sevenDayUsage ?? -1, 60.0, accuracy: 0.001)
         XCTAssertNotNil(result.details?.fiveHourReset)
         XCTAssertNotNil(result.details?.sevenDayReset)
-        XCTAssertEqual(result.details?.authSource, "~/.local/share/opencode/auth.json")
+        XCTAssertEqual(result.details?.authSource, expectedAuthSource)
     }
 
     func testFetchReturnsAuthenticationErrorOn401() async throws {

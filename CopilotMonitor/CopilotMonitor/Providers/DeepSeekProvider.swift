@@ -152,7 +152,7 @@ final class DeepSeekProvider: ProviderProtocol {
             balanceCurrency: primaryBalance.currency,
             balanceGranted: primaryBalance.grantedBalance,
             balanceToppedUp: primaryBalance.toppedUpBalance,
-            authSource: tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            authSource: tokenManager.openCodeAuthSourceLabel
         )
 
         // `cost` stays nil: it represents money already spent, while DeepSeek

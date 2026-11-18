@@ -116,43 +116,6 @@ class BrowserCookieService {
         return allCookies
     }
 
-    func getHistoryEntries(hostSuffix: String, pathPrefix: String, limit: Int = 100) throws -> [BrowserHistoryEntry] {
-        var allEntries: [BrowserHistoryEntry] = []
-        guard let normalizedHost = normalizedDomainHost(hostSuffix) else {
-            throw BrowserCookieError.noBrowserFound
-        }
-
-        for browser in SupportedBrowser.allCases {
-            for cookieDBPath in browser.cookieDBPaths {
-                let historyPath = URL(fileURLWithPath: cookieDBPath)
-                    .deletingLastPathComponent()
-                    .appendingPathComponent("History")
-                    .path
-
-                guard FileManager.default.fileExists(atPath: historyPath) else { continue }
-
-                do {
-                    let entries = try readHistoryEntries(
-                        from: historyPath,
-                        browser: browser,
-                        hostSuffix: normalizedHost,
-                        pathPrefix: pathPrefix,
-                        limit: limit
-                    )
-                    allEntries.append(contentsOf: entries)
-                } catch {
-                    debugLog("Failed to read browser history from \(historyPath): \(error.localizedDescription)")
-                }
-            }
-        }
-
-        guard !allEntries.isEmpty else {
-            throw BrowserCookieError.noBrowserFound
-        }
-
-        return allEntries.sorted { $0.lastVisitTime > $1.lastVisitTime }
-    }
-
     // MARK: - Browser Detection & Cookie Extraction
 
     private func extractCookies(from browser: SupportedBrowser) throws -> GitHubCookies {
@@ -410,95 +373,10 @@ class BrowserCookieService {
         return cookies
     }
 
-    private func readHistoryEntries(
-        from dbPath: String,
-        browser: SupportedBrowser,
-        hostSuffix: String,
-        pathPrefix: String,
-        limit: Int
-    ) throws -> [BrowserHistoryEntry] {
-        let tempPath = NSTemporaryDirectory() + "browser_history_temp_\(UUID().uuidString).db"
-        try? FileManager.default.removeItem(atPath: tempPath)
-        try FileManager.default.copyItem(atPath: dbPath, toPath: tempPath)
-        defer { try? FileManager.default.removeItem(atPath: tempPath) }
-
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(tempPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            logger.error("Failed to open SQLite history database at \(tempPath)")
-            throw BrowserCookieError.invalidCookieFormat
-        }
-        defer { sqlite3_close(db) }
-
-        let escapedHost = escapedLikeLiteral(hostSuffix)
-        let escapedPrefix = escapedLikeLiteral(normalizedPathPrefix(pathPrefix))
-        let cappedLimit = max(1, min(limit, 500))
-        let query = """
-            SELECT url, title, last_visit_time
-            FROM urls
-            WHERE url LIKE ? ESCAPE '\\'
-               OR url LIKE ? ESCAPE '\\'
-               OR url LIKE ? ESCAPE '\\'
-               OR url LIKE ? ESCAPE '\\'
-            ORDER BY last_visit_time DESC
-            LIMIT ?
-        """
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
-            logger.error("Failed to prepare browser history SQLite statement")
-            throw BrowserCookieError.invalidCookieFormat
-        }
-        defer { sqlite3_finalize(statement) }
-
-        let urlPatterns = [
-            "https://\(escapedHost)\(escapedPrefix)%",
-            "http://\(escapedHost)\(escapedPrefix)%",
-            "https://%.\(escapedHost)\(escapedPrefix)%",
-            "http://%.\(escapedHost)\(escapedPrefix)%"
-        ]
-        for (offset, pattern) in urlPatterns.enumerated() {
-            try bindText(pattern, to: Int32(offset + 1), in: statement, context: "history URL pattern")
-        }
-        guard sqlite3_bind_int(statement, 5, Int32(cappedLimit)) == SQLITE_OK else {
-            logger.error("Failed to bind browser history limit")
-            throw BrowserCookieError.invalidCookieFormat
-        }
-
-        let dbURL = URL(fileURLWithPath: dbPath)
-        let profileName = dbURL.deletingLastPathComponent().lastPathComponent
-        var entries: [BrowserHistoryEntry] = []
-
-        while sqlite3_step(statement) == SQLITE_ROW {
-            guard let urlPtr = sqlite3_column_text(statement, 0),
-                  let url = URL(string: String(cString: urlPtr)) else {
-                continue
-            }
-
-            let title = sqlite3_column_text(statement, 1).map { String(cString: $0) }
-            let lastVisitTime = sqlite3_column_int64(statement, 2)
-
-            entries.append(BrowserHistoryEntry(
-                url: url,
-                title: title,
-                browserName: browser.displayName,
-                profileName: profileName,
-                databasePath: dbPath,
-                lastVisitTime: lastVisitTime
-            ))
-        }
-
-        return entries
-    }
-
     private func normalizedDomainHost(_ host: String) -> String? {
         let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let withoutLeadingDot = trimmed.hasPrefix(".") ? String(trimmed.dropFirst()) : trimmed
         return withoutLeadingDot.isEmpty ? nil : withoutLeadingDot
-    }
-
-    private func normalizedPathPrefix(_ pathPrefix: String) -> String {
-        let trimmed = pathPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "/" }
-        return trimmed.hasPrefix("/") ? trimmed : "/\(trimmed)"
     }
 
     private func escapedLikeLiteral(_ value: String) -> String {
@@ -720,23 +598,6 @@ struct BrowserCookie {
     let browserName: String
     let profileName: String
     let databasePath: String
-
-    var profileKey: String {
-        "\(browserName)::\(profileName)::\(URL(fileURLWithPath: databasePath).deletingLastPathComponent().path)"
-    }
-
-    var displaySource: String {
-        "\(browserName) \(profileName)"
-    }
-}
-
-struct BrowserHistoryEntry {
-    let url: URL
-    let title: String?
-    let browserName: String
-    let profileName: String
-    let databasePath: String
-    let lastVisitTime: Int64
 
     var profileKey: String {
         "\(browserName)::\(profileName)::\(URL(fileURLWithPath: databasePath).deletingLastPathComponent().path)"
