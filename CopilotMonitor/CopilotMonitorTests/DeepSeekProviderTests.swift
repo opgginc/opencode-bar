@@ -112,8 +112,7 @@ final class DeepSeekProviderTests: XCTestCase {
 
     // MARK: - Fetch
 
-    @MainActor
-    func testFetchPreservesSQLiteCredentialSourceAndBothCurrencies() async throws {
+    func testFetchPreservesSQLiteCredentialSource() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let databasePath = directory.appendingPathComponent("credentials.sqlite")
@@ -139,23 +138,8 @@ final class DeepSeekProviderTests: XCTestCase {
         setenv("OPENCODE_DB", databasePath.path, 1)
         TokenManager.shared.clearOpenCodeAuthCacheForTesting()
 
-        let body = """
-        {"balance_infos": [{"currency":"CNY","total_balance":"0.00"}, {"currency":"USD","total_balance":"26.00"}]}
-        """
-        let result = try await makeProvider(body: body, apiKey: nil).fetch()
-        let details = try XCTUnwrap(result.details)
-        XCTAssertEqual(details.authSource, databasePath.path)
-        XCTAssertEqual(result.balanceInfos?.map(\.currency), ["CNY", "USD"])
-        XCTAssertEqual(result.balanceInfos?.map(\.totalBalance), [0, 26])
-
-        let controller = StatusBarController(startBackgroundServices: false)
-        let submenu = controller.createDetailSubmenu(details, identifier: .deepSeek, balanceInfos: result.balanceInfos)
-        let rows = submenu.items.flatMap { item in
-            item.view?.subviews.compactMap { ($0 as? NSTextField)?.stringValue } ?? []
-        }
-        XCTAssertTrue(rows.contains("Balance (CNY): ¥0.00"))
-        XCTAssertTrue(rows.contains("Balance (USD): $26.00"))
-        XCTAssertTrue(rows.contains("Token From: \(databasePath.path)"))
+        let result = try await makeProvider(body: balanceJSON, apiKey: nil).fetch()
+        XCTAssertEqual(result.details?.authSource, databasePath.path)
     }
 
     func testFetchSuccessSurfacesBalanceInDetails() async throws {
@@ -309,12 +293,12 @@ final class DeepSeekProviderTests: XCTestCase {
         """
         let result = try await makeProvider(body: body).fetch()
         XCTAssertEqual(result.balanceInfos, [
-            ProviderBalanceInfo(currency: "USD", totalBalance: 26, grantedBalance: 0, toppedUpBalance: 26)
+            ProviderBalanceInfo(currency: "USD", totalBalance: 26, grantedBalance: nil, toppedUpBalance: 26)
         ])
     }
 
-    /// Non-finite secondary amounts must not reach menu or JSON formatting.
-    func testNonFiniteSecondaryBalancesFallBackToZero() async throws {
+    @MainActor
+    func testNonFiniteSecondaryBalancesRemainUnavailable() async throws {
         let body = """
         {"is_available": true, "balance_infos": [
           {"currency": "USD", "total_balance": "26.00", "granted_balance": "NaN", "topped_up_balance": "Infinity"}
@@ -323,8 +307,21 @@ final class DeepSeekProviderTests: XCTestCase {
         let result = try await makeProvider(body: body).fetch()
         let balance = try XCTUnwrap(result.balanceInfos?.first)
         XCTAssertEqual(balance.totalBalance, 26.0)
-        XCTAssertEqual(balance.grantedBalance, 0.0)
-        XCTAssertEqual(balance.toppedUpBalance, 0.0)
+        XCTAssertNil(balance.grantedBalance)
+        XCTAssertNil(balance.toppedUpBalance)
+        XCTAssertEqual(StatusBarController.deepSeekBalanceRowTexts(balanceInfos: [balance]), [
+            "Balance (USD): $26.00", "Topped-up (USD): Unavailable", "Granted (USD): Unavailable"
+        ])
+        let json = try JSONFormatter.format([.deepSeek: result])
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: [String: Any]])
+        let provider = try XCTUnwrap(payload["deepseek"])
+        let ledgers = try XCTUnwrap(provider["balances"] as? [[String: Any]])
+        let ledger = try XCTUnwrap(ledgers.first)
+        XCTAssertEqual(ledger["balance"] as? Double, 26)
+        for field in ["grantedBalance", "toppedUpBalance"] {
+            XCTAssertNil(provider[field])
+            XCTAssertNil(ledger[field])
+        }
     }
 
     /// An unsupported code next to a usable ledger is skipped quietly while
@@ -364,6 +361,48 @@ final class DeepSeekProviderTests: XCTestCase {
     // MARK: - Detail menu rows
 
     @MainActor
+    func testRateLimitedMenuKeepsBothCachedCurrenciesAccessible() throws {
+        let controller = StatusBarController(startBackgroundServices: false)
+        let result = ProviderResult(
+            usage: .payAsYouGo(utilization: 0, cost: nil, resetsAt: nil),
+            details: DetailedUsage(creditsBalance: 26, authSource: "OpenCode"),
+            balanceInfos: [
+                ProviderBalanceInfo(currency: "CNY", totalBalance: 0, grantedBalance: 0, toppedUpBalance: 0),
+                ProviderBalanceInfo(currency: "USD", totalBalance: 26, grantedBalance: 0, toppedUpBalance: 26)
+            ]
+        )
+        let item = controller.createErrorMenuItem(identifier: .deepSeek, errorMessage: "HTTP 429", result: result)
+        let menu = NSMenu()
+        menu.addItem(item)
+        menu.update()
+        XCTAssertTrue(item.isEnabled)
+        let errorMenu = try XCTUnwrap(item.submenu)
+        errorMenu.update()
+        let cachedItem = try XCTUnwrap(errorMenu.item(withTitle: "Cached Details"))
+        XCTAssertTrue(cachedItem.isEnabled)
+        let rows = try XCTUnwrap(cachedItem.submenu).items.flatMap { item in
+            item.view?.subviews.compactMap { ($0 as? NSTextField)?.stringValue } ?? []
+        }
+        XCTAssertTrue(rows.contains("Balance (CNY): ¥0.00"))
+        XCTAssertTrue(rows.contains("Balance (USD): $26.00"))
+        XCTAssertTrue(rows.contains("Token From: OpenCode"))
+
+        let uncachedItem = controller.createErrorMenuItem(identifier: .deepSeek, errorMessage: "HTTP 429")
+        XCTAssertFalse(uncachedItem.isEnabled)
+        XCTAssertNil(uncachedItem.submenu)
+    }
+
+    @MainActor
+    func testDetailMenuShowsWhenBalanceDataIsUnavailable() {
+        let controller = StatusBarController(startBackgroundServices: false)
+        let submenu = controller.createDetailSubmenu(DetailedUsage(), identifier: .deepSeek, balanceInfos: nil)
+        let rows = submenu.items.flatMap { item in
+            item.view?.subviews.compactMap { ($0 as? NSTextField)?.stringValue } ?? []
+        }
+        XCTAssertEqual(rows, ["Balance: Unavailable"])
+    }
+
+    @MainActor
     func testDeepSeekBalanceRowTextsKeepBothCurrenciesSeparate() {
         // The provider stores balances in display order (CNY before USD);
         // the rows keep both currencies separate, follow that order, and pin
@@ -385,52 +424,24 @@ final class DeepSeekProviderTests: XCTestCase {
         ])
     }
 
-    /// The main row must drop a zero CNY ledger and keep only the funded USD,
-    /// but fall back to showing all when every currency is zero.
-    @MainActor
-    func testDeepSeekMainRowShowsOnlyFundedCurrencies() {
-        let funded = [
-            ProviderBalanceInfo(currency: "CNY", totalBalance: 0.0, grantedBalance: 0.0, toppedUpBalance: 0.0),
-            ProviderBalanceInfo(currency: "USD", totalBalance: 26.0, grantedBalance: 0.0, toppedUpBalance: 26.0)
-        ]
-        XCTAssertEqual(StatusBarController.deepSeekMainRowBalances(funded).map(\.currency), ["USD"])
-
-        let allZero = [
-            ProviderBalanceInfo(currency: "CNY", totalBalance: 0.0, grantedBalance: 0.0, toppedUpBalance: 0.0),
-            ProviderBalanceInfo(currency: "USD", totalBalance: 0.0, grantedBalance: 0.0, toppedUpBalance: 0.0)
-        ]
-        XCTAssertEqual(StatusBarController.deepSeekMainRowBalances(allZero).map(\.currency), ["CNY", "USD"])
-    }
-
     /// The pinned status bar and the dropdown row share one balance string:
     /// funded currencies only, or all when nothing is funded.
     @MainActor
-    func testFundedBalanceTextMatchesRowTitleRule() {
-        let funded = [
-            ProviderBalanceInfo(currency: "CNY", totalBalance: 0.0, grantedBalance: 0.0, toppedUpBalance: 0.0),
-            ProviderBalanceInfo(currency: "USD", totalBalance: 26.0, grantedBalance: 0.0, toppedUpBalance: 26.0)
-        ]
-        XCTAssertEqual(StatusBarController.fundedBalanceText(funded), "$26.00")
-
-        let bothFunded = [
-            ProviderBalanceInfo(currency: "CNY", totalBalance: 103.49, grantedBalance: 0.0, toppedUpBalance: 103.49),
-            ProviderBalanceInfo(currency: "USD", totalBalance: 26.0, grantedBalance: 0.0, toppedUpBalance: 26.0)
-        ]
-        XCTAssertEqual(StatusBarController.fundedBalanceText(bothFunded), "¥103.49, $26.00")
-
-        let balanceResult = ProviderResult(
-            usage: .payAsYouGo(utilization: 0, cost: nil, resetsAt: nil),
-            details: nil,
-            balanceInfos: funded
-        )
-        XCTAssertEqual(StatusBarController.balanceStatusText(for: balanceResult), "$26.00")
-
-        let costResult = ProviderResult(
-            usage: .payAsYouGo(utilization: 0, cost: 5.0, resetsAt: nil),
-            details: nil,
-            balanceInfos: funded
-        )
-        XCTAssertNil(StatusBarController.balanceStatusText(for: costResult))
+    func testStatusBalanceTextShowsFundedCurrenciesOrAllWhenZero() {
+        func result(cny: Double, usd: Double, cost: Double? = nil) -> ProviderResult {
+            ProviderResult(
+                usage: .payAsYouGo(utilization: 0, cost: cost, resetsAt: nil),
+                details: nil,
+                balanceInfos: [
+                    ProviderBalanceInfo(currency: "CNY", totalBalance: cny, grantedBalance: 0, toppedUpBalance: cny),
+                    ProviderBalanceInfo(currency: "USD", totalBalance: usd, grantedBalance: 0, toppedUpBalance: usd)
+                ]
+            )
+        }
+        XCTAssertEqual(StatusBarController.balanceStatusText(for: result(cny: 0, usd: 26)), "$26.00")
+        XCTAssertEqual(StatusBarController.balanceStatusText(for: result(cny: 103.49, usd: 26)), "¥103.49, $26.00")
+        XCTAssertEqual(StatusBarController.balanceStatusText(for: result(cny: 0, usd: 0)), "¥0.00, $0.00")
+        XCTAssertNil(StatusBarController.balanceStatusText(for: result(cny: 0, usd: 26, cost: 5)))
     }
 
 }

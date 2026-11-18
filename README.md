@@ -248,6 +248,7 @@ OpenRouter            Pay-as-you-go    -           $37.42 spent
 
 - DeepSeek reads the `deepseek` key from the active OpenCode credential store. The menu and pinned status show funded currencies, or all currencies when every balance is zero. The detail menu and CLI table show each currency separately.
 - `opencodebar provider deepseek --json` returns a `balances` array with `currency`, `balance`, `grantedBalance`, and `toppedUpBalance` for each currency. The existing top-level balance fields describe the first funded currency in CNY-then-USD order, or the first available currency when none is funded.
+- When a grant or top-up amount is unavailable, the detail menu marks it `Unavailable` and JSON omits that field. The total balance remains visible.
 
 #### OpenCode Go Notes
 

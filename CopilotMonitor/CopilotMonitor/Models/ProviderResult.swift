@@ -36,8 +36,8 @@ enum StatusBarQuotaVisibilityPolicy {
 struct ProviderBalanceInfo: Equatable {
     let currency: String
     let totalBalance: Double
-    let grantedBalance: Double
-    let toppedUpBalance: Double
+    let grantedBalance: Double?
+    let toppedUpBalance: Double?
 
     var currencySymbol: String {
         DetailedUsage.balanceCurrencySymbol(for: currency)
@@ -726,12 +726,13 @@ struct JSONFormatter {
                 }
                 if let balanceInfos = result.remainingBalanceInfos {
                     providerDict["balances"] = balanceInfos.map { balance in
-                        [
+                        var ledger: [String: Any] = [
                             "currency": balance.currency,
-                            "balance": balance.totalBalance,
-                            "grantedBalance": balance.grantedBalance,
-                            "toppedUpBalance": balance.toppedUpBalance
-                        ] as [String: Any]
+                            "balance": balance.totalBalance
+                        ]
+                        ledger["grantedBalance"] = balance.grantedBalance
+                        ledger["toppedUpBalance"] = balance.toppedUpBalance
+                        return ledger
                     }
                 }
 

@@ -7,9 +7,9 @@ private let logger = Logger(subsystem: "com.opencodeproviders", category: "DeepS
 ///
 /// DeepSeek is billed as prepaid credit. Its official balance endpoint may
 /// return separate balances in CNY and USD; currencies are never merged into
-/// one number, and one broken ledger never hides the others (malformed or
-/// unsupported entries are skipped and logged; the fetch fails only when
-/// nothing usable remains). There is no quota window or utilization
+/// one number. Ledgers with an invalid total or unsupported currency are
+/// skipped. Missing or invalid grant and top-up amounts remain unavailable.
+/// The fetch fails only when no usable total remains. There is no quota window or utilization
 /// percentage, so balances are surfaced as remaining funds while
 /// `payAsYouGo.cost` stays nil: cost means money spent and must not count
 /// toward the aggregate spend total.
@@ -118,8 +118,11 @@ final class DeepSeekProvider: ProviderProtocol {
                 return nil
             }
 
-            let grantedBalance = Double(info.grantedBalance ?? "").flatMap { $0.isFinite ? $0 : nil } ?? 0.0
-            let toppedUpBalance = Double(info.toppedUpBalance ?? "").flatMap { $0.isFinite ? $0 : nil } ?? 0.0
+            let grantedBalance = Double(info.grantedBalance ?? "").flatMap { $0.isFinite ? $0 : nil }
+            let toppedUpBalance = Double(info.toppedUpBalance ?? "").flatMap { $0.isFinite ? $0 : nil }
+            if grantedBalance == nil || toppedUpBalance == nil {
+                logger.warning("DeepSeek: incomplete grant or top-up data for \(currency, privacy: .public)")
+            }
             return ProviderBalanceInfo(
                 currency: currency,
                 totalBalance: totalBalance,
@@ -151,10 +154,7 @@ final class DeepSeekProvider: ProviderProtocol {
             logger.error("DeepSeek balance response has no supported currency (\(supported, privacy: .public)), got: \(currencies, privacy: .public)")
             throw ProviderError.decodingError("Unsupported balance currency")
         }
-        let balanceSummary = orderedBalances
-            .map { "\($0.currency) \(String(format: "%.2f", $0.totalBalance))" }
-            .joined(separator: ", ")
-        logger.info("DeepSeek balances fetched: \(balanceSummary, privacy: .private)")
+        logger.info("DeepSeek balances fetched for \(orderedBalances.count) currencies")
 
         let details = DetailedUsage(
             creditsBalance: primaryBalance.totalBalance,
