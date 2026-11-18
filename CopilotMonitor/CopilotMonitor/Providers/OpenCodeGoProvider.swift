@@ -89,7 +89,7 @@ final class OpenCodeGoProvider: ProviderProtocol {
             overagePermitted: false
         )
 
-        let authPath = tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+        let authPath = tokenManager.openCodeAuthSourceLabel
         let details = DetailedUsage(
             fiveHourUsage: dashboardUsage.rolling?.usagePercent,
             fiveHourReset: dashboardUsage.rolling?.resetDate,

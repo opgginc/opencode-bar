@@ -365,7 +365,7 @@ final class NanoGptProvider: ProviderProtocol {
             sevenDayUsage: weeklyInputTokenPercentUsed,
             sevenDayReset: dateFromMilliseconds(usageResponse.weeklyInputTokens?.resetAt),
             creditsBalance: parseDouble(balanceResponse?.usdBalance),
-            authSource: tokenManager.lastFoundAuthPath?.path ?? "~/.local/share/opencode/auth.json"
+            authSource: tokenManager.openCodeAuthSourceLabel
         )
 
         logger.info(
