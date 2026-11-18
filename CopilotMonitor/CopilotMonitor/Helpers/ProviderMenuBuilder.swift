@@ -62,15 +62,21 @@ enum ModelUsageGrouper {
 
 extension StatusBarController {
 
-    func createDetailSubmenu(_ details: DetailedUsage, identifier: ProviderIdentifier, accountId: String? = nil) -> NSMenu {
+    func createDetailSubmenu(
+        _ details: DetailedUsage,
+        identifier: ProviderIdentifier,
+        accountId: String? = nil,
+        balanceInfos: [ProviderBalanceInfo]?
+    ) -> NSMenu {
         let submenu = NSMenu()
         let subscriptionAccountId = resolvedSubscriptionAccountId(details: details, fallback: accountId)
 
         switch identifier {
         case .deepSeek:
-            for (label, value) in Self.deepSeekBalanceRows(details: details) {
+            let rows = balanceInfos.map { Self.deepSeekBalanceRowTexts(balanceInfos: $0) } ?? []
+            for text in rows.isEmpty ? ["Balance: Unavailable"] : rows {
                 let item = NSMenuItem()
-                item.view = createDisabledLabelView(text: String(format: "%@: %@%.2f", label, details.balanceCurrencySymbol, value))
+                item.view = createDisabledLabelView(text: text)
                 submenu.addItem(item)
             }
 
@@ -1043,20 +1049,6 @@ extension StatusBarController {
         return submenu
     }
 
-    /// Label/value pairs for the DeepSeek balance detail rows, in display
-    /// order. Extracted as a pure function so the menu rows are testable
-    /// without instantiating StatusBarController.
-    static func deepSeekBalanceRows(details: DetailedUsage) -> [(label: String, value: Double)] {
-        let rows: [(String, Double?)] = [
-            ("Balance", details.creditsBalance),
-            ("Topped-up", details.balanceToppedUp),
-            ("Granted", details.balanceGranted)
-        ]
-        return rows.compactMap { label, value -> (label: String, value: Double)? in
-            value.map { (label: label, value: $0) }
-        }
-    }
-
     private func resolvedSubscriptionAccountId(details: DetailedUsage, fallback accountId: String?) -> String? {
         if let email = details.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
            !email.isEmpty {
@@ -1069,6 +1061,34 @@ extension StatusBarController {
         }
 
         return nil
+    }
+
+    /// Rendered menu rows for the DeepSeek balance submenu: Balance /
+    /// Topped-up / Granted per currency, e.g. "Balance (CNY): ¥103.49".
+    /// The provider stores balances in display order (CNY before USD), so
+    /// rows follow the stored order; the ordering rule lives in the provider.
+    /// Returns the visible strings so tests pin the exact rendering.
+    static func deepSeekBalanceRowTexts(balanceInfos: [ProviderBalanceInfo]) -> [String] {
+        balanceInfos.flatMap { balance in
+            let amounts: [(String, Double?)] = [
+                ("Balance", balance.totalBalance),
+                ("Topped-up", balance.toppedUpBalance),
+                ("Granted", balance.grantedBalance)
+            ]
+            return amounts.map { label, amount in
+                let value = amount.map { String(format: "%@%.2f", balance.currencySymbol, $0) } ?? "Unavailable"
+                return "\(label) (\(balance.currency)): \(value)"
+            }
+        }
+    }
+
+    /// Show funded currencies in the menu and status bar. Show all when none is funded.
+    static func balanceStatusText(for result: ProviderResult) -> String? {
+        guard let balances = result.remainingBalanceInfos else { return nil }
+        let funded = balances.filter(\.isFunded)
+        return (funded.isEmpty ? balances : funded)
+            .map { String(format: "%@%.2f", $0.currencySymbol, $0.totalBalance) }
+            .joined(separator: ", ")
     }
 
     private func addHorizontalDivider(to submenu: NSMenu) {

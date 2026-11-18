@@ -1369,8 +1369,7 @@ final class StatusBarController: NSObject {
     private func formatProviderForStatusBar(identifier: ProviderIdentifier, result: ProviderResult) -> String {
         switch result.usage {
         case .payAsYouGo(_, let cost, _):
-            let costText = formatCostForStatusBar(cost ?? 0)
-            return costText
+            return Self.balanceStatusText(for: result) ?? formatCostForStatusBar(cost ?? 0)
         case .quotaBased:
             let maxPercent = preferredUsedPercentForStatusBar(identifier: identifier, result: result) ?? result.usage.usagePercentage
             let usageText = UsagePercentDisplayFormatter.string(from: maxPercent)
@@ -1688,10 +1687,7 @@ final class StatusBarController: NSObject {
 
                 if let errorMessage, shouldDisplayErrorStateEvenWithResult(errorMessage) {
                     hasPayAsYouGo = true
-                    let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                    if item.isEnabled {
-                        item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
-                    }
+                    let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage, result: result)
                     menu.insertItem(item, at: insertIndex)
                     insertIndex += 1
                 } else if let result {
@@ -1701,8 +1697,8 @@ final class StatusBarController: NSObject {
                         // surface the remaining balance through details.
                         let costValue = cost ?? result.details?.creditsBalance ?? 0.0
                         let title: String
-                        if let symbol = result.details?.balanceCurrencySymbol, !symbol.isEmpty {
-                            title = String(format: "%@ (%@%.2f)", identifier.displayName, symbol, costValue)
+                        if let balanceText = Self.balanceStatusText(for: result) {
+                            title = "\(identifier.displayName) (\(balanceText))"
                         } else {
                             title = String(format: "%@ ($%.2f)", identifier.displayName, costValue)
                         }
@@ -1714,7 +1710,11 @@ final class StatusBarController: NSObject {
                         item.tag = 999
 
                         if let details = result.details, details.hasAnyValue {
-                            item.submenu = createDetailSubmenu(details, identifier: identifier)
+                            item.submenu = createDetailSubmenu(
+                                details,
+                                identifier: identifier,
+                                balanceInfos: result.balanceInfos
+                            )
                         }
 
                        menu.insertItem(item, at: insertIndex)
@@ -1727,9 +1727,6 @@ final class StatusBarController: NSObject {
                     }
                     hasPayAsYouGo = true
                     let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                    if item.isEnabled {
-                        item.submenu = createErrorSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage)
-                    }
                     menu.insertItem(item, at: insertIndex)
                     insertIndex += 1
                 } else if loadingProviders.contains(identifier) {
@@ -1878,7 +1875,7 @@ final class StatusBarController: NSObject {
                     if quotaItem.isEnabled,
                        let details = account.details,
                        details.hasAnyValue {
-                        quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot, accountId: account.subscriptionId)
+                        quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot, accountId: account.subscriptionId, balanceInfos: nil)
                     }
 
                     menu.insertItem(quotaItem, at: insertIndex)
@@ -1898,7 +1895,7 @@ final class StatusBarController: NSObject {
                 quotaItem.tag = 999
 
                 if let details = providerResults[.copilot]?.details, details.hasAnyValue {
-                    quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot)
+                    quotaItem.submenu = createDetailSubmenu(details, identifier: .copilot, balanceInfos: nil)
                 } else {
                     let submenu = NSMenu()
                     let filledBlocks = Int((Double(used) / Double(max(limit, 1))) * 10)
@@ -2002,10 +1999,7 @@ final class StatusBarController: NSObject {
             if let errorMessage,
                shouldDisplayErrorStateEvenWithResult(errorMessage, identifier: identifier, result: result) {
                 hasQuota = true
-                let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                if item.isEnabled {
-                    item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
-                }
+                let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage, result: result)
                 menu.insertItem(item, at: insertIndex)
                 insertIndex += 1
             } else if let result {
@@ -2190,7 +2184,7 @@ final class StatusBarController: NSObject {
                         if item.isEnabled,
                            let details = account.details,
                            details.hasAnyValue {
-                            item.submenu = createDetailSubmenu(details, identifier: identifier, accountId: account.subscriptionId)
+                            item.submenu = createDetailSubmenu(details, identifier: identifier, accountId: account.subscriptionId, balanceInfos: nil)
                         }
 
                         menu.insertItem(item, at: insertIndex)
@@ -2269,7 +2263,7 @@ final class StatusBarController: NSObject {
                     item.tag = 999
 
                     if let details = result.details, details.hasAnyValue {
-                        item.submenu = createDetailSubmenu(details, identifier: identifier)
+                        item.submenu = createDetailSubmenu(details, identifier: identifier, balanceInfos: result.balanceInfos)
                     }
 
                     menu.insertItem(item, at: insertIndex)
@@ -2282,9 +2276,6 @@ final class StatusBarController: NSObject {
                 }
                 hasQuota = true
                 let item = createErrorMenuItem(identifier: identifier, errorMessage: errorMessage)
-                if item.isEnabled {
-                    item.submenu = createErrorSubmenu(identifier: identifier, result: nil, errorMessage: errorMessage)
-                }
                 let status = errorMenuStatus(for: errorMessage)
                 if status.shouldDeferToBottom {
                     deferredUnavailableItems.append(item)
@@ -2312,10 +2303,7 @@ final class StatusBarController: NSObject {
             if let geminiError,
                shouldDisplayErrorStateEvenWithResult(geminiError, identifier: .geminiCLI, result: geminiResult) {
                 hasQuota = true
-                let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: geminiError)
-                if item.isEnabled {
-                    item.submenu = createErrorSubmenu(identifier: .geminiCLI, result: geminiResult, errorMessage: geminiError)
-                }
+                let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: geminiError, result: geminiResult)
                 menu.insertItem(item, at: insertIndex)
                 insertIndex += 1
             } else if let result = geminiResult,
@@ -2365,9 +2353,6 @@ final class StatusBarController: NSObject {
                 if shouldDisplayErrorMenuItem(errorMessage) {
                     hasQuota = true
                     let item = createErrorMenuItem(identifier: .geminiCLI, errorMessage: errorMessage)
-                    if item.isEnabled {
-                        item.submenu = createErrorSubmenu(identifier: .geminiCLI, result: nil, errorMessage: errorMessage)
-                    }
                     let status = errorMenuStatus(for: errorMessage)
                     if status.shouldDeferToBottom {
                         deferredUnavailableItems.append(item)
@@ -2848,17 +2833,27 @@ final class StatusBarController: NSObject {
         return false
     }
 
-    private func createErrorMenuItem(identifier: ProviderIdentifier, errorMessage: String) -> NSMenuItem {
+    func createErrorMenuItem(
+        identifier: ProviderIdentifier,
+        errorMessage: String,
+        result: ProviderResult? = nil
+    ) -> NSMenuItem {
         let status = errorMenuStatus(for: errorMessage)
         let statusText = status.title
         let title = "\(identifier.displayName) (\(statusText))"
 
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        let iconColor: NSColor = status.shouldDisableListItem ? .disabledControlTextColor : .systemOrange
+        // The DeepSeek error row needs to stay navigable when it holds the last known balances.
+        let hasCachedBalances = identifier == .deepSeek && status == .rateLimited
+            && result?.remainingBalanceInfos != nil && result?.details?.hasAnyValue == true
+        item.isEnabled = !status.shouldDisableListItem || hasCachedBalances
+        let iconColor: NSColor = item.isEnabled ? .systemOrange : .disabledControlTextColor
         item.image = tintedImage(iconForProvider(identifier), color: iconColor)
-        item.isEnabled = !status.shouldDisableListItem
         item.tag = 999
         item.toolTip = errorMessage
+        if item.isEnabled {
+            item.submenu = createErrorSubmenu(identifier: identifier, result: result, errorMessage: errorMessage)
+        }
 
         return item
     }
@@ -2888,7 +2883,11 @@ final class StatusBarController: NSObject {
                 systemSymbolName: "clock.arrow.circlepath",
                 accessibilityDescription: "Cached Details"
             )
-            cachedItem.submenu = createDetailSubmenu(details, identifier: identifier)
+            cachedItem.submenu = createDetailSubmenu(
+                details,
+                identifier: identifier,
+                balanceInfos: result.balanceInfos
+            )
             submenu.addItem(cachedItem)
         }
 

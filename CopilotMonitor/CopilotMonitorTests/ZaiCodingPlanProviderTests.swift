@@ -454,7 +454,8 @@ final class ZaiCodingPlanProviderTests: XCTestCase {
         )
         let submenu = StatusBarController(startBackgroundServices: false).createDetailSubmenu(
             details,
-            identifier: .zaiCodingPlan
+            identifier: .zaiCodingPlan,
+            balanceInfos: nil
         )
         let renderedTexts = submenu.items.flatMap { item in
             item.view?.subviews.compactMap { ($0 as? NSTextField)?.stringValue } ?? []
