@@ -59,6 +59,15 @@ final class DeepSeekProvider: ProviderProtocol {
             case grantedBalance = "granted_balance"
             case toppedUpBalance = "topped_up_balance"
         }
+
+        init(from decoder: Decoder) {
+            // Keep a bad entry or field from invalidating the rest of the balance response.
+            let container = try? decoder.container(keyedBy: CodingKeys.self)
+            currency = try? container?.decode(String.self, forKey: .currency)
+            totalBalance = try? container?.decode(String.self, forKey: .totalBalance)
+            grantedBalance = try? container?.decode(String.self, forKey: .grantedBalance)
+            toppedUpBalance = try? container?.decode(String.self, forKey: .toppedUpBalance)
+        }
     }
 
     // MARK: - ProviderProtocol
@@ -155,9 +164,7 @@ final class DeepSeekProvider: ProviderProtocol {
             authSource: tokenManager.openCodeAuthSourceLabel
         )
 
-        // `cost` stays nil: it represents money already spent, while DeepSeek
-        // reports money remaining. The menu row reads the balance from details
-        // and the aggregate spend total never counts this provider.
+        // Remaining balances must stay out of the aggregate spend total.
         return ProviderResult(
             usage: .payAsYouGo(utilization: 0, cost: nil, resetsAt: nil),
             details: details,

@@ -1,4 +1,6 @@
 import XCTest
+import AppKit
+import SQLite3
 @testable import OpenCode_Bar
 
 final class DeepSeekProviderTests: XCTestCase {
@@ -43,11 +45,10 @@ final class DeepSeekProviderTests: XCTestCase {
         super.tearDown()
     }
 
-    /// Provider with an injected fake API key so tests run without the
-    /// credential store (and therefore execute in CI).
-    private func makeProvider(statusCode: Int = 200, body: String) -> DeepSeekProvider {
+    /// Bypass credential lookup unless a test supplies its own credential store fixture.
+    private func makeProvider(statusCode: Int = 200, body: String, apiKey: String? = "sk-test-fake") -> DeepSeekProvider {
         let session = makeSession()
-        let provider = DeepSeekProvider(tokenManager: .shared, session: session, apiKey: "sk-test-fake")
+        let provider = DeepSeekProvider(tokenManager: .shared, session: session, apiKey: apiKey)
 
         MockURLProtocol.requestHandler = { request in
             // Assert the request shape so endpoint/method/auth regressions fail.
@@ -110,6 +111,52 @@ final class DeepSeekProviderTests: XCTestCase {
     }
 
     // MARK: - Fetch
+
+    @MainActor
+    func testFetchPreservesSQLiteCredentialSourceAndBothCurrencies() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let databasePath = directory.appendingPathComponent("credentials.sqlite")
+        let previousDatabase = ProcessInfo.processInfo.environment["OPENCODE_DB"]
+        defer {
+            if let previousDatabase {
+                setenv("OPENCODE_DB", previousDatabase, 1)
+            } else {
+                unsetenv("OPENCODE_DB")
+            }
+            TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        var database: OpaquePointer?
+        let openResult = sqlite3_open(databasePath.path, &database)
+        defer { sqlite3_close(database) }
+        XCTAssertEqual(openResult, SQLITE_OK)
+        let sql = """
+        CREATE TABLE credential (integration_id TEXT, value TEXT, active INTEGER, time_updated INTEGER);
+        INSERT INTO credential VALUES ('deepseek', '{"type":"key","key":"sk-test-fake"}', 1, 10);
+        """
+        XCTAssertEqual(sqlite3_exec(database, sql, nil, nil, nil), SQLITE_OK)
+        setenv("OPENCODE_DB", databasePath.path, 1)
+        TokenManager.shared.clearOpenCodeAuthCacheForTesting()
+
+        let body = """
+        {"balance_infos": [{"currency":"CNY","total_balance":"0.00"}, {"currency":"USD","total_balance":"26.00"}]}
+        """
+        let result = try await makeProvider(body: body, apiKey: nil).fetch()
+        let details = try XCTUnwrap(result.details)
+        XCTAssertEqual(details.authSource, databasePath.path)
+        XCTAssertEqual(result.balanceInfos?.map(\.currency), ["CNY", "USD"])
+        XCTAssertEqual(result.balanceInfos?.map(\.totalBalance), [0, 26])
+
+        let controller = StatusBarController(startBackgroundServices: false)
+        let submenu = controller.createDetailSubmenu(details, identifier: .deepSeek, balanceInfos: result.balanceInfos)
+        let rows = submenu.items.flatMap { item in
+            item.view?.subviews.compactMap { ($0 as? NSTextField)?.stringValue } ?? []
+        }
+        XCTAssertTrue(rows.contains("Balance (CNY): ¥0.00"))
+        XCTAssertTrue(rows.contains("Balance (USD): $26.00"))
+        XCTAssertTrue(rows.contains("Token From: \(databasePath.path)"))
+    }
 
     func testFetchSuccessSurfacesBalanceInDetails() async throws {
         let result = try await makeProvider(body: balanceJSON).fetch()
@@ -250,6 +297,20 @@ final class DeepSeekProviderTests: XCTestCase {
         XCTAssertEqual(result.balanceInfos?.map(\.currency), ["CNY"])
         XCTAssertEqual(result.balanceInfos?.first?.totalBalance, 10.0)
         XCTAssertEqual(result.details?.creditsBalance, 10.0)
+    }
+
+    func testUnexpectedLedgerJSONTypesDoNotHideUsableBalance() async throws {
+        let body = """
+        {"balance_infos": [
+          null,
+          {"currency": "CNY", "total_balance": false},
+          {"currency": "USD", "total_balance": "26.00", "granted_balance": {}, "topped_up_balance": "26.00"}
+        ]}
+        """
+        let result = try await makeProvider(body: body).fetch()
+        XCTAssertEqual(result.balanceInfos, [
+            ProviderBalanceInfo(currency: "USD", totalBalance: 26, grantedBalance: 0, toppedUpBalance: 26)
+        ])
     }
 
     /// Non-finite secondary amounts must not reach menu or JSON formatting.
